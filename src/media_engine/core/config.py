@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     # Free providers
     cloudflare_account_id: str | None = None
-    # CLOUDFLARE_API_KEY / FAL_API_KEY are accepted as aliases of the documented names.
+    # CLOUDFLARE_API_KEY is still accepted as an alias of CLOUDFLARE_API_TOKEN.
     cloudflare_api_token: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("cloudflare_api_token", "cloudflare_api_key")
     )
@@ -32,9 +32,7 @@ class Settings(BaseSettings):
     # Paid providers
     openrouter_api_key: SecretStr | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    fal_key: SecretStr | None = Field(
-        default=None, validation_alias=AliasChoices("fal_key", "fal_api_key")
-    )
+    fal_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
     typesafe_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None

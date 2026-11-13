@@ -73,7 +73,11 @@ class CallResult:
     model: str
     latency_ms: float
     is_fallback: bool
-    neurons: float | None = None  # Cloudflare does not report neurons per call; None = unknown
+    neurons: float | None = None  # ACTUAL neurons reported by the provider (Cloudflare LLMs)
+    neurons_est: float | None = None  # registry-price estimate (images, or LLM without usage)
+    daily_neurons_total: float | None = (
+        None  # Cloudflare running total today (UTC), actual else est
+    )
     attempts: list[Attempt] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
@@ -85,5 +89,7 @@ class CallResult:
             "latency_ms": round(self.latency_ms, 1),
             "is_fallback": self.is_fallback,
             "neurons": self.neurons,
+            "neurons_est": self.neurons_est,
+            "daily_neurons_total": self.daily_neurons_total,
             "attempts": [f"{a.provider}/{a.model}:{a.outcome}" for a in self.attempts],
         }

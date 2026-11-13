@@ -15,6 +15,7 @@ from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_aft
 from media_engine.core.config import Settings, get_settings
 from media_engine.core.logging import get_logger
 from media_engine.core.telemetry import traced
+from media_engine.gateway.budget import DailyNeuronMeter, estimate_image_neurons
 from media_engine.gateway.errors import AllProvidersFailed, BadRequestError, ProviderError
 from media_engine.gateway.fallback import (
     MAX_ATTEMPTS,
@@ -23,7 +24,7 @@ from media_engine.gateway.fallback import (
     decide,
 )
 from media_engine.gateway.providers import Provider, build_providers
-from media_engine.gateway.registry import Kind
+from media_engine.gateway.registry import Kind, card_or_default
 from media_engine.gateway.types import (
     Attempt,
     CallResult,
@@ -71,6 +72,7 @@ class Gateway:
         chains: dict[str, list[ModelRef]] | None = None,
         providers: dict[str, Provider] | None = None,
         state: AvailabilityState | None = None,
+        meter: DailyNeuronMeter | None = None,
         client: httpx.AsyncClient | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -80,6 +82,7 @@ class Gateway:
         self.providers = providers or build_providers(self.settings, self._client)
         self.chains = chains if chains is not None else load_chains()
         self.state = state or AvailabilityState()
+        self.meter = meter or DailyNeuronMeter()
         self._sleep = sleep
 
     async def aclose(self) -> None:
@@ -94,7 +97,14 @@ class Gateway:
 
     @traced("gateway.image", process_inputs=_safe_inputs, process_outputs=_safe_outputs)
     async def image(self, task: str, request: ImageRequest) -> CallResult:
-        return await self._run(task, "image", lambda p, m: p.generate_image(m, request))
+        return await self._run(
+            task,
+            "image",
+            lambda p, m: p.generate_image(m, request),
+            estimate=lambda ref: estimate_image_neurons(
+                card_or_default(ref.provider, ref.model, "image"), request
+            ),
+        )
 
     # -- internals --------------------------------------------------------------------------
 
@@ -103,6 +113,7 @@ class Gateway:
         task: str,
         kind: Kind,
         invoke: Callable[[Provider, str], Awaitable[LLMResponse | ImageResponse]],
+        estimate: Callable[[ModelRef], float | None] | None = None,
     ) -> CallResult:
         if task not in self.chains:
             raise ValueError(f"Unknown task {task!r}; known: {sorted(self.chains)}")
@@ -174,6 +185,16 @@ class Gateway:
 
             latency_ms = (time.perf_counter() - started) * 1000
             attempts.append(Attempt(ref.provider, ref.model, "success", calls=calls))
+            neurons: float | None = None
+            neurons_est: float | None = None
+            daily_total: float | None = None
+            if ref.provider == "cloudflare":
+                if isinstance(output, LLMResponse):
+                    raw = output.usage.get("neurons")
+                    neurons = float(raw) if isinstance(raw, int | float) else None
+                if neurons is None and estimate is not None:
+                    neurons_est = estimate(ref)
+                daily_total = self.meter.add(actual=neurons, estimate=neurons_est)
             result = CallResult(
                 output=output,
                 task=task,
@@ -181,6 +202,9 @@ class Gateway:
                 model=ref.model,
                 latency_ms=latency_ms,
                 is_fallback=index > 0,
+                neurons=neurons,
+                neurons_est=neurons_est,
+                daily_neurons_total=daily_total,
                 attempts=attempts,
             )
             usage = output.usage if isinstance(output, LLMResponse) else {}
@@ -192,7 +216,9 @@ class Gateway:
                 latency_ms=round(latency_ms, 1),
                 calls=calls,
                 is_fallback=result.is_fallback,
-                neurons=result.neurons,
+                neurons=neurons,
+                neurons_est=neurons_est,
+                daily_neurons_total=daily_total,
                 usage=usage,
             )
             return result

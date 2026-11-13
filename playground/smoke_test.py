@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 
 import httpx
 
@@ -22,6 +23,7 @@ from media_engine.gateway.providers.cloudflare import CloudflareProvider
 from media_engine.gateway.providers.groq import GroqProvider
 from media_engine.gateway.types import ImageRequest, LLMRequest
 
+TEST_IMAGE = Path(__file__).parent / "assets" / "test.png"
 PROMPT = [{"role": "user", "content": "Reply with exactly: pong"}]
 
 
@@ -52,6 +54,7 @@ async def main() -> None:
 
         cf_llm = "@cf/openai/gpt-oss-20b"
         cf_img = "@cf/black-forest-labs/flux-1-schnell"
+        cf_flux2 = "@cf/black-forest-labs/flux-2-klein-4b"
         groq_llm = "openai/gpt-oss-20b"
 
         async def cf_chat() -> str:
@@ -64,6 +67,19 @@ async def main() -> None:
             )
             return f"image_bytes={len(r.images[0])}"
 
+        async def cf_flux2_edit() -> str:
+            # multipart form data: prompt + width/height + ONE input image (input_image_0)
+            r = await cloudflare.generate_image(
+                cf_flux2,
+                ImageRequest(
+                    prompt="make the background light blue",
+                    width=512,
+                    height=512,
+                    input_images=[TEST_IMAGE.read_bytes()],
+                ),
+            )
+            return f"status=200 response_fields=result.image images={len(r.images)} bytes={len(r.images[0])}"
+
         async def groq_chat() -> str:
             r = await groq.chat(
                 groq_llm,
@@ -74,6 +90,7 @@ async def main() -> None:
         results = [
             await _check("cloudflare LLM", cloudflare, cf_llm, cf_chat),
             await _check("cloudflare image", cloudflare, cf_img, cf_image),
+            await _check("cloudflare FLUX.2 edit", cloudflare, cf_flux2, cf_flux2_edit),
             await _check("groq LLM", groq, groq_llm, groq_chat),
         ]
     print(f"\n{sum(results)}/{len(results)} succeeded")

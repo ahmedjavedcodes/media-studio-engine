@@ -11,6 +11,9 @@ import structlog
 def configure_logging(level: str = "INFO") -> None:
     numeric = logging.getLevelNamesMapping().get(level.upper(), logging.INFO)
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=numeric, force=True)
+    # httpx logs full request URLs at INFO (Cloudflare URLs contain the account id).
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
