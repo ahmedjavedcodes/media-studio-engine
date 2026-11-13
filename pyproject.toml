@@ -36,3 +36,7 @@ target-version = "py312"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true

@@ -1,0 +1,32 @@
+# Fallback chains: "<provider>/<model>", tried in order. Config, not code.
+# Cloudflare first for everything during the build phase, then Groq (LLMs only), then paid.
+# Entries like <paid> are placeholders: the router skips them until a real model is set.
+
+reasoning: # planner, brief, router, critic
+  - cloudflare/@cf/openai/gpt-oss-120b
+  - groq/openai/gpt-oss-120b
+  - openrouter/<paid>
+
+fast_llm: # prompt agent, small tasks
+  - cloudflare/@cf/openai/gpt-oss-20b
+  - groq/openai/gpt-oss-20b
+  - groq/qwen/qwen3.8-27b
+  - openrouter/<paid>
+
+designer:
+  - cloudflare/@cf/openai/gpt-oss-120b
+  - groq/openai/gpt-oss-120b
+  - anthropic/claude
+
+image_create:
+  - cloudflare/@cf/black-forest-labs/flux-1-schnell
+  - cloudflare/@cf/black-forest-labs/flux-2-klein-4b
+  - openrouter/<paid>
+
+image_edit:
+  - cloudflare/@cf/black-forest-labs/flux-2-klein-4b
+  - openrouter/<paid edit model>
+
+image_merge:
+  - cloudflare/@cf/black-forest-labs/flux-2-klein-9b
+  - openrouter/<paid multi-reference model>
