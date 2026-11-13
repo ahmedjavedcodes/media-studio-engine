@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from pydantic import SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +15,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     app_env: str = "local"
@@ -22,13 +23,18 @@ class Settings(BaseSettings):
 
     # Free providers
     cloudflare_account_id: str | None = None
-    cloudflare_api_token: SecretStr | None = None
+    # CLOUDFLARE_API_KEY / FAL_API_KEY are accepted as aliases of the documented names.
+    cloudflare_api_token: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("cloudflare_api_token", "cloudflare_api_key")
+    )
     groq_api_key: SecretStr | None = None
 
     # Paid providers
     openrouter_api_key: SecretStr | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    fal_key: SecretStr | None = None
+    fal_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("fal_key", "fal_api_key")
+    )
     anthropic_api_key: SecretStr | None = None
     typesafe_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
