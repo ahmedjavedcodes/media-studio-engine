@@ -79,3 +79,29 @@ class DailyNeuronMeter:
     @property
     def remaining(self) -> float:
         return max(0.0, DAILY_FREE_NEURONS - self.total_today)
+
+
+class DailyCostMeter:
+    """Running USD total (providers that report cost, i.e. OpenRouter) for the current UTC day."""
+
+    def __init__(self, now: Callable[[], datetime] | None = None) -> None:
+        self._now = now or (lambda: datetime.now(UTC))
+        self._day: date = self._now().astimezone(UTC).date()
+        self.total_usd = 0.0
+
+    def _roll(self) -> None:
+        today = self._now().astimezone(UTC).date()
+        if today != self._day:
+            self._day = today
+            self.total_usd = 0.0
+
+    def add(self, cost_usd: float | None) -> float:
+        self._roll()
+        if cost_usd is not None:
+            self.total_usd += cost_usd
+        return self.total_usd
+
+    @property
+    def total_today(self) -> float:
+        self._roll()
+        return self.total_usd

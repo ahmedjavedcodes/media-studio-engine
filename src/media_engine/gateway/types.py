@@ -24,6 +24,7 @@ class LLMResponse(BaseModel):
     text: str
     reasoning: str | None = None  # keep in traces only, never show to users
     usage: dict[str, Any] = Field(default_factory=dict)
+    cost_usd: float | None = None  # actual USD cost when the provider reports it (OpenRouter)
 
 
 class ImageRequest(BaseModel):
@@ -33,10 +34,16 @@ class ImageRequest(BaseModel):
     steps: int | None = None
     seed: int | None = None
     input_images: list[bytes] = Field(default_factory=list)  # edit / merge references
+    n: int = 1  # images per call (OpenRouter only; Cloudflare returns one)
+    aspect_ratio: str | None = None  # OpenRouter; derived from width/height when omitted
+    resolution: str | None = (
+        None  # OpenRouter tier ('512','768','1K','1.5K','2K','4K'); derived when omitted
+    )
 
 
 class ImageResponse(BaseModel):
     images: list[bytes]  # decoded image bytes
+    cost_usd: float | None = None  # actual USD cost when the provider reports it (OpenRouter)
 
 
 @dataclass(frozen=True)
@@ -75,9 +82,9 @@ class CallResult:
     is_fallback: bool
     neurons: float | None = None  # ACTUAL neurons reported by the provider (Cloudflare LLMs)
     neurons_est: float | None = None  # registry-price estimate (images, or LLM without usage)
-    daily_neurons_total: float | None = (
-        None  # Cloudflare running total today (UTC), actual else est
-    )
+    daily_neurons_total: float | None = None  # Cloudflare running total today (UTC)
+    cost_usd: float | None = None  # ACTUAL USD cost reported by the provider (OpenRouter)
+    daily_cost_usd_total: float | None = None  # running USD total today (UTC)
     attempts: list[Attempt] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
@@ -91,5 +98,7 @@ class CallResult:
             "neurons": self.neurons,
             "neurons_est": self.neurons_est,
             "daily_neurons_total": self.daily_neurons_total,
+            "cost_usd": self.cost_usd,
+            "daily_cost_usd_total": self.daily_cost_usd_total,
             "attempts": [f"{a.provider}/{a.model}:{a.outcome}" for a in self.attempts],
         }

@@ -21,6 +21,7 @@ MAX_ATTEMPTS = 2  # one call + one retry
 RETRY_AFTER_MAX_SECONDS = 5.0  # "a few seconds"
 CAPACITY_BACKOFF_SECONDS = 1.0
 SERVER_ERROR_BACKOFF_SECONDS = 0.5
+OUT_OF_CREDITS_RECHECK = timedelta(hours=1)  # no reset time exists; re-check hourly
 
 
 class Action(Enum):
@@ -37,6 +38,7 @@ class Decision:
     exhausted_until: datetime | None = None  # provider-wide
     cooldown_seconds: float | None = None  # this provider+model only
     disable_model: bool = False
+    severity: str = "warning"  # log level for the fallback event
 
 
 def next_utc_midnight(now: datetime) -> datetime:
@@ -65,6 +67,15 @@ def decide(error: ProviderError, attempt: int, now: datetime) -> Decision:
             )
         if error.code == CF_PAID_ONLY:
             return Decision(Action.NEXT, "cloudflare_model_needs_paid_plan", disable_model=True)
+
+    if error.provider == "openrouter" and error.status == 402:
+        # Out of credits: a human must top up. Skip OpenRouter for an hour, shout in the logs.
+        return Decision(
+            Action.NEXT,
+            "openrouter_out_of_credits",
+            exhausted_until=now + OUT_OF_CREDITS_RECHECK,
+            severity="error",
+        )
 
     if error.status == 400:
         return Decision(Action.RAISE, "bad_request")

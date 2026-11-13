@@ -1,17 +1,18 @@
 # Fallback chains: "<provider>/<model>", tried in order. Config, not code.
 # Cloudflare first for everything during the build phase, then Groq (LLMs only), then paid.
-# Entries like <paid> are placeholders: the router skips them until a real model is set.
+# OpenRouter models are dev defaults (config only, easy to change). Entries like <paid> are
+# placeholders: the router skips them. Verify IDs with playground/sync_openrouter_models.py.
 
 reasoning: # planner, brief, router, critic
   - cloudflare/@cf/openai/gpt-oss-120b
   - groq/openai/gpt-oss-120b
-  - openrouter/<paid>
+  - openrouter/openai/gpt-oss-120b
 
 fast_llm: # prompt agent, small tasks
   - cloudflare/@cf/openai/gpt-oss-20b
   - groq/openai/gpt-oss-20b
   - groq/qwen/qwen3.8-27b
-  - openrouter/<paid>
+  - openrouter/openai/gpt-oss-120b
 
 designer:
   - cloudflare/@cf/openai/gpt-oss-120b
@@ -21,12 +22,14 @@ designer:
 image_create:
   - cloudflare/@cf/black-forest-labs/flux-1-schnell
   - cloudflare/@cf/black-forest-labs/flux-2-klein-4b
-  - openrouter/<paid>
+  - openrouter/google/gemini-2.5-flash-image
 
 image_edit:
   - cloudflare/@cf/black-forest-labs/flux-2-klein-4b
-  - openrouter/<paid edit model>
+  - openrouter/google/gemini-2.5-flash-image
 
+# klein-4b handles two input images (verified 2026-11-13) at ~105 neurons vs ~1,364 for klein-9b
 image_merge:
+  - cloudflare/@cf/black-forest-labs/flux-2-klein-4b
   - cloudflare/@cf/black-forest-labs/flux-2-klein-9b
-  - openrouter/<paid multi-reference model>
+  - openrouter/bytedance-seed/seedream-4.5

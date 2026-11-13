@@ -15,7 +15,7 @@ from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_aft
 from media_engine.core.config import Settings, get_settings
 from media_engine.core.logging import get_logger
 from media_engine.core.telemetry import traced
-from media_engine.gateway.budget import DailyNeuronMeter, estimate_image_neurons
+from media_engine.gateway.budget import DailyCostMeter, DailyNeuronMeter, estimate_image_neurons
 from media_engine.gateway.errors import AllProvidersFailed, BadRequestError, ProviderError
 from media_engine.gateway.fallback import (
     MAX_ATTEMPTS,
@@ -73,6 +73,7 @@ class Gateway:
         providers: dict[str, Provider] | None = None,
         state: AvailabilityState | None = None,
         meter: DailyNeuronMeter | None = None,
+        cost_meter: DailyCostMeter | None = None,
         client: httpx.AsyncClient | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -83,6 +84,7 @@ class Gateway:
         self.chains = chains if chains is not None else load_chains()
         self.state = state or AvailabilityState()
         self.meter = meter or DailyNeuronMeter()
+        self.cost_meter = cost_meter or DailyCostMeter()
         self._sleep = sleep
 
     async def aclose(self) -> None:
@@ -172,7 +174,7 @@ class Gateway:
                 if decision.action is Action.RAISE:
                     log.error("gateway.bad_request", **fields)
                     raise BadRequestError(err) from err
-                log.warning(
+                getattr(log, decision.severity)(
                     "gateway.fallback",
                     next_action="next_provider",
                     exhausted_until=decision.exhausted_until.isoformat()
@@ -195,6 +197,8 @@ class Gateway:
                 if neurons is None and estimate is not None:
                     neurons_est = estimate(ref)
                 daily_total = self.meter.add(actual=neurons, estimate=neurons_est)
+            cost_usd = output.cost_usd
+            daily_cost = self.cost_meter.add(cost_usd) if cost_usd is not None else None
             result = CallResult(
                 output=output,
                 task=task,
@@ -205,6 +209,8 @@ class Gateway:
                 neurons=neurons,
                 neurons_est=neurons_est,
                 daily_neurons_total=daily_total,
+                cost_usd=cost_usd,
+                daily_cost_usd_total=daily_cost,
                 attempts=attempts,
             )
             usage = output.usage if isinstance(output, LLMResponse) else {}
@@ -219,6 +225,8 @@ class Gateway:
                 neurons=neurons,
                 neurons_est=neurons_est,
                 daily_neurons_total=daily_total,
+                cost_usd=cost_usd,
+                daily_cost_usd_total=daily_cost,
                 usage=usage,
             )
             return result

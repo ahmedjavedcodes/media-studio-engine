@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +15,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
-        populate_by_name=True,
     )
 
     app_env: str = "local"
@@ -23,10 +22,7 @@ class Settings(BaseSettings):
 
     # Free providers
     cloudflare_account_id: str | None = None
-    # CLOUDFLARE_API_KEY is still accepted as an alias of CLOUDFLARE_API_TOKEN.
-    cloudflare_api_token: SecretStr | None = Field(
-        default=None, validation_alias=AliasChoices("cloudflare_api_token", "cloudflare_api_key")
-    )
+    cloudflare_api_token: SecretStr | None = None
     groq_api_key: SecretStr | None = None
 
     # Paid providers
