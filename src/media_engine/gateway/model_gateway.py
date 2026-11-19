@@ -19,6 +19,7 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from media_engine.contracts import Plan
+from media_engine.gateway.registry import card_or_default
 from media_engine.gateway.types import CallResult, ImageRequest, ImageResponse
 
 IMAGE_CREATOR = "image_creator"
@@ -42,7 +43,8 @@ class ImageResult(BaseModel):
     provider: str
     model: str
     chain: str
-    seed: int
+    seed: int  # the seed sent
+    seed_honoured: bool | None  # from the model card; None = not verified for this model
     cost_usd: float
     neurons: float  # actual if reported, else the registry estimate (Cloudflare images)
     duration_ms: int
@@ -90,6 +92,7 @@ class ModelGateway:
             model=result.model,
             chain=chain,
             seed=seed,
+            seed_honoured=card_or_default(result.provider, result.model, "image").honours_seed,
             cost_usd=result.cost_usd or 0.0,
             neurons=neurons,
             duration_ms=duration_ms,

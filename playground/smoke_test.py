@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import hashlib
+import io
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -35,6 +38,8 @@ PROMPT = [{"role": "user", "content": "Reply with exactly: pong"}]
 CF_LLM = "@cf/openai/gpt-oss-20b"
 CF_IMG = "@cf/black-forest-labs/flux-1-schnell"
 CF_FLUX2 = "@cf/black-forest-labs/flux-2-klein-4b"
+CF_VISION_SCOUT = "@cf/meta/llama-4-scout-17b-16e-instruct"
+CF_VISION_GEMMA = "@cf/google/gemma-3-12b-it"
 GROQ_LLM = "openai/gpt-oss-20b"
 OR_IMG = "google/gemini-2.5-flash-image"
 
@@ -129,6 +134,47 @@ async def main() -> None:
             )
             return _image_detail(r) + " response_fields=result.image"
 
+        def vision_check(model: str) -> Callable[[], Awaitable[str]]:
+            # OpenAI-style multimodal message: text part + image_url part with a data URL.
+            # test2.png is a solid red 256x256 square, so the right answer is unambiguous.
+            data = base64.b64encode((ASSETS / "test2.png").read_bytes()).decode()
+
+            async def run() -> str:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "What colour is this image? Reply with JSON only: "
+                                '{"colour": "<one word>"}',
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{data}"},
+                            },
+                        ],
+                    }
+                ]
+                r = await cf.chat(model, LLMRequest(messages=messages, max_tokens=64))
+                return f"reply={r.text.strip()[:60]!r} usage={r.usage}"
+
+            return run
+
+        async def cf_seed() -> str:
+            # Same prompt + same seed twice. Compare decoded PIXELS, not file bytes, so encoder
+            # metadata can't hide a match. Identical pixels => the seed is honoured.
+            from PIL import Image
+
+            req = ImageRequest(prompt="a red apple on a white table", steps=4, seed=42)
+            digests = []
+            for _ in range(2):
+                r = await cf.generate_image(CF_IMG, req)
+                with Image.open(io.BytesIO(r.images[0])) as img:
+                    digests.append(hashlib.sha256(img.convert("RGB").tobytes()).hexdigest())
+            same = digests[0] == digests[1]
+            return f"seed=42 x2 pixels_identical={same} sha={digests[0][:12]},{digests[1][:12]}"
+
         async def groq_chat() -> str:
             r = await groq.chat(
                 GROQ_LLM, LLMRequest(messages=PROMPT, max_tokens=64, reasoning_effort="low")
@@ -151,6 +197,21 @@ async def main() -> None:
             Check("cf-image", "cloudflare image", cf, CF_IMG, cf_image),
             Check("cf-flux2-edit", "cloudflare FLUX.2 edit", cf, CF_FLUX2, cf_edit),
             Check("cf-flux2-merge", "cloudflare FLUX.2 merge", cf, CF_FLUX2, cf_merge),
+            Check(
+                "cf-vision-scout",
+                "cloudflare vision",
+                cf,
+                CF_VISION_SCOUT,
+                vision_check(CF_VISION_SCOUT),
+            ),
+            Check(
+                "cf-vision-gemma",
+                "cloudflare vision",
+                cf,
+                CF_VISION_GEMMA,
+                vision_check(CF_VISION_GEMMA),
+            ),
+            Check("cf-seed", "cloudflare image seed", cf, CF_IMG, cf_seed),
             Check("groq-llm", "groq LLM", groq, GROQ_LLM, groq_chat),
             Check("openrouter-image", "openrouter image (PAID)", orr, OR_IMG, or_image, paid=True),
         ]

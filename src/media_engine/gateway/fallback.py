@@ -6,6 +6,7 @@ disabled models between calls.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,15 @@ CF_PAID_ONLY = 5035
 # FLUX NSFW filter: "AiError: Input prompt contains NSFW content (code 3030)". UNVERIFIED: seen
 # in third-party reports, not in Cloudflare's error reference. Confirm on the first real refusal.
 CF_CONTENT_REFUSED = 3030
+# Backup for a Cloudflare 400 that is a refusal under another (or no) code. Specific phrases
+# only: a bare "content" would also match "invalid content-type", which is our bug, not a
+# refusal. The separator allows "content policy", "content_policy_violation" (OpenAI-style
+# codes) and "content-filter". UNVERIFIED wording; widen only from real refusal messages.
+CF_REFUSAL_MESSAGE = re.compile(
+    r"nsfw|content[ _-](?:policy|filter|moderation|violation)|unsafe[ _-]content"
+    r"|inappropriate[ _-]content",
+    re.IGNORECASE,
+)
 
 MAX_ATTEMPTS = 2  # one call + one retry
 RETRY_AFTER_MAX_SECONDS = 5.0  # "a few seconds"
@@ -45,6 +55,17 @@ class Decision:
     severity: str = "warning"  # log level for the fallback event
 
 
+CF_UNCLASSIFIED_400 = "cloudflare_bad_request_unclassified"
+
+
+def is_cloudflare_refusal(error: ProviderError) -> bool:
+    if error.provider != "cloudflare":
+        return False
+    if error.code == CF_CONTENT_REFUSED:
+        return True
+    return error.status == 400 and bool(CF_REFUSAL_MESSAGE.search(error.message or ""))
+
+
 def next_utc_midnight(now: datetime) -> datetime:
     now = now.astimezone(UTC)
     return (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -60,7 +81,7 @@ def decide(error: ProviderError, attempt: int, now: datetime) -> Decision:
     """Decide what to do after `attempt` (1-based) consecutive failures on one model."""
     # First: a refusal often arrives as a 400 or 403, and must not be read as our bug or as a
     # reason to try the next provider (that would route round the safety filter).
-    if error.refused or (error.provider == "cloudflare" and error.code == CF_CONTENT_REFUSED):
+    if error.refused or is_cloudflare_refusal(error):
         return Decision(Action.REFUSE, "content_refused")
 
     if error.provider == "cloudflare":
@@ -87,6 +108,10 @@ def decide(error: ProviderError, attempt: int, now: datetime) -> Decision:
         )
 
     if error.status == 400:
+        if error.provider == "cloudflare":  # 5035 / 3030 / 3036 were handled above
+            # Logged under its own event by the router: an unknown Cloudflare 400 may be a
+            # refusal wording we don't recognise yet, so it must be easy to find in the logs.
+            return Decision(Action.RAISE, CF_UNCLASSIFIED_400, severity="error")
         return Decision(Action.RAISE, "bad_request")
 
     if error.status == 429:

@@ -33,11 +33,16 @@ budgets:
 #                      Must cover gpt-oss reasoning tokens as well as the JSON.
 #   neurons:           pre-flight neuron estimate. generate = flux-1-schnell 1024x1024 @ 4 steps
 #                      (4 tiles x 4.80 + 4 steps x 9.60 = 57.6), rounded up.
+#   critique:          the image makes each call large (~2,500 prompt tokens incl. a 768px image),
+#                      and the repair re-sends all of it plus the first reply. 12,000 tokens lets
+#                      the repair fit (6,000 never did). Neurons: ~100 per vision call at
+#                      llama-4-scout prices (UNVERIFIED: ~24.5k neurons/M in, ~77k/M out), x2 for
+#                      a repair. Replace both with measured values after the cf-vision smoke run.
 step_estimates:
   route: {tokens: 2500, completion_tokens: 600, cost_usd: 0.0, neurons: 5}
   enhance: {tokens: 6000, completion_tokens: 1500, cost_usd: 0.0, neurons: 15}
   generate: {tokens: 0, completion_tokens: 0, cost_usd: 0.0, neurons: 60}
-  critique: {tokens: 6000, completion_tokens: 1200, cost_usd: 0.0, neurons: 25}
+  critique: {tokens: 12000, completion_tokens: 1200, cost_usd: 0.0, neurons: 200}
   supervise: {tokens: 3000, completion_tokens: 800, cost_usd: 0.0, neurons: 10}
 
 deadlines_ms: # wall-clock deadline per step (repair included)

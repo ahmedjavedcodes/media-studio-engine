@@ -32,3 +32,12 @@ def load_prompt(path: Traversable) -> str:
 def render(template: str, **values: str) -> str:
     """Fill `{{name}}` placeholders. Unknown placeholders are left as-is."""
     return _PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), template)
+
+
+def tag_stripper(*tags: str) -> re.Pattern[str]:
+    """Pattern matching open/close copies of `tags` (`<user_request>`, `</ user_request >`...).
+    User-supplied values are wrapped in such tag blocks in the input prompt; stripping copies of
+    the tags from the values means no value can close its block early and smuggle in text that
+    reads as instructions."""
+    names = "|".join(re.escape(t) for t in tags)
+    return re.compile(rf"</?\s*(?:{names})\s*>", re.IGNORECASE)

@@ -8,10 +8,16 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 import respx
+from structlog.testing import capture_logs
 
 from media_engine.core.config import Settings
 from media_engine.gateway.breaker import BreakerState
-from media_engine.gateway.errors import AllProvidersFailed, ContentRefused, ProviderError
+from media_engine.gateway.errors import (
+    AllProvidersFailed,
+    BadRequestError,
+    ContentRefused,
+    ProviderError,
+)
 from media_engine.gateway.fallback import Action, decide
 from media_engine.gateway.providers.openrouter import OpenRouterProvider
 from media_engine.gateway.types import ImageRequest, LLMRequest
@@ -157,3 +163,97 @@ async def test_cloudflare_5xx_on_every_model_opens_its_breaker(gateway):
     assert schnell.call_count == before
     reasons = [a.reason for a in exc.value.attempts if a.provider == "cloudflare"]
     assert reasons == ["circuit_open", "circuit_open"]
+
+
+# -- M5: Cloudflare 400 wording, distinct logging, metering billed refusals ---------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "AiError: Input prompt contains NSFW content.",
+        "Request blocked: content policy violation",
+        "Output flagged by content filter",
+        "content_policy_violation: request rejected",  # OpenAI-style code, underscores
+        "blocked by content-moderation",
+        "Unsafe_content detected",
+    ],
+)
+@respx.mock
+async def test_cloudflare_400_with_refusal_wording_is_a_refusal(gateway, message):
+    schnell = respx.post(CF_SCHNELL).mock(return_value=cf_error(400, 1000, message))
+    klein = respx.post(CF_KLEIN_4B).mock(return_value=httpx.Response(200, json={}))
+
+    with pytest.raises(ContentRefused):
+        await gateway.image("image_create", ImageRequest(prompt="x"))
+
+    assert schnell.call_count == 1 and klein.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Invalid content-type: expected multipart/form-data",
+        "Invalid content_type",
+        "content length too large",
+    ],
+)
+def test_bare_content_in_a_400_is_not_a_refusal(message):
+    # "content" alone would turn our own bugs into refusals; only specific phrases count.
+    error = ProviderError("cloudflare", "m", message, status=400, code=1000)
+    assert decide(error, 1, NOW).action is Action.RAISE
+
+
+@respx.mock
+async def test_unclassified_cloudflare_400_is_logged_under_its_own_event(gateway):
+    respx.post(CF_SCHNELL).mock(return_value=cf_error(400, 1000, "Invalid content-type"))
+
+    with capture_logs() as logs, pytest.raises(BadRequestError):
+        await gateway.image("image_create", ImageRequest(prompt="x"))
+
+    events = [e["event"] for e in logs]
+    assert "gateway.cloudflare_bad_request_unclassified" in events
+    assert "gateway.bad_request" not in events
+
+
+@respx.mock
+async def test_other_providers_400_keeps_the_plain_bad_request_event(gateway):
+    respx.post(CF_CHAT).mock(return_value=cf_error(429, 3036))
+    respx.post(GROQ_CHAT).mock(return_value=httpx.Response(400, json={"error": {"message": "x"}}))
+
+    with capture_logs() as logs, pytest.raises(BadRequestError):
+        await gateway.chat("reasoning", REQ)
+
+    events = [e["event"] for e in logs]
+    assert "gateway.bad_request" in events
+    assert "gateway.cloudflare_bad_request_unclassified" not in events
+
+
+@respx.mock
+async def test_a_billed_content_filter_reply_is_metered(gateway):
+    respx.post(CF_CHAT).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": ""}, "finish_reason": "content_filter"}],
+                "usage": {"prompt_tokens": 900, "completion_tokens": 0, "neurons": 14.5},
+            },
+        )
+    )
+
+    with pytest.raises(ContentRefused) as exc:
+        await gateway.chat("reasoning", REQ)
+
+    assert exc.value.neurons == pytest.approx(14.5)
+    assert gateway.meter.total_today == pytest.approx(14.5)
+
+
+@respx.mock
+async def test_an_unbilled_refusal_meters_nothing(gateway):
+    respx.post(CF_SCHNELL).mock(return_value=cf_error(400, 3030, "NSFW"))
+
+    with pytest.raises(ContentRefused) as exc:
+        await gateway.image("image_create", ImageRequest(prompt="x"))
+
+    assert exc.value.neurons is None
+    assert gateway.meter.total_today == 0

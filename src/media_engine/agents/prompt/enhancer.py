@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from media_engine.agents.base import Agent, AgentConfig
 from media_engine.contracts import AuthContext, Envelope, Goal, Spend, Status, StoppingCondition
 from media_engine.core.logging import get_logger
-from media_engine.core.prompts import PROMPTS_DIR, load_prompt, render
+from media_engine.core.prompts import PROMPTS_DIR, load_prompt, render, tag_stripper
 from media_engine.gateway.llm_gateway import LLMGateway
 from media_engine.ports.event_sink import EventSink
 from media_engine.schemas import EnhancerOutput, MissingItem
@@ -50,7 +50,7 @@ class EnhancerParams(BaseModel):
 
 # Every user-supplied value is wrapped in one of these tag blocks. Strip copies of the tags from
 # the values themselves so no value can close its block early and smuggle instructions after it.
-_TAG = re.compile(r"</?\s*(?:user_request|settings|feedback)\s*>", re.IGNORECASE)
+_TAG = tag_stripper("user_request", "settings", "feedback")
 
 
 def sanitize(text: str) -> str:
@@ -168,7 +168,7 @@ class PromptEnhancer(Agent):
         raw = inputs.get("prompt")
         user_prompt = sanitize(raw) if isinstance(raw, str) else ""
         if not user_prompt:
-            return self.failed("no prompt given", Spend())
+            return self.failed("no prompt given", Spend(), "invalid_input")
 
         settings: dict[str, Any] = dict(inputs.get("settings") or {})
         feedback_raw = inputs.get("feedback")
@@ -182,7 +182,9 @@ class PromptEnhancer(Agent):
 
         result = await self.call_structured(auth, stop, content, EnhancerOutput)
         if result.output is None:
-            return self.failed(result.error or "enhancer produced no output", result.spend)
+            return self.failed(
+                result.error or "enhancer produced no output", result.spend, result.failure
+            )
         out = result.output
 
         must_have, dropped = ground_must_have(out.must_have, user_prompt, params)

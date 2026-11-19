@@ -30,9 +30,16 @@ from media_engine.contracts import (
 )
 from media_engine.core.logging import get_logger
 from media_engine.core.prompts import PROMPTS_DIR, load_prompt, render
-from media_engine.gateway.errors import GatewayError
+from media_engine.gateway.errors import (
+    AllProvidersFailed,
+    BadRequestError,
+    ContentRefused,
+    DeadlineExceeded,
+    GatewayError,
+)
 from media_engine.gateway.llm_gateway import LLMGateway, LLMResult
 from media_engine.ports.event_sink import EventSink
+from media_engine.schemas import FailureKind
 
 REPAIR_PROMPT = PROMPTS_DIR / "shared" / "repair.md"
 FAILED_SUMMARY = "This step could not be completed."
@@ -78,6 +85,7 @@ class Structured[T: BaseModel]:
     output: T | None
     spend: Spend
     error: str | None = None
+    failure: FailureKind | None = None  # set whenever output is None
     calls: list[LLMResult] = field(default_factory=list)
 
     @property
@@ -110,6 +118,18 @@ def extract_json(text: str) -> str | None:
             return stripped[start:end]
         start = stripped.find("{", end)
     return None
+
+
+def gateway_failure(err: GatewayError) -> FailureKind:
+    if isinstance(err, ContentRefused):
+        return "content_refused"
+    if isinstance(err, AllProvidersFailed):
+        return "no_provider"
+    if isinstance(err, DeadlineExceeded):
+        return "deadline"
+    if isinstance(err, BadRequestError):
+        return "bad_request"
+    return "gateway_error"
 
 
 def describe_validation_error(error: ValidationError) -> str:
@@ -184,12 +204,22 @@ class Agent(ABC):
             # The in-flight call's tokens are unknown (the provider may still bill them);
             # llm_calls already counts it.
             result.error = f"deadline of {stop.deadline_ms} ms exceeded (in-flight spend unknown)"
+            result.failure = "deadline"
         except GatewayError as err:
             result.error = f"model call failed: {type(err).__name__}"
+            result.failure = gateway_failure(err)
+            if isinstance(err, ContentRefused):
+                # A refusal that came back as HTTP 200 was billed: charge it to the step.
+                result.spend = result.spend.plus(
+                    Spend(neurons=err.neurons or 0.0, cost_usd=err.cost_usd or 0.0)
+                )
             log.warning("agent.gateway_error", agent=self.name, error=str(err)[:300])
         except Exception as err:
             result.error = f"internal error: {type(err).__name__}"
+            result.failure = "internal"
             log.exception("agent.internal_error", agent=self.name)
+        if result.output is None and result.failure is None:
+            result.failure = "invalid_output"
         result.spend.duration_ms = int((time.perf_counter() - started) * 1000)
         if not result.ok:
             log.warning(
@@ -307,5 +337,7 @@ class Agent(ABC):
             state=EnvelopeState(status=status, spend=spend, reason=reason),
         )
 
-    def failed(self, reason: str, spend: Spend) -> Envelope:
-        return self.envelope(Status.FAILED, {}, FAILED_SUMMARY, spend, reason)
+    def failed(self, reason: str, spend: Spend, failure: FailureKind | None = None) -> Envelope:
+        """FAILED envelope. `failure` goes in `output["failure"]` for the supervisor."""
+        output: dict[str, Any] = {"failure": failure} if failure else {}
+        return self.envelope(Status.FAILED, output, FAILED_SUMMARY, spend, reason)

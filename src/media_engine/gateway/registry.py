@@ -41,6 +41,9 @@ class ModelCard:
     reasoning: bool = False
     gpt_oss: bool = False  # GPT-OSS uses include_reasoning, not reasoning_format
     neuron_pricing: NeuronPricing | None = None  # image models; LLMs report actual neurons
+    # Image models: does the same seed reproduce the same image? None = not verified. Check with
+    # `playground/smoke_test.py --only cf-seed` before relying on it (the M7 reseed lever).
+    honours_seed: bool | None = None
 
 
 def _llm(provider: str, model: str, **kw: object) -> ModelCard:

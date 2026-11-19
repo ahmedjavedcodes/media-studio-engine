@@ -15,7 +15,7 @@ MAX_LITERAL_CHARS = 200
 PROMPT_MARKERS = ("You are ", "Reply with ONLY")
 
 # Agents whose prompt files land in later milestones. Remove each name as it is built.
-PENDING_PROMPTS = {"router", "critic", "image_grand_agent"}
+PENDING_PROMPTS = {"router", "image_grand_agent"}
 
 
 def _docstring_nodes(tree: ast.AST) -> set[int]:

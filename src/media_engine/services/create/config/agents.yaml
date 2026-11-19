@@ -23,6 +23,11 @@ prompt_enhancer:
 critic:
   prompt: image_create/critic.md
   requires: [vision, structured_output]
+  params:
+    # The image is downscaled before it is sent: a 4K output would otherwise be ~10 MB of
+    # base64 per review (and twice that with a repair). Re-encoded as JPEG at this quality.
+    max_side: 768
+    jpeg_quality: 90
   models: {free: vision, pro: vision, max: vision, ultra: vision}
 
 image_grand_agent: # LLM only for choosing a retry lever and deciding escalation

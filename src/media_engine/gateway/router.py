@@ -31,6 +31,7 @@ from media_engine.gateway.errors import (
     ProviderError,
 )
 from media_engine.gateway.fallback import (
+    CF_UNCLASSIFIED_400,
     MAX_ATTEMPTS,
     Action,
     AvailabilityState,
@@ -342,10 +343,17 @@ class Gateway:
                 "message": err.message[:200],
             }
             if decision.action is Action.REFUSE:
-                log.warning("gateway.content_refused", **fields)
-                raise ContentRefused(err, task) from err
+                # A refusal that arrived as HTTP 200 was billed: meter it like a success.
+                refused = ContentRefused(err, task, neurons=self._meter_refusal(ref, err))
+                log.warning("gateway.content_refused", neurons=refused.neurons, **fields)
+                raise refused from err
             if decision.action is Action.RAISE:
-                log.error("gateway.bad_request", **fields)
+                event = (
+                    "gateway.cloudflare_bad_request_unclassified"
+                    if decision.reason == CF_UNCLASSIFIED_400
+                    else "gateway.bad_request"
+                )
+                log.error(event, **fields)
                 raise BadRequestError(err) from err
             getattr(log, decision.severity)(
                 "gateway.fallback",
@@ -410,6 +418,18 @@ class Gateway:
             usage=usage,
         )
         return result
+
+    def _meter_refusal(self, ref: ModelRef, err: ProviderError) -> float | None:
+        """Add a billed refusal's neurons / cost to the daily meters; return the neurons."""
+        neurons: float | None = None
+        if ref.provider == "cloudflare" and err.usage:
+            raw = err.usage.get("neurons")
+            if isinstance(raw, int | float):
+                neurons = float(raw)
+                self.meter.add(actual=neurons, estimate=None)
+        if err.cost_usd is not None:
+            self.cost_meter.add(err.cost_usd)
+        return neurons
 
     def _skip_reason(self, ref: ModelRef) -> str | None:
         """Every reason to skip an entry except the breaker, which _run checks last."""

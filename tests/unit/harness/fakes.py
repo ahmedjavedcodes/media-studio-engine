@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import io
 from collections.abc import Iterable
 from typing import Any
 
+from PIL import Image
+
 from media_engine.gateway.errors import GatewayError
-from media_engine.gateway.types import CallResult, LLMRequest, LLMResponse
+from media_engine.gateway.types import (
+    CallResult,
+    ImageRequest,
+    ImageResponse,
+    LLMRequest,
+    LLMResponse,
+)
 
 
 class ScriptedChat:
@@ -73,3 +82,51 @@ class RaisingSink:
 
 def messages_of(backend: ScriptedChat, index: int) -> list[dict[str, Any]]:
     return backend.requests[index][1].messages
+
+
+def image_bytes(width: int = 64, height: int = 64, fmt: str = "PNG", color: str = "red") -> bytes:
+    """Real, decodable image bytes (the Creator and Critic sniff the format)."""
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), color).save(buf, fmt)
+    return buf.getvalue()
+
+
+class ScriptedImages:
+    """An ImageBackend (what ModelGateway calls) that replays scripted results in order: bytes
+    -> one image, an exception instance -> raised. Records every request and deadline."""
+
+    def __init__(
+        self,
+        replies: Iterable[bytes | Exception],
+        *,
+        provider: str = "cloudflare",
+        model: str = "@cf/black-forest-labs/flux-1-schnell",
+        neurons_est: float | None = 57.6,
+        cost_usd: float | None = None,
+    ) -> None:
+        self.replies = list(replies)
+        self.provider = provider
+        self.model = model
+        self.neurons_est = neurons_est
+        self.cost_usd = cost_usd
+        self.requests: list[tuple[str, ImageRequest, float | None]] = []
+
+    async def image(
+        self, task: str, request: ImageRequest, *, deadline_s: float | None = None
+    ) -> CallResult:
+        self.requests.append((task, request, deadline_s))
+        if not self.replies:
+            raise AssertionError("ScriptedImages ran out of replies (unexpected extra image call)")
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return CallResult(
+            output=ImageResponse(images=[reply], cost_usd=self.cost_usd),
+            task=task,
+            provider=self.provider,
+            model=self.model,
+            latency_ms=1.0,
+            is_fallback=False,
+            neurons_est=self.neurons_est,
+            cost_usd=self.cost_usd,
+        )

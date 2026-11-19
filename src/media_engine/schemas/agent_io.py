@@ -69,19 +69,55 @@ class EnhancerOutput(BaseModel):
         return [t.strip() for t in value if not isinstance(t, str) or t.strip()]
 
 
+# Why a step FAILED, in `Envelope.output["failure"]`. Lets the supervisor choose what to do
+# (re-enhance after a refusal, give up when no provider is left) without parsing reason text.
+FailureKind = Literal[
+    "invalid_input",  # the step was called with bad inputs: our bug
+    "invalid_output",  # the model's reply failed validation, even after the one repair
+    "content_refused",  # a provider's safety filter declined (may be a false positive)
+    "no_provider",  # every chain entry failed or was unavailable
+    "deadline",  # the step's deadline ran out
+    "bad_request",  # HTTP 400: our request is wrong
+    "gateway_error",  # any other gateway failure
+    "bad_image",  # the provider returned bytes that are not a known image format
+    "storage",  # the artifact store failed
+    "internal",  # an unexpected bug
+]
+
+Verdict = Literal["allow", "block"]
+
+
 class GenerationResult(BaseModel):
     image_id: str
     provider: str
     model: str
-    seed: int
+    seed: int  # the seed sent
+    # Whether the model reproduces an image from its seed (ModelCard.honours_seed). None =
+    # not verified yet: the reseed lever (M7) must not rely on `seed` until this is True.
+    seed_honoured: bool | None = None
     cost_usd: float
     neurons: float = 0.0
+    # What came back, read from the image itself. May differ from the request: flux-1-schnell
+    # is sent no width/height at all, so the supervisor must not assume the requested size.
+    width: int
+    height: int
+    mime: str
+
+
+def _normalise_verdict(value: Any) -> Any:
+    return value.strip().lower() if isinstance(value, str) else value
 
 
 class CriticOutput(BaseModel):
     quality_score: int = Field(ge=0, le=10)
     # Safety is a verdict, not a score: separate field, never compared with quality_score.
-    safety_verdict: Literal["allow", "block"]
+    safety_verdict: Verdict
     safety_reason: str | None = None
     critique: str
     summary: str = ""  # envelope summary, returned in the same call (no extra LLM call)
+
+    @field_validator("safety_verdict", mode="before")
+    @classmethod
+    def _verdict_case(cls, value: Any) -> Any:
+        # "Block" / " BLOCK " must still be a block, not a validation error.
+        return _normalise_verdict(value)

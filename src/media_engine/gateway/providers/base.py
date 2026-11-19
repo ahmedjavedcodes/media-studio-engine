@@ -111,9 +111,18 @@ def parse_chat_completion(provider: str, model: str, data: dict[str, Any]) -> LL
             provider, model, "malformed chat completion response", status=502
         ) from exc
     if choice.get("finish_reason") == "content_filter":
-        # OpenAI-compatible signal that the provider's filter withheld the reply.
+        # OpenAI-compatible signal that the provider's filter withheld the reply. The call was
+        # still billed, so keep its usage for metering.
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else None
+        cost = usage.get("cost") if usage else None
         raise ProviderError(
-            provider, model, "reply withheld by content filter", status=200, refused=True
+            provider,
+            model,
+            "reply withheld by content filter",
+            status=200,
+            refused=True,
+            usage=usage,
+            cost_usd=float(cost) if isinstance(cost, int | float) else None,
         )
     reasoning = message.get("reasoning") or message.get("reasoning_content")
     return LLMResponse(

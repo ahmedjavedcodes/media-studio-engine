@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from media_engine.gateway.types import Attempt
 
 
@@ -21,6 +23,8 @@ class ProviderError(GatewayError):
         retry_after: float | None = None,
         timeout: bool = False,
         refused: bool = False,
+        usage: dict[str, Any] | None = None,
+        cost_usd: float | None = None,
     ) -> None:
         super().__init__(f"{provider}/{model}: {message}")
         self.provider = provider
@@ -31,6 +35,10 @@ class ProviderError(GatewayError):
         self.retry_after = retry_after
         self.timeout = timeout
         self.refused = refused  # the provider declined the content (safety filter / moderation)
+        # Billed usage of a call that returned HTTP 200 and was then read as a failure (e.g. a
+        # chat reply withheld by a content filter). None when nothing was billed / reported.
+        self.usage = usage
+        self.cost_usd = cost_usd
 
 
 class BadRequestError(GatewayError):
@@ -53,7 +61,7 @@ class ContentRefused(GatewayError):
     only be a way round the filter. The caller (the Image Grand Agent) decides what happens next.
     Not a provider-health failure, so it never trips the circuit breaker."""
 
-    def __init__(self, error: ProviderError, task: str) -> None:
+    def __init__(self, error: ProviderError, task: str, *, neurons: float | None = None) -> None:
         super().__init__(
             f"Content refused by {error.provider}/{error.model} for task '{task}' "
             f"(status={error.status}, code={error.code}): {error.message}"
@@ -64,6 +72,10 @@ class ContentRefused(GatewayError):
         self.code = error.code
         self.message = error.message
         self.task = task
+        # Billed spend of the refused call (HTTP 200 + content filter), metered by the gateway
+        # so the agent can charge it to the step. None = nothing billed or reported.
+        self.neurons = neurons
+        self.cost_usd = error.cost_usd
 
 
 def _trail(attempts: list[Attempt]) -> str:
