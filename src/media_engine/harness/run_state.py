@@ -22,6 +22,10 @@ class PlanStep(BaseModel):
     public_label: PublicLabel
     status: StepStatus = "pending"
     output_ref: str | None = None
+    # The step agent's envelope output (refs and scalars only; Envelope already rejects bytes).
+    # Kept here, not in any in-memory context, so RunState alone can resume or retry a run
+    # (completed steps keep their outputs). Not in the spec's PlanStep: added for M6/M7.
+    output: dict[str, Any] = Field(default_factory=dict)
     branches_total: int | None = None
     branches_done: int | None = None
     branches_aborted: int | None = None

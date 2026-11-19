@@ -1,9 +1,8 @@
 """Spec §7.5 / acceptance: `safety_verdict: block` ends the run as REJECTED no matter the score,
 plan tier or retries left, and no retry path can override it.
 
-Written before the supervisor exists (M5). The Critic-level half runs now. The run-level half
-skips until `media_engine.agents.image_grand.supervisor` exists (M6), and fixes the factory the
-supervisor must provide. M6: remove the importorskip so this can never be silently skipped."""
+Written before the supervisor existed (M5), against the factory it had to provide. Since M6
+the run-level half imports the supervisor directly: it can fail, never silently skip."""
 
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ import pytest
 
 from media_engine.agents.base import AgentConfig
 from media_engine.agents.critic.critic import Critic, reply_block_reason
+from media_engine.agents.image_grand import supervisor
 from media_engine.contracts import AuthContext, Goal, Plan, Status
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.ports import ListEventSink, LocalArtifactStore
@@ -137,7 +137,6 @@ def enhancer_ok() -> str:
 @pytest.mark.parametrize("plan", PLANS)
 @pytest.mark.parametrize("score", SCORES)
 async def test_run_ends_rejected_on_block_with_retries_left(store, plan, score):
-    supervisor = pytest.importorskip("media_engine.agents.image_grand.supervisor")
     assert CFG.policy.max_retries[plan] >= 1  # retries are available, and must not be used
 
     llm = ScriptedChat([enhancer_ok(), block(score)])  # an extra LLM call raises

@@ -18,6 +18,14 @@ negative_prompt: "text, letters, words, captions, signage with writing, logos, w
 max_parallel_branches: 4
 max_images_per_request: 4
 
+# Seeds are drawn uniformly from [0, max_seed]. 2^31 - 1: the int32 range providers accept.
+max_seed: 2147483647
+
+# Returned image counts as the requested shape when |w/h - requested w/h| <= this. Mismatches
+# are reported as an issue only when a PAID provider served the image; on the free path
+# (flux-1-schnell is sent no size) they are logged and ignored, by the user's decision.
+aspect_ratio_tolerance: 0.02
+
 # Per run, on three meters. reserve_fraction of each is held back for retries.
 # neurons_total caps image generation on the free path (Cloudflare: 10,000 neurons/day shared).
 budgets:

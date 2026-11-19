@@ -54,6 +54,8 @@ class HarnessPolicy(_Strict):
     negative_prompt: str
     max_parallel_branches: int = Field(gt=0)
     max_images_per_request: int = Field(gt=0)
+    max_seed: int = Field(gt=0)
+    aspect_ratio_tolerance: float = Field(ge=0.0)
     budgets: dict[Plan, BudgetPolicy]
     step_estimates: dict[StepKind, StepEstimate]
     deadlines_ms: dict[StepKind, int]
