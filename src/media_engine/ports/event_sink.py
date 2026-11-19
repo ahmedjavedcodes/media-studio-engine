@@ -28,14 +28,14 @@ class Event(BaseModel):
     ts: str
 
 
-def make_event(run_id: str, step: int, public_label: PublicLabel, phase: Phase) -> dict[str, Any]:
+def make_event(run_id: str, step: int, public_label: PublicLabel, phase: Phase) -> Event:
     return Event(
         run_id=run_id,
         step=step,
         public_label=public_label,
         phase=phase,
         ts=datetime.now(UTC).isoformat(),
-    ).model_dump()
+    )
 
 
 @runtime_checkable
@@ -43,13 +43,19 @@ class EventSink(Protocol):
     def emit(self, run_id: str, event: dict[str, Any]) -> None: ...  # sync, fire-and-forget
 
 
-def safe_emit(sink: EventSink, run_id: str, event: dict[str, Any]) -> None:
-    """Call the sink and swallow anything it raises. Harness code emits only through this."""
+def safe_emit(sink: EventSink, event: Event) -> None:
+    """The only way harness code emits. Takes a typed `Event` (so the public-label rule holds
+    by construction), serialises it here, and swallows anything the sink raises.
+
+    Passing something that is not an `Event` is a programming error, not a sink failure, so it
+    raises (before the swallow) instead of silently dropping the event."""
+    if not isinstance(event, Event):
+        raise TypeError(f"safe_emit takes an Event, got {type(event).__name__}; use make_event()")
     try:
-        sink.emit(run_id, event)
+        sink.emit(event.run_id, event.model_dump())
     except Exception:  # noqa: BLE001 - by contract an event failure must never surface
         with contextlib.suppress(Exception):
-            log.warning("events.emit_failed", run_id=run_id)
+            log.warning("events.emit_failed", run_id=event.run_id)
 
 
 class ListEventSink:

@@ -25,7 +25,17 @@ class Settings(BaseSettings):
     cloudflare_api_token: SecretStr | None = None
     groq_api_key: SecretStr | None = None
 
-    # Paid providers
+    # Paid providers. Off unless ALLOW_PAID=true: the gateway skips every chain entry whose
+    # provider is listed in `paid_providers`, even when its key is set.
+    allow_paid: bool = False
+    paid_providers: list[str] = [
+        "openrouter",
+        "anthropic",
+        "fal",
+        "google",
+        "openai",
+        "siliconflow",
+    ]
     openrouter_api_key: SecretStr | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     fal_key: SecretStr | None = None

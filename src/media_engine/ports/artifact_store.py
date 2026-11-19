@@ -50,12 +50,16 @@ class LocalArtifactStore:
     def __init__(self, root: str | Path = ".artifacts") -> None:
         self.root = Path(root)
 
-    def _path(self, image_id: str) -> Path:
-        _check_id(image_id)
+    def _find(self, image_id: str) -> Path:
+        """Blocking directory lookup: always call via `_path` (offloaded to a thread)."""
         matches = sorted(self.root.glob(f"{image_id}.*"))
         if not matches:
             raise ArtifactNotFound(image_id)
         return matches[0]
+
+    async def _path(self, image_id: str) -> Path:
+        _check_id(image_id)
+        return await asyncio.to_thread(self._find, image_id)
 
     async def put(self, data: bytes, mime: str) -> str:
         ext = _EXT_BY_MIME.get(mime)
@@ -72,11 +76,12 @@ class LocalArtifactStore:
         return image_id
 
     async def get(self, image_id: str) -> bytes:
-        path = self._path(image_id)
+        path = await self._path(image_id)
         return await asyncio.to_thread(path.read_bytes)
 
     async def url(self, image_id: str) -> str:
-        return self._path(image_id).resolve().as_uri()
+        path = await self._path(image_id)
+        return await asyncio.to_thread(lambda: path.resolve().as_uri())
 
     async def mark_orphaned(self, image_id: str, reason: str) -> None:
         _check_id(image_id)

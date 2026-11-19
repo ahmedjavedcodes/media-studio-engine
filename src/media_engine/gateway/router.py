@@ -242,6 +242,8 @@ class Gateway:
             return "provider_not_implemented"
         if not provider.is_configured():
             return "provider_not_configured"
+        if ref.provider in self.settings.paid_providers and not self.settings.allow_paid:
+            return "paid_disabled"
         return self.state.unavailable_reason(ref.provider, ref.model)
 
     async def _with_retry(

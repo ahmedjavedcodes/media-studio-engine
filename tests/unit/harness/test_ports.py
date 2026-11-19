@@ -18,6 +18,7 @@ from media_engine.ports import (
     make_event,
     safe_emit,
 )
+from tests.unit.harness.fakes import RaisingSink
 
 
 def test_local_implementations_satisfy_protocols(tmp_path: Path) -> None:
@@ -61,7 +62,7 @@ async def test_orphaned_images_are_recorded_and_swept(tmp_path: Path) -> None:
 
 
 def test_make_event_has_exact_public_shape() -> None:
-    event = make_event("run_1", 2, "Creating your image", "started")
+    event = make_event("run_1", 2, "Creating your image", "started").model_dump()
     assert set(event) == {"run_id", "step", "public_label", "phase", "ts"}
 
 
@@ -70,15 +71,22 @@ def test_make_event_refuses_internal_names() -> None:
         make_event("run_1", 2, "image_creator", "started")  # type: ignore[arg-type]
 
 
-def test_list_sink_collects() -> None:
+def test_list_sink_collects_serialised_events() -> None:
     sink = ListEventSink()
-    safe_emit(sink, "run_1", make_event("run_1", 1, "Understanding your request", "started"))
-    assert sink.events[0][0] == "run_1"
+    safe_emit(sink, make_event("run_1", 1, "Understanding your request", "started"))
+    run_id, event = sink.events[0]
+    assert run_id == "run_1"
+    assert event["public_label"] == "Understanding your request"
 
 
-def test_safe_emit_swallows_a_raising_sink() -> None:
-    class Exploding:
-        def emit(self, run_id: str, event: dict) -> None:
-            raise RuntimeError("sink down")
+def test_safe_emit_swallows_a_sink_that_always_raises() -> None:
+    sink = RaisingSink()
+    for phase in ("started", "progress", "finished"):
+        safe_emit(sink, make_event("run_1", 1, "Finishing up", phase))  # type: ignore[arg-type]
+    assert sink.attempts == 3
 
-    safe_emit(Exploding(), "run_1", make_event("run_1", 1, "Finishing up", "finished"))
+
+def test_safe_emit_only_accepts_typed_events() -> None:
+    # A hand-built dict (which could carry an internal agent name) is not an Event.
+    with pytest.raises(TypeError, match="takes an Event"):
+        safe_emit(ListEventSink(), {"run_id": "r", "public_label": "critic"})  # type: ignore[arg-type]

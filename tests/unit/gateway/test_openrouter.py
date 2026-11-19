@@ -72,6 +72,7 @@ def or_settings() -> Settings:
         cloudflare_api_token="cf-test-token",
         groq_api_key="groq-test-key",
         openrouter_api_key="or-test-key",
+        allow_paid=True,
     )
 
 

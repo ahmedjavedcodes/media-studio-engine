@@ -4,7 +4,7 @@ no open connections, nothing that `model_dump_json()` cannot represent."""
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 
@@ -29,39 +29,60 @@ class PlanStep(BaseModel):
     spend: Spend = Field(default_factory=Spend)
 
 
+class Remaining(NamedTuple):
+    tokens: int
+    cost_usd: float
+    neurons: float
+
+
 class Budget(BaseModel):
-    """Per-run budget. A `reserve_fraction` of each cap is held back for retries: ordinary steps
-    may only spend the rest; retries may also draw on the reserve."""
+    """Per-run budget on three meters: tokens, USD and Cloudflare neurons. Neurons are the meter
+    that actually moves on the free path (images cost neurons, not dollars), so image generation
+    is capped by `neurons_total`.
+
+    A `reserve_fraction` of each cap is held back for retries: ordinary steps may only spend the
+    rest; retries may also draw on the reserve. The fraction comes from harness.yaml."""
 
     tokens_total: int
     cost_cap_usd: float
-    reserve_fraction: float = Field(default=0.30, ge=0.0, lt=1.0)
+    neurons_total: float
+    reserve_fraction: float = Field(ge=0.0, lt=1.0)
     tokens_spent: int = 0
     cost_spent_usd: float = 0.0
+    neurons_spent: float = 0.0
 
-    def remaining_for_steps(self) -> tuple[int, float]:
-        usable_tokens = int(self.tokens_total * (1 - self.reserve_fraction))
-        usable_cost = self.cost_cap_usd * (1 - self.reserve_fraction)
-        return (
-            max(0, usable_tokens - self.tokens_spent),
-            max(0.0, usable_cost - self.cost_spent_usd),
+    def remaining_for_steps(self) -> Remaining:
+        usable = 1 - self.reserve_fraction
+        return Remaining(
+            max(0, int(self.tokens_total * usable) - self.tokens_spent),
+            max(0.0, self.cost_cap_usd * usable - self.cost_spent_usd),
+            max(0.0, self.neurons_total * usable - self.neurons_spent),
         )
 
-    def remaining_total(self) -> tuple[int, float]:
-        return (
+    def remaining_total(self) -> Remaining:
+        return Remaining(
             max(0, self.tokens_total - self.tokens_spent),
             max(0.0, self.cost_cap_usd - self.cost_spent_usd),
+            max(0.0, self.neurons_total - self.neurons_spent),
         )
 
-    def can_afford(self, est_tokens: int, est_cost: float, *, use_reserve: bool = False) -> bool:
-        tokens_left, cost_left = (
-            self.remaining_total() if use_reserve else self.remaining_for_steps()
+    def can_afford(
+        self,
+        est_tokens: int,
+        est_cost: float,
+        est_neurons: float = 0.0,
+        *,
+        use_reserve: bool = False,
+    ) -> bool:
+        left = self.remaining_total() if use_reserve else self.remaining_for_steps()
+        return (
+            est_tokens <= left.tokens and est_cost <= left.cost_usd and est_neurons <= left.neurons
         )
-        return est_tokens <= tokens_left and est_cost <= cost_left
 
     def charge(self, spend: Spend) -> None:
         self.tokens_spent += spend.tokens
         self.cost_spent_usd += spend.cost_usd
+        self.neurons_spent += spend.neurons
 
 
 class RunState(BaseModel):

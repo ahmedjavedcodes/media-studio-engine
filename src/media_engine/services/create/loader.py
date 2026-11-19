@@ -2,64 +2,49 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import Literal, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from media_engine.contracts import Plan
+from media_engine.agents.config import PLANS, AgentPolicy
+from media_engine.agents.config import require_all_plans as _all_plans
+from media_engine.contracts import Plan, StoppingCondition
+from media_engine.harness.run_state import Budget
 
 CONFIG_DIR = Path(__file__).with_name("config")
 PRESETS_PATH = Path(__file__).parents[2] / "presets" / "library" / "image_create.yaml"
-REPO_ROOT = Path(__file__).parents[4]  # src/media_engine/services/create/loader.py -> repo
 
-PLANS: tuple[str, ...] = get_args(Plan)
-Capability = Literal["structured_output", "vision", "image"]
 Lever = Literal["reseed", "re_enhance", "switch_model", "raise_tier"]
 StepKind = Literal["route", "enhance", "generate", "critique", "supervise"]
+
+__all__ = ["PLANS", "AgentPolicy", "CreateConfig", "get_create_config", "load_create_config"]
 
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-def _all_plans(values: Mapping[Any, object], field: str) -> None:
-    missing = [p for p in PLANS if p not in values]
-    if missing:
-        raise ValueError(f"{field} is missing plan(s): {missing}")
-
-
-class AgentPolicy(_Strict):
-    prompt: str | None = None  # None only for the no-LLM image creator
-    requires: list[Capability]
-    models: dict[Plan, str]  # plan -> gateway chain name
-
-    @model_validator(mode="after")
-    def _complete(self) -> AgentPolicy:
-        _all_plans(self.models, "models")
-        return self
-
-    def chain_for(self, plan: Plan) -> str:
-        return self.models[plan]
-
-    def prompt_path(self) -> Path:
-        if self.prompt is None:
-            raise ValueError("This agent has no prompt (it makes no LLM call)")
-        return REPO_ROOT / self.prompt
-
-
 class BudgetPolicy(_Strict):
     tokens_total: int = Field(gt=0)
     cost_cap_usd: float = Field(ge=0.0)
+    neurons_total: float = Field(gt=0.0)
     reserve_fraction: float = Field(ge=0.0, lt=1.0)
 
 
 class StepEstimate(_Strict):
-    tokens: int = Field(ge=0)
+    tokens: int = Field(ge=0)  # step total budget: prompt + completion, repair included
+    completion_tokens: int = Field(ge=0)  # per-call provider cap
     cost_usd: float = Field(ge=0.0)
+    neurons: float = Field(ge=0.0)
+
+    @model_validator(mode="after")
+    def _completion_fits(self) -> StepEstimate:
+        if self.completion_tokens > self.tokens:
+            raise ValueError("completion_tokens cannot exceed the step's total tokens")
+        return self
 
 
 class HarnessPolicy(_Strict):
@@ -91,6 +76,19 @@ class HarnessPolicy(_Strict):
 
     def levers_for(self, plan: Plan) -> list[Lever]:
         return [lever for lever, plans in self.levers.items() if plan in plans]
+
+    def budget_for(self, plan: Plan) -> Budget:
+        return Budget(**self.budgets[plan].model_dump())
+
+    def stopping_condition(self, kind: StepKind, plan: Plan, success: str) -> StoppingCondition:
+        estimate = self.step_estimates[kind]
+        return StoppingCondition(
+            success=success,
+            max_tokens=estimate.tokens,
+            max_completion_tokens=estimate.completion_tokens,
+            max_retries=self.max_retries[plan],
+            deadline_ms=self.deadlines_ms[kind],
+        )
 
 
 class Size(_Strict):

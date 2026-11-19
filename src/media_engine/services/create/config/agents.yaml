@@ -1,24 +1,24 @@
 # Per-agent model policy for the image-creation harness.
 # `models` maps each plan tier to a gateway chain name (gateway/chains.yaml). The chain, not the
-# agent, decides the provider and the fallback order. Prompt paths are relative to the repo root.
+# agent, decides the provider and the fallback order. Prompt paths are relative to media_engine/prompts/.
 
 router: # complexity router: small, fast, one structured call
-  prompt: prompts/image_create/router.md
+  prompt: image_create/router.md
   requires: [structured_output]
   models: {free: fast_llm, pro: fast_llm, max: fast_llm, ultra: fast_llm}
 
 prompt_enhancer:
-  prompt: prompts/image_create/prompt_enhancer.md
+  prompt: image_create/prompt_enhancer.md
   requires: [structured_output]
   models: {free: fast_llm, pro: fast_llm, max: reasoning, ultra: reasoning}
 
 critic:
-  prompt: prompts/image_create/critic.md
+  prompt: image_create/critic.md
   requires: [vision, structured_output]
   models: {free: vision, pro: vision, max: vision, ultra: vision}
 
 image_grand_agent: # LLM only for choosing a retry lever and deciding escalation
-  prompt: prompts/image_create/image_grand_agent.md
+  prompt: image_create/image_grand_agent.md
   requires: [structured_output]
   models: {free: reasoning, pro: reasoning, max: reasoning, ultra: reasoning}
 
