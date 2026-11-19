@@ -11,6 +11,10 @@ levers: # which plans may use each retry lever
   switch_model: [pro, max, ultra]
   raise_tier: [max, ultra]
 
+# Passed by the Image Creator to providers that support a negative prompt. FLUX (the free
+# chain) ignores negative prompts, so the enhancer prompt also avoids describing text at all.
+negative_prompt: "text, letters, words, captions, signage with writing, logos, watermark, signature"
+
 max_parallel_branches: 4
 max_images_per_request: 4
 

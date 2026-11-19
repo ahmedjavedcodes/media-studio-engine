@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from importlib.resources.abc import Traversable
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from media_engine.contracts import Plan
 from media_engine.core.prompts import PROMPTS_DIR
@@ -30,6 +30,7 @@ class AgentPolicy(BaseModel):
     requires: list[Capability]
     models: dict[Plan, str]  # plan -> gateway chain name
     reasoning_effort: ReasoningEffort | None = None
+    params: dict[str, Any] = Field(default_factory=dict)  # per-agent tunables, agent-validated
 
     @model_validator(mode="after")
     def _complete(self) -> AgentPolicy:

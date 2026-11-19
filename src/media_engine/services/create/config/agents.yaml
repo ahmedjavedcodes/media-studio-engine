@@ -5,11 +5,19 @@
 router: # complexity router: small, fast, one structured call
   prompt: image_create/router.md
   requires: [structured_output]
+  reasoning_effort: low
   models: {free: fast_llm, pro: fast_llm, max: fast_llm, ultra: fast_llm}
 
 prompt_enhancer:
   prompt: image_create/prompt_enhancer.md
   requires: [structured_output]
+  reasoning_effort: low
+  params:
+    # must_have grounding: keep an item only if at least this fraction of its word stems
+    # appear in the user's request (or the item appears in it verbatim).
+    grounding_min_fraction: 0.5
+    stem_len: 6 # compare words by this many leading letters, after stripping -s/-ed/-ing
+    min_word_len: 3 # shorter Latin-script words are ignored (CJK characters always count)
   models: {free: fast_llm, pro: fast_llm, max: reasoning, ultra: reasoning}
 
 critic:

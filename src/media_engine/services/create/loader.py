@@ -51,6 +51,7 @@ class HarnessPolicy(_Strict):
     quality_threshold: dict[Plan, int]
     max_retries: dict[Plan, int]
     levers: dict[Lever, list[Plan]]
+    negative_prompt: str
     max_parallel_branches: int = Field(gt=0)
     max_images_per_request: int = Field(gt=0)
     budgets: dict[Plan, BudgetPolicy]
