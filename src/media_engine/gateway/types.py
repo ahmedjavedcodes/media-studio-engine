@@ -72,6 +72,44 @@ class Attempt:
     calls: int = 0
 
 
+AttemptOutcome = Literal["ok", "skipped", "rate_limited", "timeout", "refused", "error"]
+
+
+class AttemptInfo(BaseModel):
+    """JSON-safe view of one gateway `Attempt` (for the developer trace)."""
+
+    provider: str
+    model: str
+    outcome: AttemptOutcome
+    reason: str | None = None
+
+
+def attempt_infos(attempts: list[Attempt]) -> list[AttemptInfo]:
+    """Map the gateway's attempts (success | skipped | failed) onto the trace's outcomes."""
+    infos: list[AttemptInfo] = []
+    for a in attempts:
+        reason = (a.reason or "").lower()
+        if a.outcome == "success":
+            outcome: AttemptOutcome = "ok"
+        elif a.outcome == "skipped":
+            outcome = "skipped"
+        elif a.status == 429 or any(k in reason for k in ("rate", "exhaust", "capacity", "429")):
+            outcome = "rate_limited"
+        elif any(k in reason for k in ("deadline", "timeout", "timed out")):
+            outcome = "timeout"
+        elif any(k in reason for k in ("refus", "nsfw", "content")):
+            outcome = "refused"
+        else:
+            outcome = "error"
+        detail = a.reason
+        if a.status is not None or a.code is not None:
+            detail = f"{a.reason or ''} (status={a.status}, code={a.code})".strip()
+        infos.append(
+            AttemptInfo(provider=a.provider, model=a.model, outcome=outcome, reason=detail)
+        )
+    return infos
+
+
 @dataclass
 class CallResult:
     output: LLMResponse | ImageResponse

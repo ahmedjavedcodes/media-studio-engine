@@ -44,7 +44,10 @@ from media_engine.contracts import (
 from media_engine.core.images import NotAnImage, inspect_image
 from media_engine.core.logging import get_logger
 from media_engine.gateway.errors import ContentRefused, GatewayError
-from media_engine.gateway.model_gateway import ModelGateway
+from media_engine.gateway.model_gateway import ImageResult, ModelGateway
+from media_engine.gateway.registry import card_or_default
+from media_engine.gateway.types import attempt_infos
+from media_engine.harness import trace as tracing
 from media_engine.ports.artifact_store import ArtifactStore
 from media_engine.ports.event_sink import EventSink
 from media_engine.schemas import GenerationResult
@@ -89,18 +92,23 @@ class ImageCreator(Agent):
             return self.failed(
                 "invalid inputs:\n" + describe_validation_error(err), Spend(), "invalid_input"
             )
-        started = time.perf_counter()
+        started_at, started = tracing.now(), time.perf_counter()
+        tier = args.tier or auth.plan
         try:
             result = await self._images.generate(
                 args.prompt,
                 width=args.width,
                 height=args.height,
-                tier=args.tier or auth.plan,
+                tier=tier,
                 seed=args.seed,
                 deadline_ms=stop.deadline_ms,
                 chain_offset=args.chain_offset,
             )
+        except asyncio.CancelledError:
+            self._trace(args, tier, started_at, started, failure="aborted")
+            raise
         except GatewayError as err:
+            self._trace(args, tier, started_at, started, failure=gateway_failure(err), err=err)
             spend = Spend(duration_ms=_elapsed_ms(started))
             if isinstance(err, ContentRefused):  # billed refusals, as the Agent base charges them
                 spend = spend.plus(Spend(neurons=err.neurons or 0.0, cost_usd=err.cost_usd or 0.0))
@@ -120,6 +128,9 @@ class ImageCreator(Agent):
             info = inspect_image(data)
         except NotAnImage as err:
             log.warning("creator.bad_image", provider=result.provider, model=result.model)
+            self._trace(
+                args, tier, started_at, started, result=result, size=len(data), failure="bad_image"
+            )
             return self.failed(str(err), spend, "bad_image")
         put = asyncio.ensure_future(self._artifacts.put(data, info.mime))
         try:
@@ -131,8 +142,19 @@ class ImageCreator(Agent):
             raise
         except Exception as err:  # the store is a backend port: any failure is "storage"
             log.exception("creator.storage_failed")
+            self._trace(
+                args,
+                tier,
+                started_at,
+                started,
+                result=result,
+                info=info,
+                size=len(data),
+                failure="storage",
+            )
             return self.failed(f"artifact store failed: {type(err).__name__}", spend, "storage")
 
+        self._trace(args, tier, started_at, started, result=result, info=info, size=len(data))
         generated = GenerationResult(
             image_id=image_id,
             provider=result.provider,
@@ -153,6 +175,74 @@ class ImageCreator(Agent):
                 model=result.model,
             )
         return self.envelope(Status.DONE, generated.model_dump(), SUMMARY, spend)
+
+    def _trace(
+        self,
+        args: CreatorInputs,
+        tier: Plan,
+        started_at: str,
+        started: float,
+        *,
+        result: ImageResult | None = None,
+        info: Any = None,
+        size: int | None = None,
+        failure: str | None = None,
+        err: GatewayError | None = None,
+    ) -> None:
+        """Developer trace: one record for this image call. No model call, no image bytes."""
+        scope = tracing.current()
+        if scope is None:
+            return
+        provider = model = chain = None
+        attempts: list[Any] = []
+        neurons = cost = 0.0
+        fallback = False
+        seed_sent, honoured, steps = True, None, None
+        if result is not None:
+            provider, model, chain = result.provider, result.model, result.chain
+            attempts, fallback = result.attempts, result.is_fallback
+            neurons, cost, honoured, steps = (
+                result.neurons,
+                result.cost_usd,
+                result.seed_honoured,
+                result.steps,
+            )
+            seed_sent = card_or_default(result.provider, result.model, "image").accepts_seed
+        elif err is not None:
+            attempts = attempt_infos(getattr(err, "attempts", []) or [])
+            neurons = float(getattr(err, "neurons", 0.0) or 0.0)
+            cost = float(getattr(err, "cost_usd", 0.0) or 0.0)
+        scope.trace.add_call(
+            ts=started_at,
+            step=scope.step,
+            role=self.name,
+            attempt=scope.attempt,
+            branch=scope.branch,
+            kind="image",
+            chain=chain,
+            provider=provider,
+            model=model,
+            was_fallback=fallback,
+            attempts=attempts,
+            neurons=neurons,
+            cost_usd=cost,
+            duration_ms=_elapsed_ms(started),
+            failure=failure,
+            request_text=tracing.redact(args.prompt) or "",
+            reply_text=None if info is None else f"{info.mime}, {size} bytes " + tracing.OMITTED,
+            image=tracing.ImageDetail(
+                width_requested=args.width,
+                height_requested=args.height,
+                width=None if info is None else info.width,
+                height=None if info is None else info.height,
+                seed=args.seed,
+                seed_sent=seed_sent,
+                seed_honoured=honoured,
+                mime=None if info is None else info.mime,
+                bytes=size,
+                steps=steps,
+            ),
+        )
 
     async def _orphan_after_cancel(self, put: asyncio.Future[str]) -> None:
         """Cancelled while storing: let the put finish, then mark what it stored as orphaned

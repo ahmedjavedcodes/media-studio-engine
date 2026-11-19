@@ -57,9 +57,11 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
@@ -84,6 +86,7 @@ from media_engine.core.logging import get_logger
 from media_engine.core.prompts import PROMPTS_DIR, load_prompt, render, tag_stripper
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.gateway.model_gateway import ImageBackend, ModelGateway
+from media_engine.harness import trace as tracing
 from media_engine.harness.run_state import (
     AttemptRecord,
     PlanStep,
@@ -91,6 +94,7 @@ from media_engine.harness.run_state import (
     RunState,
     StepStatus,
 )
+from media_engine.harness.trace import Trace
 from media_engine.ports.artifact_store import ArtifactStore
 from media_engine.ports.event_sink import EventSink, Phase, make_event, safe_emit
 from media_engine.ports.run_store import RunStore
@@ -241,6 +245,8 @@ class RunContext:
     user_prompt: str
     settings: dict[str, str]
     n: int = 1  # images wanted (an immutable input)
+    trace: Trace = field(default_factory=Trace)  # developer trace (not run state)
+    t0: dict[int, float] = field(default_factory=dict)  # step number -> perf_counter at start
     _outcome: Outcome | None = field(default=None, init=False, repr=False)
 
     @property
@@ -298,6 +304,7 @@ class ImageGrandAgent(Agent):
         paid_providers: Iterable[str] = (),
         allow_paid: bool = False,
         seed_source: Callable[[], int] | None = None,
+        trace: Trace | None = None,
     ) -> None:
         # The gateway is for the lever-choice call only; a first-pass success never uses it.
         super().__init__(config, gateway, events)
@@ -310,6 +317,7 @@ class ImageGrandAgent(Agent):
         self._store = run_store
         self._paid = frozenset(paid_providers)
         self._allow_paid = allow_paid
+        self._trace = trace  # developer trace for this run (create_images passes one in)
         resolve = chain_resolver(create.agents)
         self._image_chain: Callable[[Plan], str] = lambda tier: resolve("image_creator", tier)
         self._seed = seed_source or (lambda: secrets.randbelow(self._policy.max_seed + 1))
@@ -343,6 +351,7 @@ class ImageGrandAgent(Agent):
             if item.status == "pending":
                 item.status = "skipped"
         state.status = outcome.status
+        state.finished_at = datetime.now(UTC)
         await self._save(ctx)
         log.info(
             "supervisor.done",
@@ -379,7 +388,18 @@ class ImageGrandAgent(Agent):
         state.attempts = self._new_round(
             1, args.n, lever=None, tier=auth.plan, chain_offset=0, feedback=None
         )
-        return RunContext(state, auth, args.prompt, dict(args.settings), n=args.n)
+        trace = self._trace or Trace()
+        trace.bind(state)  # what the router recorded moves into RunState.calls
+        trace.meta = {
+            "plan": auth.plan,
+            "n": args.n,
+            "retry_cap": self._policy.max_retries[auth.plan],
+            "critic_reask_cap": self._policy.max_critic_reasks,
+            "quality_threshold": self._policy.quality_threshold[auth.plan],
+            "reserve_fraction": state.budget.reserve_fraction,
+            "max_parallel_branches": self._policy.max_parallel_branches,
+        }
+        return RunContext(state, auth, args.prompt, dict(args.settings), n=args.n, trace=trace)
 
     def _new_round(
         self,
@@ -423,6 +443,18 @@ class ImageGrandAgent(Agent):
         run's verdict on `ctx.outcome` (None: the last attempt reached a verdict)."""
         while True:
             await run_attempt(self.graph, ctx.state.run_id, ctx)
+            state, ended = ctx.state, ctx.outcome
+            ctx.trace.decide(
+                "supervise",
+                f"round {state.attempt.number} ended: "
+                + (
+                    "reached a verdict"
+                    if ended is None
+                    else f"{ended.status.value} ({ended.reason})"
+                )
+                + f"; retries {state.retries_used} of {self._policy.max_retries[ctx.auth.plan]}"
+                + f", critic re-asks {state.critic_reasks_used} of {self._policy.max_critic_reasks}",
+            )
             move = self._retry_wanted(ctx)
             if move is None or not await self._start_retry(ctx, move):
                 return
@@ -485,6 +517,9 @@ class ImageGrandAgent(Agent):
                 return False
         elif move in allowed:
             lever = move  # forced: one possible lever, so no LLM call is made
+            ctx.trace.decide(
+                "supervise", f"lever forced: {lever} after {failure or 'the failure'} (no LLM call)"
+            )
         else:
             return False
         self._begin_retry(ctx, lever, failure=failure)
@@ -511,14 +546,21 @@ class ImageGrandAgent(Agent):
             history="\n".join(history) or "none",
             levers="\n".join(allowed),
         )
-        result = await self.call_structured(
-            ctx.auth, self._stop(ctx, "supervise"), content, LeverChoice
-        )
+        with tracing.scope(ctx.trace, "supervise", attempt.number):
+            result = await self.call_structured(
+                ctx.auth, self._stop(ctx, "supervise"), content, LeverChoice
+            )
         state.supervisor_spend = state.supervisor_spend.plus(result.spend)
         state.budget.charge(result.spend)
         await self._save(ctx)
         if result.output is not None and result.output.lever in allowed:
             log.info("supervisor.lever", lever=result.output.lever, reason=result.output.reason)
+            ctx.trace.decide(
+                "supervise",
+                f"lever chosen: {result.output.lever} (score {attempt.quality_score} below "
+                f"{self._policy.quality_threshold[ctx.auth.plan]}); why: {result.output.reason}; "
+                f"permitted: {', '.join(allowed)}",
+            )
             return result.output.lever
         # The call failed, or named a lever that is not permitted. One call is all the spec
         # allows: fall back to the first permitted lever instead of asking again.
@@ -527,6 +569,16 @@ class ImageGrandAgent(Agent):
             chosen=None if result.output is None else result.output.lever,
             used=allowed[0],
             error=result.error,
+        )
+        ctx.trace.decide(
+            "supervise",
+            f"lever FALLBACK: {allowed[0]} (the lever call "
+            + (
+                f"failed: {result.error}"
+                if result.output is None
+                else f"named {result.output.lever}, which is not permitted"
+            )
+            + f"); permitted: {', '.join(allowed)}",
         )
         return allowed[0]
 
@@ -540,6 +592,7 @@ class ImageGrandAgent(Agent):
         previous = state.attempt
         ctx.outcome = None
         if lever is None:
+            ctx.trace.decide("critique", "critic re-ask: the same image is checked again")
             state.critic_reasks_used += 1  # its own counter: not one of the plan's retries
             for record in state.round:
                 if record.image_id and record.verdict is None:
@@ -595,11 +648,13 @@ class ImageGrandAgent(Agent):
             return None
         step = ctx.step(kind)
         if step.status == "done":
+            ctx.trace.decide(kind, "step reused from an earlier attempt (already done, no cost)")
             return None
         await self._save(ctx)  # step boundary: RunState is JSON-complete here
         if not await self._gate(ctx, kind, step):
             return None
         step.status = "running"
+        self._stamp_start(ctx, step)
         self._emit(ctx, step, "started")
         return step
 
@@ -633,7 +688,9 @@ class ImageGrandAgent(Agent):
         # Spend that is running (this branch and `inflight` others, generate + critique each) or
         # still owed (a critique per image already generated) is not charged yet: count it.
         owed = live.pending_critique if kind == "generate" else 0
-        if not self._affordable(ctx, kind, units=1 + live.inflight, owed=owed):
+        if not self._affordable(
+            ctx, kind, units=1 + live.inflight, owed=owed, who=f"branch {record.branch}"
+        ):
             log.warning("supervisor.branch_budget_refused", step=kind, branch=record.branch)
             record.failure = BRANCH_BUDGET
             return False
@@ -654,7 +711,13 @@ class ImageGrandAgent(Agent):
             ctx.state.cancel_requested = True
 
     def _affordable(
-        self, ctx: RunContext, kind: StepKind, *, units: int = 1, owed: int = 0
+        self,
+        ctx: RunContext,
+        kind: StepKind,
+        *,
+        units: int = 1,
+        owed: int = 0,
+        who: str = "step",
     ) -> bool:
         """Can the run afford `units` of this step's paid call, plus what it already owes?
 
@@ -671,17 +734,24 @@ class ImageGrandAgent(Agent):
         elif kind == "supervise":
             weights = {"supervise": 1, "generate": 1, "critique": 1}
         est = self._policy.step_estimates
-        return ctx.state.budget.can_afford(
-            sum(est[k].tokens * w for k, w in weights.items()),
-            sum(est[k].cost_usd * w for k, w in weights.items()) if self._allow_paid else 0.0,
-            sum(est[k].neurons * w for k, w in weights.items()),
-            # retries (and Critic re-asks) may use the reserve
-            use_reserve=(
-                ctx.state.retries_used > 0
-                or ctx.state.critic_reasks_used > 0
-                or kind == "supervise"
-            ),
+        tokens = sum(est[k].tokens * w for k, w in weights.items())
+        cost = sum(est[k].cost_usd * w for k, w in weights.items()) if self._allow_paid else 0.0
+        neurons = sum(est[k].neurons * w for k, w in weights.items())
+        # retries (and Critic re-asks) may use the reserve
+        reserve = (
+            ctx.state.retries_used > 0 or ctx.state.critic_reasks_used > 0 or kind == "supervise"
         )
+        budget = ctx.state.budget
+        ok = budget.can_afford(tokens, cost, neurons, use_reserve=reserve)
+        left = budget.remaining_total() if reserve else budget.remaining_for_steps()
+        ctx.trace.decide(
+            kind,
+            f"guard before {kind} [{who}]: cancel not requested; budget {'ok' if ok else 'REFUSED'}: "
+            f"needs ~{neurons:.0f} neurons / {tokens} tokens / ${cost:.4f}, left "
+            f"{left.neurons:.0f} / {left.tokens} / ${left.cost_usd:.4f} "
+            f"({'incl. the reserve' if reserve else 'reserve held back'})",
+        )
+        return ok
 
     def _refuse_budget(self, ctx: RunContext, step: PlanStep | None, kind: StepKind) -> None:
         log.warning("supervisor.budget_refused", run_id=ctx.state.run_id, step=kind)
@@ -697,6 +767,7 @@ class ImageGrandAgent(Agent):
         skipped (never removed). Without a step (the lever call, which follows the critique),
         the critique step is the one recorded."""
         at = step if step is not None else ctx.step("critique")
+        ctx.trace.decide("guard", f"guard: cancel requested, frozen before step {at.step}")
         ctx.state.cancelled_at_step = at.step
         if step is not None:
             step.status = "skipped"
@@ -706,6 +777,7 @@ class ImageGrandAgent(Agent):
         for item in ctx.state.plan:
             if item.status == "running":
                 item.status = "failed"
+                self._stamp_end(ctx, item)
         if ctx.outcome is None:
             ctx.outcome = Outcome(Status.FAILED, f"internal error: {type(err).__name__}")
 
@@ -767,12 +839,13 @@ class ImageGrandAgent(Agent):
         stop = self._stop(ctx, "enhance")
 
         async def job() -> Envelope:
-            return await self._enhancer.run(
-                Goal(task="enhance", instructions="Write a detailed image prompt."),
-                stop,
-                ctx.auth,
-                inputs,
-            )
+            with tracing.scope(ctx.trace, "enhance", attempt.number):
+                return await self._enhancer.run(
+                    Goal(task="enhance", instructions="Write a detailed image prompt."),
+                    stop,
+                    ctx.auth,
+                    inputs,
+                )
 
         (result,), cancelled = await self._run_jobs(ctx, [job], limit=1)
         if isinstance(result, asyncio.CancelledError) or cancelled:
@@ -786,6 +859,13 @@ class ImageGrandAgent(Agent):
             resolved = self._resolve(env.output, ctx, may_ask=first_pass)
             step.output = {**env.output, "resolved": resolved.model_dump()}
             step.output_ref = f"{ctx.state.run_id}:enhance"
+            ctx.trace.decide(
+                "enhance",
+                f"resolved prompt: {resolved.prompt}; size {resolved.width}x{resolved.height} "
+                f"({resolved.aspect_ratio}); assumptions: {resolved.assumptions or 'none'}; "
+                f"must_have: {env.output.get('must_have')}; dropped as ungrounded: "
+                f"{env.output.get('must_have_dropped') or 'none'}",
+            )
             await self._finish(ctx, step, env)
             # Questions go to the user on the first pass only: a retry has an image in hand
             # and must not stop to ask about something it already got past.
@@ -833,19 +913,20 @@ class ImageGrandAgent(Agent):
                 return
             live.inflight += 1
             try:
-                env = await self._creator.run(
-                    Goal(task="generate", instructions="Create the image."),
-                    self._stop(ctx, "generate"),
-                    ctx.auth,
-                    {
-                        "prompt": resolved.prompt,
-                        "width": resolved.width,
-                        "height": resolved.height,
-                        "seed": record.seed,
-                        "tier": record.tier,
-                        "chain_offset": record.chain_offset,
-                    },
-                )
+                with tracing.scope(ctx.trace, "generate", record.number, record.branch):
+                    env = await self._creator.run(
+                        Goal(task="generate", instructions="Create the image."),
+                        self._stop(ctx, "generate"),
+                        ctx.auth,
+                        {
+                            "prompt": resolved.prompt,
+                            "width": resolved.width,
+                            "height": resolved.height,
+                            "seed": record.seed,
+                            "tier": record.tier,
+                            "chain_offset": record.chain_offset,
+                        },
+                    )
             finally:
                 live.inflight -= 1
             self._charge(ctx, step, env)
@@ -898,16 +979,17 @@ class ImageGrandAgent(Agent):
                 return
             live.inflight += 1
             try:
-                env = await self._critic.run(
-                    Goal(task="critique", instructions="Review the image."),
-                    self._stop(ctx, "critique"),
-                    ctx.auth,
-                    {
-                        "image_id": record.image_id,
-                        "prompt": ctx.user_prompt,
-                        "must_have": enhanced["must_have"],
-                    },
-                )
+                with tracing.scope(ctx.trace, "critique", record.number, record.branch):
+                    env = await self._critic.run(
+                        Goal(task="critique", instructions="Review the image."),
+                        self._stop(ctx, "critique"),
+                        ctx.auth,
+                        {
+                            "image_id": record.image_id,
+                            "prompt": ctx.user_prompt,
+                            "must_have": enhanced["must_have"],
+                        },
+                    )
             finally:
                 live.inflight -= 1
             self._charge(ctx, step, env)
@@ -916,6 +998,9 @@ class ImageGrandAgent(Agent):
                 # image orphaned; it is not delivered and no retry path starts from here.
                 record.verdict = "block"
                 ctx.outcome = Outcome(Status.REJECTED, env.state.reason)
+                ctx.trace.decide("critique", f"image {record.image_id} blocked: {env.state.reason}")
+                if record.image_id:  # the Critic orphaned it; note it in the trace
+                    ctx.trace.orphan(record.image_id, "safety_block")
             elif env.state.status is Status.DONE:
                 record.verdict = "allow"
                 record.quality_score = int(env.output["quality_score"])
@@ -1001,6 +1086,7 @@ class ImageGrandAgent(Agent):
                 failed_step=kind,
                 failure=failure,
             )
+        self._stamp_end(ctx, step)
         self._emit(ctx, step, "finished")
         await self._save(ctx)
 
@@ -1012,12 +1098,28 @@ class ImageGrandAgent(Agent):
             step.branches_aborted = step.branches_total - (step.branches_done or 0)
         ctx.state.cancelled_at_step = step.step
         ctx.outcome = Outcome(Status.CANCELLED, f"cancelled during step {step.step}")
+        ctx.trace.decide("guard", f"in-flight cancel: step {step.step} aborted, plan frozen")
+        self._stamp_end(ctx, step)
         self._emit(ctx, step, "finished")
         await self._save(ctx)
+
+    @staticmethod
+    def _stamp_start(ctx: RunContext, step: PlanStep) -> None:
+        step.started_at, step.finished_at = tracing.now(), None
+        ctx.t0[step.step] = time.perf_counter()
+
+    @staticmethod
+    def _stamp_end(ctx: RunContext, step: PlanStep) -> None:
+        """Developer trace: when the step stopped, and its running time (summed over reruns)."""
+        began = ctx.t0.pop(step.step, None)
+        if began is not None:
+            step.duration_ms += int((time.perf_counter() - began) * 1000)
+        step.finished_at = tracing.now()
 
     async def _finish(self, ctx: RunContext, step: PlanStep, env: Envelope) -> None:
         self._charge(ctx, step, env)
         step.status = _STEP_STATUS.get(env.state.status, "done")
+        self._stamp_end(ctx, step)
         self._emit(ctx, step, "finished")
         await self._save(ctx)
 
@@ -1028,10 +1130,21 @@ class ImageGrandAgent(Agent):
         not be delivered. REJECTED delivers nothing; CANCELLED returns only images the Critic
         had allowed; otherwise the checked images are delivered, best first."""
         state, outcome = ctx.state, ctx.outcome
-        await self._orphan_unchecked(state)
+        await self._orphan_unchecked(ctx)
         checked = [a for a in state.attempts if a.verdict == "allow" and a.image_id]
         # Best first; a tie goes to the earlier attempt (it cost less).
         ranked = sorted(checked, key=lambda a: (-(a.quality_score or 0), a.number, a.branch))
+        ctx.trace.decide(
+            "settle",
+            "ranking (best first): "
+            + (
+                ", ".join(
+                    f"{a.image_id} score {a.quality_score} (round {a.number}, branch {a.branch})"
+                    for a in ranked
+                )
+                or "no checked images"
+            ),
+        )
 
         if any(a.verdict == "block" for a in state.attempts) or (
             outcome is not None and outcome.status is Status.REJECTED
@@ -1040,7 +1153,7 @@ class ImageGrandAgent(Agent):
             # Decided from the records, not only from `outcome`: whatever finished last (a
             # cancel, a budget refusal) must not hide that an image was blocked.
             for a in checked:
-                await self._mark_orphaned(str(a.image_id), ORPHAN_RUN_REJECTED)
+                await self._mark_orphaned(ctx, str(a.image_id), ORPHAN_RUN_REJECTED)
             if outcome is not None and outcome.status is Status.REJECTED:
                 return outcome
             return Outcome(Status.REJECTED, "an image did not pass the safety review")
@@ -1067,7 +1180,7 @@ class ImageGrandAgent(Agent):
                 issues.append(f"{missing} of {ctx.n} requested images could not be created.")
         for a in ranked:
             if a not in delivered:
-                await self._mark_orphaned(str(a.image_id), ORPHAN_SUPERSEDED)
+                await self._mark_orphaned(ctx, str(a.image_id), ORPHAN_SUPERSEDED)
         for position, a in enumerate(
             delivered, start=1
         ):  # every delivered image, not just the best
@@ -1093,11 +1206,11 @@ class ImageGrandAgent(Agent):
         summary = best.summary if ctx.n == 1 else MULTI_SUMMARIES[status]
         return Outcome(status, None, output, summary)
 
-    async def _orphan_unchecked(self, state: RunState) -> None:
+    async def _orphan_unchecked(self, ctx: RunContext) -> None:
         """A generated image the Critic never ruled on is never delivered (spec §10)."""
-        for a in state.attempts:
+        for a in ctx.state.attempts:
             if a.image_id and a.verdict is None:
-                await self._mark_orphaned(a.image_id, ORPHAN_UNCHECKED)
+                await self._mark_orphaned(ctx, a.image_id, ORPHAN_UNCHECKED)
 
     # -- helpers --------------------------------------------------------------------------------
 
@@ -1170,7 +1283,8 @@ class ImageGrandAgent(Agent):
         )
         return []
 
-    async def _mark_orphaned(self, image_id: str, reason: str) -> None:
+    async def _mark_orphaned(self, ctx: RunContext, image_id: str, reason: str) -> None:
+        ctx.trace.orphan(image_id, reason)
         try:
             await self._artifacts.mark_orphaned(image_id, reason)
         except Exception:  # bookkeeping must never change the outcome
@@ -1215,6 +1329,7 @@ def create_image_grand_agent(
     paid_providers: Iterable[str] | None = None,
     allow_paid: bool | None = None,
     seed_source: Callable[[], int] | None = None,
+    trace: Trace | None = None,
 ) -> ImageGrandAgent:
     """Wire the supervisor and its step agents from config. Ports are passed in: nothing here
     builds a concrete store or sink. `images` is the gateway's image backend (Gateway), which
@@ -1249,6 +1364,7 @@ def create_image_grand_agent(
         paid_providers=get_settings().paid_providers if paid_providers is None else paid_providers,
         allow_paid=get_settings().allow_paid if allow_paid is None else allow_paid,
         seed_source=seed_source,
+        trace=trace,
     )
 
 

@@ -13,7 +13,14 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from media_engine.contracts import AuthContext, Plan
-from media_engine.gateway.types import CallResult, LLMRequest, LLMResponse, ReasoningEffort
+from media_engine.gateway.types import (
+    AttemptInfo,
+    CallResult,
+    LLMRequest,
+    LLMResponse,
+    ReasoningEffort,
+    attempt_infos,
+)
 
 ChainResolver = Callable[[str, Plan], str]
 
@@ -37,6 +44,10 @@ class LLMResult(BaseModel):
     neurons: float
     duration_ms: int
     is_fallback: bool
+    # Developer trace only (never reaches an Envelope or an event):
+    attempts: list[AttemptInfo] = []  # every chain entry tried or skipped, in order
+    reasoning_tokens: int | None = None  # None: the provider did not report it
+    reasoning_text: str | None = None  # None: the provider did not return it
 
 
 def _int(value: Any) -> int:
@@ -94,7 +105,17 @@ class LLMGateway:
             neurons=neurons,
             duration_ms=duration_ms,
             is_fallback=result.is_fallback,
+            attempts=attempt_infos(result.attempts),
+            reasoning_tokens=reasoning_tokens(output.usage),
+            reasoning_text=output.reasoning,
         )
+
+
+def reasoning_tokens(usage: Mapping[str, Any]) -> int | None:
+    """OpenAI-style `completion_tokens_details.reasoning_tokens`, if the provider sent it."""
+    details = usage.get("completion_tokens_details")
+    value = details.get("reasoning_tokens") if isinstance(details, Mapping) else None
+    return int(value) if isinstance(value, int | float) else None
 
 
 def chain_resolver(policies: Mapping[str, Any]) -> ChainResolver:

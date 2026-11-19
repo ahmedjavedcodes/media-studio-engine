@@ -20,7 +20,13 @@ from pydantic import BaseModel, Field
 
 from media_engine.contracts import Plan
 from media_engine.gateway.registry import card_or_default
-from media_engine.gateway.types import CallResult, ImageRequest, ImageResponse
+from media_engine.gateway.types import (
+    AttemptInfo,
+    CallResult,
+    ImageRequest,
+    ImageResponse,
+    attempt_infos,
+)
 
 IMAGE_CREATOR = "image_creator"
 
@@ -54,6 +60,8 @@ class ImageResult(BaseModel):
     neurons: float  # actual if reported, else the registry estimate (Cloudflare images)
     duration_ms: int
     is_fallback: bool
+    attempts: list[AttemptInfo] = Field(default_factory=list)  # developer trace only
+    steps: int | None = None  # steps sent (None: the provider's default)
 
 
 class ModelGateway:
@@ -106,6 +114,8 @@ class ModelGateway:
             neurons=neurons,
             duration_ms=duration_ms,
             is_fallback=result.is_fallback,
+            attempts=attempt_infos(result.attempts),
+            steps=steps,
         )
 
 

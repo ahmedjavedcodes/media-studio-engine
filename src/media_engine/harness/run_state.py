@@ -9,6 +9,7 @@ from typing import Any, Literal, NamedTuple
 from pydantic import BaseModel, Field
 
 from media_engine.contracts import AuthContext, Plan, Spend, Status
+from media_engine.harness.trace import CallRecord, Decision, Orphan
 from media_engine.schemas import Lever, Verdict
 
 # The only strings that may reach a user. Internal agent names never appear in events/output.
@@ -32,6 +33,11 @@ class PlanStep(BaseModel):
     branches_aborted: int | None = None
     partial_outputs: list[str] = Field(default_factory=list)
     spend: Spend = Field(default_factory=Spend)
+    # Timing (developer trace). `started_at` / `finished_at` are the LAST run of the step; the
+    # duration adds up every run (a retry that redoes the step adds to it).
+    started_at: str | None = None
+    finished_at: str | None = None
+    duration_ms: int = 0
 
 
 class AttemptRecord(BaseModel):
@@ -137,6 +143,11 @@ class RunState(BaseModel):
     cancelled_at_step: int | None = None
     events: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime | None = None  # when the run settled (developer trace)
+    # Developer trace (see harness/trace.py). Never reaches an Envelope or an event.
+    calls: list[CallRecord] = Field(default_factory=list)  # one per model call, in order
+    decisions: list[Decision] = Field(default_factory=list)
+    orphaned: list[Orphan] = Field(default_factory=list)
 
     @property
     def attempt(self) -> AttemptRecord:

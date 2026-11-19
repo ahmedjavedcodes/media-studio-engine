@@ -77,6 +77,7 @@ def build(
     events: Any = None,
     cfg: Any = CFG,
     allow_paid: bool = False,
+    trace: Any = None,
 ) -> ImageGrandAgent:
     seeds = itertools.count(100)  # 100 for the first attempt, 101 for the next, ...
     return create_image_grand_agent(
@@ -89,6 +90,7 @@ def build(
         paid_providers=("openrouter",),
         allow_paid=allow_paid,
         seed_source=lambda: next(seeds),
+        trace=trace,
     )
 
 

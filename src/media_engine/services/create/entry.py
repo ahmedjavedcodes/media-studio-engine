@@ -45,6 +45,8 @@ from media_engine.contracts import (
 from media_engine.core.logging import get_logger
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.gateway.router import Gateway
+from media_engine.harness import trace as tracing
+from media_engine.harness.trace import Trace
 from media_engine.ports import (
     ArtifactStore,
     EventSink,
@@ -96,9 +98,14 @@ async def create_images(
     events: EventSink | None = None,
     cfg: CreateConfig | None = None,
     seed_source: Callable[[], int] | None = None,
+    trace: Trace | None = None,
 ) -> Envelope:
     """Turn `prompt` into `n` quality-checked images. See the supervisor's docstring for the
-    envelope's output. Never talks to the user: NEEDS_INPUT and ESCALATE are returned upward."""
+    envelope's output. Never talks to the user: NEEDS_INPUT and ESCALATE are returned upward.
+
+    `trace` (optional): a developer `Trace` the caller keeps, to read what the run did while it is
+    still going (every model call, every decision). It is a separate channel: nothing in it
+    reaches the Envelope or an event."""
     cfg = cfg or get_create_config()
     if not prompt.strip():
         return _invalid("no prompt given")
@@ -109,18 +116,29 @@ async def create_images(
     sink = events if events is not None else ListEventSink()
     run_id = run_id or f"run_{uuid.uuid4().hex}"
     llm = LLMGateway(backend, chain_resolver(cfg.agents))
+    trace = trace or Trace()
 
     # 1. route: one small call. A failure defaults to "simple" (see the router).
     router = Router(
         AgentConfig.from_policy("router", cfg.agent("router"), RouteDecision), llm, sink
     )
-    routed = await router.run(
-        Goal(task="route", instructions="Decide how much work the request needs."),
-        cfg.policy.stopping_condition("route", auth.plan, "a route: simple or complex"),
-        auth,
-        {"prompt": prompt},
-    )
+    with tracing.scope(trace, "route", 0):  # the router's call is seq 1 of the run's trace
+        routed = await router.run(
+            Goal(task="route", instructions="Decide how much work the request needs."),
+            cfg.policy.stopping_condition("route", auth.plan, "a route: simple or complex"),
+            auth,
+            {"prompt": prompt},
+        )
     route = routed.output.get("route", "simple")
+    trace.decide(
+        "route",
+        f"route = {route}"
+        + (
+            " (DEFAULTED: the router call failed or was unusable)"
+            if routed.output.get("defaulted")
+            else ""
+        ),
+    )
     log.info("create.routed", run_id=run_id, route=route)
 
     # 2. hand over
@@ -144,6 +162,7 @@ async def create_images(
             events=sink,
             run_store=run_store or InMemoryRunStore(),
             seed_source=seed_source,
+            trace=trace,
         )
         inputs: dict[str, Any] = {
             "prompt": prompt,

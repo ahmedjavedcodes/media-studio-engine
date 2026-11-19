@@ -38,6 +38,9 @@ from media_engine.gateway.errors import (
     GatewayError,
 )
 from media_engine.gateway.llm_gateway import LLMGateway, LLMResult
+from media_engine.gateway.types import attempt_infos
+from media_engine.harness import trace as tracing
+from media_engine.harness.trace import CallRecord
 from media_engine.ports.event_sink import EventSink
 from media_engine.schemas import FailureKind
 
@@ -87,6 +90,7 @@ class Structured[T: BaseModel]:
     error: str | None = None
     failure: FailureKind | None = None  # set whenever output is None
     calls: list[LLMResult] = field(default_factory=list)
+    records: list[CallRecord] = field(default_factory=list)  # developer trace, same calls
 
     @property
     def ok(self) -> bool:
@@ -247,6 +251,7 @@ class Agent(ABC):
         if parsed is not None:
             result.output = parsed
             return
+        self._mark_unusable(result)
 
         repair = render(
             load_prompt(REPAIR_PROMPT), error=error or "", schema=self.schema_json(output_model)
@@ -282,7 +287,7 @@ class Agent(ABC):
             est_prompt_tokens=est_prompt,
             completion_cap=repair_cap,
         )
-        second = await self._complete(auth, repair_messages, repair_cap, result)
+        second = await self._complete(auth, repair_messages, repair_cap, result, was_repair=True)
         if result.spend.tokens > stop.max_tokens:
             log.warning(
                 "agent.token_budget_overrun",
@@ -294,6 +299,7 @@ class Agent(ABC):
         if parsed is not None:
             result.output = parsed
         else:
+            self._mark_unusable(result)
             result.error = f"invalid output after one repair attempt:\n{error}"
 
     async def _complete[T: BaseModel](
@@ -302,24 +308,118 @@ class Agent(ABC):
         messages: list[dict[str, Any]],
         max_tokens: int,
         result: Structured[T],
+        *,
+        was_repair: bool = False,
     ) -> LLMResult:
         if self._gateway is None:  # pragma: no cover - checked in call_structured
             raise RuntimeError(f"Agent {self.name!r} has no LLM gateway")
         # Count the call before awaiting it, so a call cut off by the deadline is still counted.
         result.spend = result.spend.plus(Spend(llm_calls=1))
-        reply = await self._gateway.complete(
-            self.name,
-            auth,
-            messages,
-            max_tokens=max_tokens,
-            json_mode=True,
-            reasoning_effort=self.config.model_policy.reasoning_effort,
-        )
+        started_at, started = tracing.now(), time.perf_counter()
+        try:
+            reply = await self._gateway.complete(
+                self.name,
+                auth,
+                messages,
+                max_tokens=max_tokens,
+                json_mode=True,
+                reasoning_effort=self.config.model_policy.reasoning_effort,
+            )
+        except BaseException as err:  # trace the call that never returned, then re-raise
+            self._trace_failed(result, messages, err, was_repair, started_at, started)
+            raise
         result.calls.append(reply)
         result.spend = result.spend.plus(
             Spend(tokens=reply.tokens, cost_usd=reply.cost_usd, neurons=reply.neurons)
         )
+        self._trace_reply(result, messages, reply, was_repair, started_at)
         return reply
+
+    # -- developer trace (no model call: it only reads what the gateway already returned) --------
+
+    def _trace_reply(
+        self,
+        result: Structured[Any],
+        messages: list[dict[str, Any]],
+        reply: LLMResult,
+        was_repair: bool,
+        started_at: str,
+    ) -> None:
+        scope = tracing.current()
+        if scope is None:
+            return
+        estimated = reply.tokens == 0 and reply.prompt_tokens == 0 and reply.completion_tokens == 0
+        prompt = estimate_tokens(messages) if estimated else reply.prompt_tokens
+        completion = estimate_tokens(reply.text) if estimated else reply.completion_tokens
+        record = scope.trace.add_call(
+            ts=started_at,
+            step=scope.step,
+            role=self.name,
+            attempt=scope.attempt,
+            branch=scope.branch,
+            chain=reply.chain,
+            provider=reply.provider,
+            model=reply.model,
+            was_fallback=reply.is_fallback,
+            attempts=reply.attempts,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            reasoning_tokens=reply.reasoning_tokens,
+            total_tokens=(prompt + completion) if estimated else reply.tokens,
+            tokens_estimated=estimated,
+            reasoning_effort=self.config.model_policy.reasoning_effort,
+            neurons=reply.neurons,
+            cost_usd=reply.cost_usd,
+            duration_ms=reply.duration_ms,
+            was_repair=was_repair,
+            request_text=tracing.messages_text(messages),
+            reply_text=reply.text,
+            reasoning_text=reply.reasoning_text,
+        )
+        result.records.append(record)
+
+    def _trace_failed(
+        self,
+        result: Structured[Any],
+        messages: list[dict[str, Any]],
+        err: BaseException,
+        was_repair: bool,
+        started_at: str,
+        started: float,
+    ) -> None:
+        scope = tracing.current()
+        if scope is None:
+            return
+        failure: str
+        if isinstance(err, GatewayError):
+            failure = gateway_failure(err)
+            attempts = attempt_infos(getattr(err, "attempts", []) or [])
+        elif isinstance(err, Exception):
+            failure, attempts = "internal", []
+        else:  # a cancel or the step deadline cut the call off
+            failure, attempts = "aborted", []
+        neurons = float(getattr(err, "neurons", 0.0) or 0.0)
+        record = scope.trace.add_call(
+            ts=started_at,
+            step=scope.step,
+            role=self.name,
+            attempt=scope.attempt,
+            branch=scope.branch,
+            attempts=attempts,
+            reasoning_effort=self.config.model_policy.reasoning_effort,
+            neurons=neurons,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            was_repair=was_repair,
+            failure=failure,
+            request_text=tracing.messages_text(messages),
+        )
+        result.records.append(record)
+
+    @staticmethod
+    def _mark_unusable(result: Structured[Any]) -> None:
+        """The reply could not be parsed into the output model: say so on its trace record."""
+        if result.records and result.records[-1].failure is None:
+            result.records[-1].failure = "invalid_output"
 
     # -- envelopes --------------------------------------------------------------------------
 
