@@ -1,0 +1,15 @@
+# Defaults the Image Grand Agent uses to answer the Enhancer's `missing_info` locally before
+# escalating. Keys under `defaults` are the questions it can answer on its own.
+# Sizes stay <= 1024 per side (flux-1-schnell max_side).
+
+defaults:
+  aspect_ratio: "1:1"
+  style: "natural, photographic"
+  size: {width: 1024, height: 1024}
+
+aspect_ratios:
+  "1:1": {width: 1024, height: 1024}
+  "4:3": {width: 1024, height: 768}
+  "3:4": {width: 768, height: 1024}
+  "16:9": {width: 1024, height: 576}
+  "9:16": {width: 576, height: 1024}

@@ -8,6 +8,13 @@ reasoning: # planner, brief, router, critic
   - groq/openai/gpt-oss-120b
   - openrouter/openai/gpt-oss-120b
 
+# critic (image in, structured JSON out). Model IDs UNVERIFIED: confirm with a free smoke call
+# before M5. Paid slot is a placeholder, so the router skips it.
+vision:
+  - cloudflare/@cf/meta/llama-4-scout-17b-16e-instruct
+  - cloudflare/@cf/google/gemma-3-12b-it
+  - openrouter/<paid vision>
+
 fast_llm: # prompt agent, small tasks
   - cloudflare/@cf/openai/gpt-oss-20b
   - groq/openai/gpt-oss-20b

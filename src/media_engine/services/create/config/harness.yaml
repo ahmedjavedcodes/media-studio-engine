@@ -1,0 +1,35 @@
+# Image-creation harness policy. Every threshold, cap and estimate lives here, not in code.
+# Budget and threshold values are build-phase placeholders: product to confirm.
+
+quality_threshold: {free: 6, pro: 7, max: 7, ultra: 8} # retry when quality_score < threshold
+
+max_retries: {free: 1, pro: 2, max: 2, ultra: 2}
+
+levers: # which plans may use each retry lever
+  reseed: [free, pro, max, ultra]
+  re_enhance: [free, pro, max, ultra]
+  switch_model: [pro, max, ultra]
+  raise_tier: [max, ultra]
+
+max_parallel_branches: 4
+max_images_per_request: 4
+
+budgets: # per run. reserve_fraction is held back for retries.
+  free: {tokens_total: 12000, cost_cap_usd: 0.0, reserve_fraction: 0.30}
+  pro: {tokens_total: 24000, cost_cap_usd: 0.20, reserve_fraction: 0.30}
+  max: {tokens_total: 48000, cost_cap_usd: 0.50, reserve_fraction: 0.30}
+  ultra: {tokens_total: 96000, cost_cap_usd: 1.00, reserve_fraction: 0.30}
+
+step_estimates: # pre-flight estimates used by Budget.can_afford before each step
+  route: {tokens: 400, cost_usd: 0.0}
+  enhance: {tokens: 1500, cost_usd: 0.0}
+  generate: {tokens: 0, cost_usd: 0.0} # per image; free chain
+  critique: {tokens: 1500, cost_usd: 0.0} # per image
+  supervise: {tokens: 800, cost_usd: 0.0} # lever choice / escalation call
+
+deadlines_ms: # per-call timeout handed down in StoppingCondition
+  route: 10000
+  enhance: 20000
+  generate: 60000
+  critique: 30000
+  supervise: 15000

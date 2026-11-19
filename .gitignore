@@ -9,3 +9,4 @@ outputs/
 .pytest_cache/
 .coverage
 .cache/
+.artifacts/
