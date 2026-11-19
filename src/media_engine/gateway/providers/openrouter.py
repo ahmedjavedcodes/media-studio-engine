@@ -117,9 +117,16 @@ class OpenRouterProvider(Provider):
     def is_configured(self) -> bool:
         return self._key is not None
 
-    def _headers(self) -> dict[str, str]:
-        assert self._key is not None
-        return {"Authorization": f"Bearer {self._key.get_secret_value()}"}
+    def _headers(self, model: str) -> dict[str, str]:
+        return self._bearer(model, self._key, "OPENROUTER_API_KEY")
+
+    def _error_from_response(self, model: str, response: httpx.Response) -> ProviderError:
+        error = super()._error_from_response(model, response)
+        # Moderation: 403 with error.metadata.reasons (OpenRouter errors reference). A 403
+        # without reasons is something else (spending limit, permissions), not a refusal.
+        if response.status_code == 403 and _moderation_reasons(response):
+            error.refused = True
+        return error
 
     # -- chat ---------------------------------------------------------------------------------
 
@@ -140,7 +147,7 @@ class OpenRouterProvider(Provider):
         response = await self._post(
             model,
             f"{self._base}/chat/completions",
-            headers=self._headers(),
+            headers=self._headers(model),
             json=payload,
             timeout=DEFAULT_TIMEOUT,
         )
@@ -208,7 +215,7 @@ class OpenRouterProvider(Provider):
         response = await self._post(
             model,
             f"{self._base}/images",
-            headers=self._headers(),
+            headers=self._headers(model),
             json=payload,
             timeout=IMAGE_TIMEOUT,
         )
@@ -220,6 +227,17 @@ class OpenRouterProvider(Provider):
         if not images:
             raise ProviderError(self.name, model, "response contained no images", status=502)
         return ImageResponse(images=images, cost_usd=_cost(data))
+
+
+def _moderation_reasons(response: httpx.Response) -> list[Any]:
+    try:
+        body = response.json()
+    except ValueError:
+        return []
+    error = body.get("error") if isinstance(body, dict) else None
+    metadata = error.get("metadata") if isinstance(error, dict) else None
+    reasons = metadata.get("reasons") if isinstance(metadata, dict) else None
+    return reasons if isinstance(reasons, list) else []
 
 
 def _cost(data: dict[str, Any]) -> float | None:

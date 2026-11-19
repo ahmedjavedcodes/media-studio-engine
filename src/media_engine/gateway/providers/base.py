@@ -5,6 +5,7 @@ from abc import ABC
 from typing import Any
 
 import httpx
+from pydantic import SecretStr
 
 from media_engine.gateway.errors import ProviderError
 from media_engine.gateway.types import ImageRequest, ImageResponse, LLMRequest, LLMResponse
@@ -31,6 +32,15 @@ class Provider(ABC):
         raise ProviderError(self.name, model, "images not supported by this provider", status=400)
 
     # -- shared helpers ---------------------------------------------------------------------
+
+    def _bearer(self, model: str, secret: SecretStr | None, env_name: str) -> dict[str, str]:
+        """Auth header. The gateway skips unconfigured providers, so a missing key here is our
+        bug: raised as a 400 (never falls back), not an assert that `python -O` would strip."""
+        if secret is None:
+            raise ProviderError(
+                self.name, model, f"{env_name} is not set; provider not configured", status=400
+            )
+        return {"Authorization": f"Bearer {secret.get_secret_value()}"}
 
     async def _post(self, model: str, url: str, **kwargs: Any) -> httpx.Response:
         try:
@@ -94,11 +104,17 @@ def parse_error_body(response: httpx.Response) -> tuple[int | str | None, str | 
 
 def parse_chat_completion(provider: str, model: str, data: dict[str, Any]) -> LLMResponse:
     try:
-        message = data["choices"][0]["message"]
+        choice = data["choices"][0]
+        message = choice["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise ProviderError(
             provider, model, "malformed chat completion response", status=502
         ) from exc
+    if choice.get("finish_reason") == "content_filter":
+        # OpenAI-compatible signal that the provider's filter withheld the reply.
+        raise ProviderError(
+            provider, model, "reply withheld by content filter", status=200, refused=True
+        )
     reasoning = message.get("reasoning") or message.get("reasoning_content")
     return LLMResponse(
         text=message.get("content") or "",

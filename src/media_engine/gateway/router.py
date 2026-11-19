@@ -1,10 +1,16 @@
-"""The gateway: the only door for model calls. Walks a fallback chain and logs every step."""
+"""The gateway: the only door for model calls. Walks a fallback chain and logs every step.
+
+Per chain entry, three independent checks decide whether to call it: `fallback.py` rules
+(quota exhausted, model disabled, cooling down), the per-provider circuit breaker
+(`breaker.py`), and the caller's deadline. A content refusal or a 400 stops the chain."""
 
 from __future__ import annotations
 
 import asyncio
 import time
+from asyncio import FIRST_COMPLETED
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +21,15 @@ from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_aft
 from media_engine.core.config import Settings, get_settings
 from media_engine.core.logging import get_logger
 from media_engine.core.telemetry import traced
+from media_engine.gateway.breaker import BreakerBoard, CircuitBreaker, Permit, Verdict, verdict_for
 from media_engine.gateway.budget import DailyCostMeter, DailyNeuronMeter, estimate_image_neurons
-from media_engine.gateway.errors import AllProvidersFailed, BadRequestError, ProviderError
+from media_engine.gateway.errors import (
+    AllProvidersFailed,
+    BadRequestError,
+    ContentRefused,
+    DeadlineExceeded,
+    ProviderError,
+)
 from media_engine.gateway.fallback import (
     MAX_ATTEMPTS,
     Action,
@@ -38,6 +51,8 @@ from media_engine.gateway.types import (
 CHAINS_PATH = Path(__file__).with_name("chains.yaml")
 
 log = get_logger("gateway")
+
+Invoke = Callable[[Provider, str], Awaitable[LLMResponse | ImageResponse]]
 
 
 def parse_ref(entry: str) -> ModelRef:
@@ -64,7 +79,32 @@ def _safe_outputs(result: CallResult) -> dict[str, Any]:
     return result.summary()
 
 
+class _DeadlineHit(Exception):
+    """Internal: the caller's deadline ran out inside one chain entry. Not a ProviderError, so
+    the retry predicate never retries it; `_run` turns it into `DeadlineExceeded`."""
+
+
+@dataclass(frozen=True)
+class _Deadline:
+    """The caller's budget for one chain walk. Uses time.monotonic, the clock asyncio.timeout
+    effectively counts in, never the injectable breaker clock."""
+
+    budget_s: float
+    at: float
+
+    @classmethod
+    def start(cls, budget_s: float | None) -> _Deadline | None:
+        return None if budget_s is None else cls(budget_s, time.monotonic() + budget_s)
+
+    def remaining(self) -> float:
+        return self.at - time.monotonic()
+
+
 class Gateway:
+    """The fallback-chain gateway. Create ONE instance per process and share it: what it
+    learns about providers (AvailabilityState, circuit breakers, daily meters) lives on the
+    instance, so a second instance would start blind and re-pay every timeout."""
+
     def __init__(
         self,
         settings: Settings | None = None,
@@ -76,6 +116,7 @@ class Gateway:
         cost_meter: DailyCostMeter | None = None,
         client: httpx.AsyncClient | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        breakers: BreakerBoard | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self._owns_client = client is None
@@ -85,6 +126,7 @@ class Gateway:
         self.state = state or AvailabilityState()
         self.meter = meter or DailyNeuronMeter()
         self.cost_meter = cost_meter or DailyCostMeter()
+        self.breakers = breakers or BreakerBoard()
         self._sleep = sleep
 
     async def aclose(self) -> None:
@@ -94,11 +136,15 @@ class Gateway:
     # -- public API -------------------------------------------------------------------------
 
     @traced("gateway.chat", process_inputs=_safe_inputs, process_outputs=_safe_outputs)
-    async def chat(self, task: str, request: LLMRequest) -> CallResult:
-        return await self._run(task, "llm", lambda p, m: p.chat(m, request))
+    async def chat(
+        self, task: str, request: LLMRequest, *, deadline_s: float | None = None
+    ) -> CallResult:
+        return await self._run(task, "llm", lambda p, m: p.chat(m, request), deadline_s=deadline_s)
 
     @traced("gateway.image", process_inputs=_safe_inputs, process_outputs=_safe_outputs)
-    async def image(self, task: str, request: ImageRequest) -> CallResult:
+    async def image(
+        self, task: str, request: ImageRequest, *, deadline_s: float | None = None
+    ) -> CallResult:
         return await self._run(
             task,
             "image",
@@ -106,6 +152,7 @@ class Gateway:
             estimate=lambda ref: estimate_image_neurons(
                 card_or_default(ref.provider, ref.model, "image"), request
             ),
+            deadline_s=deadline_s,
         )
 
     # -- internals --------------------------------------------------------------------------
@@ -114,127 +161,258 @@ class Gateway:
         self,
         task: str,
         kind: Kind,
-        invoke: Callable[[Provider, str], Awaitable[LLMResponse | ImageResponse]],
+        invoke: Invoke,
         estimate: Callable[[ModelRef], float | None] | None = None,
+        deadline_s: float | None = None,
     ) -> CallResult:
+        """Walk the chain. `deadline_s` bounds the whole walk, retries, fallbacks and probe
+        waits included: each call gets only the time that is left, and is cancelled (httpx
+        aborts the request) when it runs out.
+
+        Probe window: if an entry is skipped only because another request is probing its
+        provider (half-open), and nothing else in the chain works, wait for that probe's
+        verdict and then retry just the entries that were skipped for it. On the free path
+        Cloudflare is the only image provider, so without this every concurrent request (M8
+        branches) would fail for the length of a probe."""
         if task not in self.chains:
             raise ValueError(f"Unknown task {task!r}; known: {sorted(self.chains)}")
         if task_kind(task) != kind:
             raise ValueError(f"Task {task!r} is a {task_kind(task)} task, not {kind}")
 
-        chain = self.chains[task]
         attempts: list[Attempt] = []
+        deadline = _Deadline.start(deadline_s)
+        entries = list(enumerate(self.chains[task]))
 
-        for index, ref in enumerate(chain):
-            skip = self._skip_reason(ref)
-            if skip is not None:
-                attempts.append(Attempt(ref.provider, ref.model, "skipped", reason=skip))
-                log.info(
-                    "gateway.skip", task=task, provider=ref.provider, model=ref.model, reason=skip
-                )
-                continue
-
-            provider = self.providers[ref.provider]
-            started = time.perf_counter()
-            calls = 0
-
-            async def call(provider: Provider = provider, ref: ModelRef = ref) -> Any:
-                nonlocal calls
-                calls += 1
-                return await invoke(provider, ref.model)
-
-            try:
-                output = await self._with_retry(call, ref)
-            except ProviderError as err:
-                decision = decide(err, calls, self.state.now())
-                self.state.apply(ref.provider, ref.model, decision)
-                latency_ms = (time.perf_counter() - started) * 1000
-                attempts.append(
-                    Attempt(
-                        ref.provider,
-                        ref.model,
-                        "failed",
-                        reason=decision.reason,
-                        status=err.status,
-                        code=err.code,
-                        calls=calls,
+        for walk in (1, 2):
+            waiting: list[tuple[int, ModelRef]] = []
+            probes: dict[str, CircuitBreaker] = {}
+            for index, ref in entries:
+                skip = self._skip_reason(ref)
+                permit: Permit | None = None
+                if skip is None:
+                    # Breaker last: a PROBE permit claims the half-open slot, and every path in
+                    # _attempt hands it back.
+                    breaker = self.breakers.get(ref.provider)
+                    permit = breaker.allow()
+                    if not permit.allowed:
+                        skip = breaker.skip_reason
+                        if breaker.probe_in_flight:
+                            waiting.append((index, ref))
+                            probes[ref.provider] = breaker
+                if skip is not None or permit is None:
+                    attempts.append(Attempt(ref.provider, ref.model, "skipped", reason=skip))
+                    log.info(
+                        "gateway.skip",
+                        task=task,
+                        provider=ref.provider,
+                        model=ref.model,
+                        reason=skip,
+                        walk=walk,
                     )
+                    continue
+                result = await self._attempt(
+                    task, index, ref, invoke, estimate, permit, attempts, deadline
                 )
-                fields: dict[str, Any] = {
-                    "task": task,
-                    "provider": ref.provider,
-                    "model": ref.model,
-                    "reason": decision.reason,
-                    "status": err.status,
-                    "code": err.code,
-                    "calls": calls,
-                    "latency_ms": round(latency_ms, 1),
-                    "message": err.message[:200],
-                }
-                if decision.action is Action.RAISE:
-                    log.error("gateway.bad_request", **fields)
-                    raise BadRequestError(err) from err
-                getattr(log, decision.severity)(
-                    "gateway.fallback",
-                    next_action="next_provider",
-                    exhausted_until=decision.exhausted_until.isoformat()
-                    if decision.exhausted_until
-                    else None,
-                    model_disabled=decision.disable_model,
-                    **fields,
-                )
-                continue
-
-            latency_ms = (time.perf_counter() - started) * 1000
-            attempts.append(Attempt(ref.provider, ref.model, "success", calls=calls))
-            neurons: float | None = None
-            neurons_est: float | None = None
-            daily_total: float | None = None
-            if ref.provider == "cloudflare":
-                if isinstance(output, LLMResponse):
-                    raw = output.usage.get("neurons")
-                    neurons = float(raw) if isinstance(raw, int | float) else None
-                if neurons is None and estimate is not None:
-                    neurons_est = estimate(ref)
-                daily_total = self.meter.add(actual=neurons, estimate=neurons_est)
-            cost_usd = output.cost_usd
-            daily_cost = self.cost_meter.add(cost_usd) if cost_usd is not None else None
-            result = CallResult(
-                output=output,
-                task=task,
-                provider=ref.provider,
-                model=ref.model,
-                latency_ms=latency_ms,
-                is_fallback=index > 0,
-                neurons=neurons,
-                neurons_est=neurons_est,
-                daily_neurons_total=daily_total,
-                cost_usd=cost_usd,
-                daily_cost_usd_total=daily_cost,
-                attempts=attempts,
-            )
-            usage = output.usage if isinstance(output, LLMResponse) else {}
-            log.info(
-                "gateway.call",
-                task=task,
-                provider=ref.provider,
-                model=ref.model,
-                latency_ms=round(latency_ms, 1),
-                calls=calls,
-                is_fallback=result.is_fallback,
-                neurons=neurons,
-                neurons_est=neurons_est,
-                daily_neurons_total=daily_total,
-                cost_usd=cost_usd,
-                daily_cost_usd_total=daily_cost,
-                usage=usage,
-            )
-            return result
+                if result is not None:
+                    return result
+            if walk == 2 or not waiting:
+                break
+            await self._await_probes(task, list(probes.values()), deadline, attempts)
+            entries = waiting
 
         log.error("gateway.all_failed", task=task, attempts=[vars(a) for a in attempts])
         raise AllProvidersFailed(task, attempts)
 
+    async def _await_probes(
+        self,
+        task: str,
+        probes: list[CircuitBreaker],
+        deadline: _Deadline | None,
+        attempts: list[Attempt],
+    ) -> None:
+        """Wait until the first in-flight probe reports back, within the deadline."""
+        timeout = None if deadline is None else deadline.remaining()
+        if timeout is not None and timeout <= 0:
+            raise DeadlineExceeded(task, deadline.budget_s if deadline else 0.0, attempts)
+        log.info("gateway.probe_wait", task=task, providers=[b.provider for b in probes])
+        waits = [asyncio.ensure_future(b.wait_for_probe()) for b in probes]
+        try:
+            done, _ = await asyncio.wait(waits, timeout=timeout, return_when=FIRST_COMPLETED)
+        finally:
+            for w in waits:
+                w.cancel()
+        if not done:
+            if deadline is None:  # pragma: no cover - asyncio.wait without timeout always waits
+                raise RuntimeError("probe wait ended without a result or a deadline")
+            log.warning("gateway.deadline_exceeded", task=task, during="probe_wait")
+            raise DeadlineExceeded(task, deadline.budget_s, attempts)
+
+    async def _attempt(
+        self,
+        task: str,
+        index: int,
+        ref: ModelRef,
+        invoke: Invoke,
+        estimate: Callable[[ModelRef], float | None] | None,
+        permit: Permit,
+        attempts: list[Attempt],
+        deadline: _Deadline | None,
+    ) -> CallResult | None:
+        """Try one chain entry (with its retry). Returns the result, or None to move on.
+        Raises ContentRefused / BadRequestError / DeadlineExceeded to stop the chain. Every
+        path reports the breaker permit back exactly once."""
+        provider = self.providers[ref.provider]
+        breaker = self.breakers.get(ref.provider)
+        started = time.perf_counter()
+        calls = 0
+        cut_off = False  # a call was cancelled mid-flight by the deadline
+        last_error: ProviderError | None = None
+
+        async def call() -> LLMResponse | ImageResponse:
+            nonlocal calls, cut_off, last_error
+            if deadline is not None and deadline.remaining() <= 0:
+                raise _DeadlineHit
+            calls += 1
+            try:
+                if deadline is None:
+                    return await invoke(provider, ref.model)
+                scope = asyncio.timeout(deadline.remaining())
+                try:
+                    async with scope:
+                        return await invoke(provider, ref.model)
+                except TimeoutError:
+                    if not scope.expired():
+                        raise
+                    cut_off = True
+                    raise _DeadlineHit from None
+            except ProviderError as err:
+                last_error = err
+                raise
+
+        try:
+            output = await self._with_retry(call, ref)
+        except _DeadlineHit:
+            if deadline is None:  # _DeadlineHit is only raised when a deadline is set
+                raise RuntimeError("deadline hit without a deadline") from None
+            provider_down = cut_off or (
+                last_error is not None and verdict_for(last_error) is Verdict.FAILURE
+            )
+            if provider_down:
+                breaker.report(Verdict.FAILURE, permit)
+            else:
+                breaker.release(permit)  # our deadline, not the provider's fault
+            attempts.append(
+                Attempt(ref.provider, ref.model, "failed", reason="deadline", calls=calls)
+            )
+            log.warning(
+                "gateway.deadline_exceeded",
+                task=task,
+                provider=ref.provider,
+                model=ref.model,
+                deadline_s=deadline.budget_s,
+                calls=calls,
+                cut_off=cut_off,
+            )
+            raise DeadlineExceeded(task, deadline.budget_s, attempts) from None
+        except ProviderError as err:
+            decision = decide(err, calls, self.state.now())
+            self.state.apply(ref.provider, ref.model, decision)
+            breaker.report(verdict_for(err), permit)
+            latency_ms = (time.perf_counter() - started) * 1000
+            attempts.append(
+                Attempt(
+                    ref.provider,
+                    ref.model,
+                    "failed",
+                    reason=decision.reason,
+                    status=err.status,
+                    code=err.code,
+                    calls=calls,
+                )
+            )
+            fields: dict[str, Any] = {
+                "task": task,
+                "provider": ref.provider,
+                "model": ref.model,
+                "reason": decision.reason,
+                "status": err.status,
+                "code": err.code,
+                "calls": calls,
+                "latency_ms": round(latency_ms, 1),
+                "message": err.message[:200],
+            }
+            if decision.action is Action.REFUSE:
+                log.warning("gateway.content_refused", **fields)
+                raise ContentRefused(err, task) from err
+            if decision.action is Action.RAISE:
+                log.error("gateway.bad_request", **fields)
+                raise BadRequestError(err) from err
+            getattr(log, decision.severity)(
+                "gateway.fallback",
+                next_action="next_provider",
+                exhausted_until=decision.exhausted_until.isoformat()
+                if decision.exhausted_until
+                else None,
+                model_disabled=decision.disable_model,
+                breaker=breaker.state.value,
+                **fields,
+            )
+            return None
+        except BaseException:
+            # Cancelled from outside (run cancel, step deadline) or an unexpected bug: we
+            # learned nothing about the provider. Free our probe slot if we held it, re-raise.
+            breaker.release(permit)
+            raise
+
+        breaker.report(Verdict.SUCCESS, permit)
+        latency_ms = (time.perf_counter() - started) * 1000
+        attempts.append(Attempt(ref.provider, ref.model, "success", calls=calls))
+        neurons: float | None = None
+        neurons_est: float | None = None
+        daily_total: float | None = None
+        if ref.provider == "cloudflare":
+            if isinstance(output, LLMResponse):
+                raw = output.usage.get("neurons")
+                neurons = float(raw) if isinstance(raw, int | float) else None
+            if neurons is None and estimate is not None:
+                neurons_est = estimate(ref)
+            daily_total = self.meter.add(actual=neurons, estimate=neurons_est)
+        cost_usd = output.cost_usd
+        daily_cost = self.cost_meter.add(cost_usd) if cost_usd is not None else None
+        result = CallResult(
+            output=output,
+            task=task,
+            provider=ref.provider,
+            model=ref.model,
+            latency_ms=latency_ms,
+            is_fallback=index > 0,
+            neurons=neurons,
+            neurons_est=neurons_est,
+            daily_neurons_total=daily_total,
+            cost_usd=cost_usd,
+            daily_cost_usd_total=daily_cost,
+            attempts=attempts,
+        )
+        usage = output.usage if isinstance(output, LLMResponse) else {}
+        log.info(
+            "gateway.call",
+            task=task,
+            provider=ref.provider,
+            model=ref.model,
+            latency_ms=round(latency_ms, 1),
+            calls=calls,
+            is_fallback=result.is_fallback,
+            neurons=neurons,
+            neurons_est=neurons_est,
+            daily_neurons_total=daily_total,
+            cost_usd=cost_usd,
+            daily_cost_usd_total=daily_cost,
+            usage=usage,
+        )
+        return result
+
     def _skip_reason(self, ref: ModelRef) -> str | None:
+        """Every reason to skip an entry except the breaker, which _run checks last."""
         if ref.is_placeholder:
             return "placeholder"
         provider = self.providers.get(ref.provider)

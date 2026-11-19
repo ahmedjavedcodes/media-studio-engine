@@ -25,7 +25,6 @@ class GroqProvider(Provider):
         return self._key is not None
 
     async def chat(self, model: str, request: LLMRequest) -> LLMResponse:
-        assert self._key is not None
         card = card_or_default(self.name, model, "llm")
         payload: dict[str, Any] = {"model": model, "messages": request.messages}
         if request.temperature is not None:
@@ -47,7 +46,7 @@ class GroqProvider(Provider):
         response = await self._post(
             model,
             f"{BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {self._key.get_secret_value()}"},
+            headers=self._bearer(model, self._key, "GROQ_API_KEY"),
             json=payload,
             timeout=DEFAULT_TIMEOUT,
         )

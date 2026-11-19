@@ -1,0 +1,19 @@
+# Provider health policy for the gateway. Config, not code. Chains live in chains.yaml.
+#
+# Circuit breaker, one per provider (shared by every model, task and request on that provider).
+#   failure_threshold: consecutive FAILURE verdicts that open the breaker. A FAILURE is a
+#                      timeout, transport error or 5xx, counted once per CHAIN ENTRY after the
+#                      fallback rules' own retry, not once per request. image_create has two
+#                      Cloudflare entries, so one request with Cloudflare down counts 2, and a
+#                      threshold of 3 opens after ~2 such requests.
+#   cooldown_seconds:  how long an open breaker skips the provider. After it, the next request
+#                      is let through as a single probe: any answer closes the breaker, a
+#                      failure re-opens it for another cooldown. Requests arriving mid-probe
+#                      wait for its verdict (within their deadline) instead of failing.
+# 429s, 400s, Cloudflare 3036/5035 and content refusals are NEUTRAL: the provider answered, so
+# they neither count toward the threshold nor reset it. fallback.py handles what they mean.
+# Values are build-phase defaults.
+
+breaker:
+  default: {failure_threshold: 3, cooldown_seconds: 30}
+  providers: {} # per-provider override, e.g. groq: {failure_threshold: 2, cooldown_seconds: 60}

@@ -16,6 +16,9 @@ from media_engine.gateway.errors import ProviderError
 CF_DAILY_EXHAUSTED = 3036
 CF_TEMP_CAPACITY = 3040
 CF_PAID_ONLY = 5035
+# FLUX NSFW filter: "AiError: Input prompt contains NSFW content (code 3030)". UNVERIFIED: seen
+# in third-party reports, not in Cloudflare's error reference. Confirm on the first real refusal.
+CF_CONTENT_REFUSED = 3030
 
 MAX_ATTEMPTS = 2  # one call + one retry
 RETRY_AFTER_MAX_SECONDS = 5.0  # "a few seconds"
@@ -27,7 +30,8 @@ OUT_OF_CREDITS_RECHECK = timedelta(hours=1)  # no reset time exists; re-check ho
 class Action(Enum):
     RETRY_SAME = "retry_same"
     NEXT = "next"
-    RAISE = "raise"
+    RAISE = "raise"  # our bug (400): BadRequestError
+    REFUSE = "refuse"  # safety filter said no: ContentRefused, never the next provider
 
 
 @dataclass(frozen=True)
@@ -54,6 +58,11 @@ def _retry_once_or_next(attempt: int, reason: str, delay: float) -> Decision:
 
 def decide(error: ProviderError, attempt: int, now: datetime) -> Decision:
     """Decide what to do after `attempt` (1-based) consecutive failures on one model."""
+    # First: a refusal often arrives as a 400 or 403, and must not be read as our bug or as a
+    # reason to try the next provider (that would route round the safety filter).
+    if error.refused or (error.provider == "cloudflare" and error.code == CF_CONTENT_REFUSED):
+        return Decision(Action.REFUSE, "content_refused")
+
     if error.provider == "cloudflare":
         if error.code == CF_DAILY_EXHAUSTED:
             return Decision(

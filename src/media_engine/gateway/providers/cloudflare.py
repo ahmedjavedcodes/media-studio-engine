@@ -32,9 +32,8 @@ class CloudflareProvider(Provider):
     def is_configured(self) -> bool:
         return bool(self._account_id and self._token)
 
-    def _headers(self) -> dict[str, str]:
-        assert self._token is not None
-        return {"Authorization": f"Bearer {self._token.get_secret_value()}"}
+    def _headers(self, model: str) -> dict[str, str]:
+        return self._bearer(model, self._token, "CLOUDFLARE_API_TOKEN")
 
     async def chat(self, model: str, request: LLMRequest) -> LLMResponse:
         url = f"{API_ROOT}/{self._account_id}/ai/v1/chat/completions"
@@ -50,7 +49,7 @@ class CloudflareProvider(Provider):
         if request.reasoning_effort and request.reasoning_effort != "none":
             payload["reasoning_effort"] = request.reasoning_effort
         response = await self._post(
-            model, url, headers=self._headers(), json=payload, timeout=DEFAULT_TIMEOUT
+            model, url, headers=self._headers(model), json=payload, timeout=DEFAULT_TIMEOUT
         )
         return parse_chat_completion(self.name, model, response.json())
 
@@ -73,7 +72,7 @@ class CloudflareProvider(Provider):
             response = await self._post(
                 model,
                 url,
-                headers=self._headers(),
+                headers=self._headers(model),
                 data=fields,
                 files=files or None,
                 timeout=IMAGE_TIMEOUT,
@@ -88,7 +87,7 @@ class CloudflareProvider(Provider):
             if request.seed is not None:
                 body["seed"] = request.seed
             response = await self._post(
-                model, url, headers=self._headers(), json=body, timeout=IMAGE_TIMEOUT
+                model, url, headers=self._headers(model), json=body, timeout=IMAGE_TIMEOUT
             )
         return self._parse_image(model, response)
 
