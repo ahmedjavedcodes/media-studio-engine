@@ -7,7 +7,7 @@ the returned `LLMResult` -> the agent's `Spend` -> the run's plan, never on this
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
 from pydantic import BaseModel
@@ -21,7 +21,7 @@ ChainResolver = Callable[[str, Plan], str]
 class ChatBackend(Protocol):
     """What LLMGateway needs from the provider gateway (`media_engine.gateway.router.Gateway`)."""
 
-    async def chat(self, task: str, request: LLMRequest) -> CallResult: ...
+    def chat(self, task: str, request: LLMRequest) -> Awaitable[CallResult]: ...
 
 
 class LLMResult(BaseModel):

@@ -13,14 +13,21 @@ from media_engine.agents.config import PLANS, AgentPolicy
 from media_engine.agents.config import require_all_plans as _all_plans
 from media_engine.contracts import Plan, StoppingCondition
 from media_engine.harness.run_state import Budget
+from media_engine.schemas import Lever
 
 CONFIG_DIR = Path(__file__).with_name("config")
 PRESETS_PATH = Path(__file__).parents[2] / "presets" / "library" / "image_create.yaml"
 
-Lever = Literal["reseed", "re_enhance", "switch_model", "raise_tier"]
 StepKind = Literal["route", "enhance", "generate", "critique", "supervise"]
 
-__all__ = ["PLANS", "AgentPolicy", "CreateConfig", "get_create_config", "load_create_config"]
+__all__ = [
+    "PLANS",
+    "AgentPolicy",
+    "CreateConfig",
+    "Lever",
+    "get_create_config",
+    "load_create_config",
+]
 
 
 class _Strict(BaseModel):
@@ -50,12 +57,14 @@ class StepEstimate(_Strict):
 class HarnessPolicy(_Strict):
     quality_threshold: dict[Plan, int]
     max_retries: dict[Plan, int]
+    max_critic_reasks: int = Field(ge=0)  # re-asks of the Critic on the SAME image, per run
     levers: dict[Lever, list[Plan]]
     negative_prompt: str
     max_parallel_branches: int = Field(gt=0)
     max_images_per_request: int = Field(gt=0)
     max_seed: int = Field(gt=0)
     aspect_ratio_tolerance: float = Field(ge=0.0)
+    cancel_poll_ms: int = Field(gt=0)
     budgets: dict[Plan, BudgetPolicy]
     step_estimates: dict[StepKind, StepEstimate]
     deadlines_ms: dict[StepKind, int]

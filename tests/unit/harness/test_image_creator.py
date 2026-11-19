@@ -3,7 +3,9 @@ returns the id. Never puts bytes in the envelope. All image calls are faked (Scr
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import json
 from pathlib import Path
 from typing import Any
 
@@ -72,7 +74,7 @@ async def test_generates_stores_and_returns_only_the_id(store):
         42,
     )
     assert (result.width, result.height, result.mime) == (1024, 1024, "image/png")
-    assert result.seed_honoured is None  # not verified yet: M7 must not rely on it
+    assert result.seed_honoured is False  # flux-1-schnell takes no seed (verified 2026-11-19)
     assert env.state.spend.neurons == pytest.approx(57.6)
     assert env.state.spend.llm_calls == 0  # no LLM, ever
 
@@ -110,22 +112,15 @@ def test_has_no_llm_and_refuses_a_prompt_or_output_model(store):
         )
 
 
-# -- cancellation: checked immediately before the paid call --------------------------------------
+# -- cancellation is the supervisor's job -------------------------------------------------------
 
 
-async def test_cancel_seen_before_generation_makes_no_call_and_spends_nothing(store):
+async def test_an_is_cancelled_input_is_ignored_the_supervisor_guard_owns_cancel(store):
     backend = ScriptedImages([image_bytes()])
 
-    env = await run(backend, store, is_cancelled=lambda: True)
+    env = await run(backend, store, is_cancelled=lambda: True)  # the old hook: gone
 
-    assert env.state.status is Status.CANCELLED
-    assert backend.requests == []
-    assert env.state.spend.neurons == 0 and env.state.spend.cost_usd == 0
-
-
-async def test_not_cancelled_proceeds(store):
-    env = await run(ScriptedImages([image_bytes()]), store, is_cancelled=lambda: False)
-    assert env.state.status is Status.DONE
+    assert env.state.status is Status.DONE and len(backend.requests) == 1
 
 
 # -- failures are typed for the supervisor --------------------------------------------------------
@@ -210,17 +205,6 @@ async def test_tier_override_picks_that_tiers_chain(store):
 # -- review fixes -------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("bad", [True, "yes", 1])
-async def test_a_non_callable_is_cancelled_is_invalid_input_not_a_crash(store, bad):
-    backend = ScriptedImages([image_bytes()])
-
-    env = await run(backend, store, is_cancelled=bad)
-
-    assert env.state.status is Status.FAILED
-    assert env.output == {"failure": "invalid_input"}
-    assert backend.requests == []
-
-
 async def test_a_billed_refusal_is_charged_to_the_step(store):
     refused = ContentRefused(_pe(status=200, refused=True, cost_usd=0.002), "t", neurons=9.5)
 
@@ -229,3 +213,33 @@ async def test_a_billed_refusal_is_charged_to_the_step(store):
     assert env.output == {"failure": "content_refused"}
     assert env.state.spend.neurons == pytest.approx(9.5)
     assert env.state.spend.cost_usd == pytest.approx(0.002)
+
+
+# -- review fix 4: a cancel during the store must not lose the image --------------------------
+
+
+class SlowStore(LocalArtifactStore):
+    """`put` takes a moment, so a cancel can land in the middle of it."""
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.started = asyncio.Event()
+
+    async def put(self, data: bytes, mime: str) -> str:
+        self.started.set()
+        await asyncio.sleep(0.05)
+        return await super().put(data, mime)
+
+
+async def test_a_cancel_during_the_store_still_finishes_the_put_and_orphans_the_image(tmp_path):
+    slow = SlowStore(tmp_path / ".artifacts")
+    task = asyncio.ensure_future(run(ScriptedImages([image_bytes(1024, 1024)]), slow))
+    await slow.started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):  # the cancel is still delivered to the caller
+        await task
+
+    orphans = [json.loads(row) for row in (slow.root / "orphaned.jsonl").read_text().splitlines()]
+    assert [o["reason"] for o in orphans] == ["cancelled"]  # not leaked: it will be swept
+    assert await slow.get(orphans[0]["image_id"])  # and the put really finished

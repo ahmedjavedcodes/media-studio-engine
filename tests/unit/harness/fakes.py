@@ -110,11 +110,18 @@ class ScriptedImages:
         self.neurons_est = neurons_est
         self.cost_usd = cost_usd
         self.requests: list[tuple[str, ImageRequest, float | None]] = []
+        self.start_at: list[int] = []  # the chain offset of each call
 
     async def image(
-        self, task: str, request: ImageRequest, *, deadline_s: float | None = None
+        self,
+        task: str,
+        request: ImageRequest,
+        *,
+        deadline_s: float | None = None,
+        start_at: int = 0,
     ) -> CallResult:
         self.requests.append((task, request, deadline_s))
+        self.start_at.append(start_at)
         if not self.replies:
             raise AssertionError("ScriptedImages ran out of replies (unexpected extra image call)")
         reply = self.replies.pop(0)

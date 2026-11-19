@@ -8,7 +8,8 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 
-from media_engine.contracts import AuthContext, Spend, Status
+from media_engine.contracts import AuthContext, Plan, Spend, Status
+from media_engine.schemas import Lever, Verdict
 
 # The only strings that may reach a user. Internal agent names never appear in events/output.
 PublicLabel = Literal["Understanding your request", "Creating your image", "Finishing up"]
@@ -31,6 +32,35 @@ class PlanStep(BaseModel):
     branches_aborted: int | None = None
     partial_outputs: list[str] = Field(default_factory=list)
     spend: Spend = Field(default_factory=Spend)
+
+
+class AttemptRecord(BaseModel):
+    """One image of one pass through enhance -> generate -> critique (one record per branch per
+    round), kept in RunState so a retry can resume from it and the final answer can rank every
+    image. Not in the spec's RunState: added in M7
+    (a PlanStep holds one output per step, not one per attempt). JSON-safe, refs and scalars only.
+
+    The first group is what the attempt was run WITH (the knobs a lever changes; they carry over
+    to the next attempt). The second is what came out of it."""
+
+    number: int  # 1-based: the round (one pass of the graph); all N branches of a round share it
+    branch: int = 0  # 0-based image within the round (M8); a single-image run only has 0
+    lever: Lever | None = None  # the lever that started this attempt; None for the first
+    seed: int
+    tier: Plan  # the chain tier sent to the Image Creator (raise_tier moves it up)
+    chain_offset: int = 0  # leading chain entries skipped (switch_model moves it on)
+    feedback: str | None = None  # what the Enhancer is told about the last attempt (re_enhance)
+
+    image_id: str | None = None  # set once an image was stored
+    provider: str | None = None
+    width: int | None = None
+    height: int | None = None
+    shape_issues: list[str] = Field(default_factory=list)
+    verdict: Verdict | None = None  # None: the Critic never ruled on it, so it is never delivered
+    quality_score: int | None = None
+    critique: str | None = None
+    summary: str | None = None
+    failure: str | None = None  # why the attempt ended without a verdict, if it did
 
 
 class Remaining(NamedTuple):
@@ -97,10 +127,27 @@ class RunState(BaseModel):
     budget: Budget
     plan: list[PlanStep] = Field(default_factory=list)
     replans_used: int = 0
+    attempts: list[AttemptRecord] = Field(default_factory=list)  # one per attempt, oldest first
+    retries_used: int = 0  # levers applied so far; capped per plan (harness.yaml max_retries)
+    critic_reasks_used: int = 0  # Critic re-asks on the same image (harness.yaml max_critic_reasks)
+    # The supervisor's own LLM calls (the lever choice). Kept apart from the plan so that "the
+    # supervisor made zero LLM calls" can be read straight off RunState; run_spend adds it in.
+    supervisor_spend: Spend = Field(default_factory=Spend)
     cancel_requested: bool = False
     cancelled_at_step: int | None = None
     events: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @property
+    def attempt(self) -> AttemptRecord:
+        """The newest record. Every record of a round shares the knobs a lever changes."""
+        return self.attempts[-1]
+
+    @property
+    def round(self) -> list[AttemptRecord]:
+        """The records of the round in progress (the newest), one per branch."""
+        number = self.attempts[-1].number
+        return [a for a in self.attempts if a.number == number]
 
     def step(self, number: int) -> PlanStep:
         for item in self.plan:

@@ -86,6 +86,23 @@ FailureKind = Literal[
 
 Verdict = Literal["allow", "block"]
 
+# What the supervisor may change on a retry (spec §8.2). Which plans may use which lever is
+# config (harness.yaml `levers`).
+Lever = Literal["reseed", "re_enhance", "switch_model", "raise_tier"]
+
+
+class LeverChoice(BaseModel):
+    """The supervisor's one lever-choice LLM call (spec §8.2). Only the lever is acted on; the
+    reason is kept for the logs."""
+
+    lever: Lever
+    reason: str = ""
+
+    @field_validator("lever", mode="before")
+    @classmethod
+    def _lever_case(cls, value: Any) -> Any:
+        return value.strip().lower() if isinstance(value, str) else value
+
 
 class GenerationResult(BaseModel):
     image_id: str

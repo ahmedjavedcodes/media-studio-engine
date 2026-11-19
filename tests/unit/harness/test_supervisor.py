@@ -25,6 +25,14 @@ GOAL = Goal(task="create", instructions="Create the image the user asked for.")
 PROMPT = "a cozy coffee shop"
 AGENT_NAMES = ("prompt_enhancer", "image_creator", "critic", "image_grand_agent")
 SEED = 1234
+# M6 behaviour: one attempt. The retry tests live in test_retries.py.
+NO_RETRIES = CFG.model_copy(
+    update={
+        "policy": CFG.policy.model_copy(
+            update={"max_retries": dict.fromkeys(CFG.policy.max_retries, 0)}
+        )
+    }
+)
 
 
 def auth(plan: str = "free", mode: str = "auto") -> AuthContext:
@@ -71,6 +79,9 @@ class RecordingStore:
     async def load(self, run_id: str) -> RunState | None:
         return RunState.model_validate_json(self.snapshots[-1]) if self.snapshots else None
 
+    async def cancel_requested(self, run_id: str) -> bool:
+        return False  # this double cancels by poking the live state in save()
+
 
 @pytest.fixture
 def store(tmp_path: Path) -> LocalArtifactStore:
@@ -95,6 +106,7 @@ def build(
         events=events if events is not None else ListEventSink(),
         run_store=run_store,
         paid_providers=paid,
+        allow_paid=False,
         seed_source=lambda: SEED,
     )
 
@@ -184,7 +196,7 @@ def test_attempt_graph_is_linear_with_one_way_out(store):
 
 
 async def test_one_graph_run_makes_at_most_one_image_call(store):
-    # A low score would trigger a retry in M7. The retry must wrap the graph, so a single graph
+    # A low score triggers a retry. The retry must wrap the graph, so a single graph
     # run still makes exactly one image call even with more images and replies on offer.
     llm = ScriptedChat([enhanced(), verdict(0), enhanced(), verdict(9)])
     images = ScriptedImages([image_bytes(), image_bytes()])
@@ -349,12 +361,12 @@ async def test_unsupported_aspect_ratio_falls_back_to_the_default(store):
 # -- quality and shape --------------------------------------------------------------------------
 
 
-async def test_low_score_delivers_with_the_critique_as_an_issue(store):
+async def test_low_score_with_no_retries_left_delivers_the_critique_as_an_issue(store):
     llm = ScriptedChat([enhanced(), verdict(2, critique="No coffee shop visible.")])
 
-    env = await create(build(llm, ScriptedImages([image_bytes()]), store))
+    env = await create(build(llm, ScriptedImages([image_bytes()]), store, cfg=NO_RETRIES))
 
-    assert env.state.status is Status.DONE_WITH_ISSUES  # TODO(M7): retries come first
+    assert env.state.status is Status.DONE_WITH_ISSUES
     assert env.output["issues"] == ["No coffee shop visible."]
     assert len(env.output["image_ids"]) == 1
 
@@ -364,11 +376,21 @@ async def test_threshold_is_per_plan(store):
     score = CFG.policy.quality_threshold["free"]
     assert CFG.policy.quality_threshold["ultra"] > score
     free = await create(
-        build(ScriptedChat([enhanced(), verdict(score)]), ScriptedImages([image_bytes()]), store),
+        build(
+            ScriptedChat([enhanced(), verdict(score)]),
+            ScriptedImages([image_bytes()]),
+            store,
+            cfg=NO_RETRIES,
+        ),
         "free",
     )
     ultra = await create(
-        build(ScriptedChat([enhanced(), verdict(score)]), ScriptedImages([image_bytes()]), store),
+        build(
+            ScriptedChat([enhanced(), verdict(score)]),
+            ScriptedImages([image_bytes()]),
+            store,
+            cfg=NO_RETRIES,
+        ),
         "ultra",
     )
     assert free.state.status is Status.DONE
@@ -415,7 +437,7 @@ async def test_matching_shape_on_a_paid_provider_is_fine(store):
 async def test_critic_failure_never_delivers_the_unchecked_image(store):
     llm = ScriptedChat([enhanced(), '{"quality_score": 99}', '{"quality_score": "x"}'])
 
-    env = await create(build(llm, ScriptedImages([image_bytes()]), store))
+    env = await create(build(llm, ScriptedImages([image_bytes()]), store, cfg=NO_RETRIES))
 
     assert env.state.status is Status.FAILED
     assert env.output["image_ids"] == []
@@ -428,7 +450,7 @@ async def test_creator_refusal_fails_without_calling_the_critic(store):
     )
     llm = ScriptedChat([enhanced()])  # no critic reply: a critic call would raise
 
-    env = await create(build(llm, ScriptedImages([refused]), store))
+    env = await create(build(llm, ScriptedImages([refused]), store, cfg=NO_RETRIES))
 
     assert env.state.status is Status.FAILED
     assert "content_refused" in (env.state.reason or "")
@@ -444,20 +466,21 @@ async def test_enhancer_failure_makes_no_image_call(store):
 
 
 async def test_an_unexpected_exception_inside_a_node_becomes_a_failed_envelope(store):
-    # A non-gateway exception escapes the Image Creator; the node must not raise past the graph.
+    # A non-gateway exception escapes the Image Creator: that branch fails, the run does not raise.
     images = ScriptedImages([RuntimeError("bug in a backend adapter")])
     run_store = RecordingStore()
 
     env = await create(build(ScriptedChat([enhanced()]), images, store, run_store=run_store))
 
     assert env.state.status is Status.FAILED
-    assert env.state.reason == "internal error: RuntimeError"
+    assert env.state.reason == "could not create the image (internal)"
     final = RunState.model_validate_json(run_store.snapshots[-1])
     assert [s.status for s in final.plan] == ["done", "failed", "skipped"]
 
 
-async def test_more_than_one_image_is_rejected_until_m8(store):
-    env = await create(build(ScriptedChat([]), ScriptedImages([]), store), n=2)
+async def test_more_images_than_the_configured_cap_is_rejected(store):
+    too_many = CFG.policy.max_images_per_request + 1
+    env = await create(build(ScriptedChat([]), ScriptedImages([]), store), n=too_many)
     assert env.output == {"failure": "invalid_input"}
 
 

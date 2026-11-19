@@ -5,6 +5,10 @@ quality_threshold: {free: 6, pro: 7, max: 7, ultra: 8} # retry when quality_scor
 
 max_retries: {free: 1, pro: 2, max: 2, ultra: 2}
 
+# A Critic that fails (bad reply, timeout) is asked again about the same image, up to this many
+# times per run. Kept apart from max_retries so a glitch never spends the plan's lever retries.
+max_critic_reasks: 2
+
 levers: # which plans may use each retry lever
   reseed: [free, pro, max, ultra]
   re_enhance: [free, pro, max, ultra]
@@ -26,6 +30,10 @@ max_seed: 2147483647
 # (flux-1-schnell is sent no size) they are logged and ignored, by the user's decision.
 aspect_ratio_tolerance: 0.02
 
+# While a step runs, the supervisor looks for a cancel (RunStore.load) this often, and aborts the
+# in-flight provider calls when one arrives. The backend sets cancel_requested on its store.
+cancel_poll_ms: 200
+
 # Per run, on three meters. reserve_fraction of each is held back for retries.
 # neurons_total caps image generation on the free path (Cloudflare: 10,000 neurons/day shared).
 budgets:
@@ -46,12 +54,18 @@ budgets:
 #                      the repair fit (6,000 never did). Neurons: ~100 per vision call at
 #                      llama-4-scout prices (UNVERIFIED: ~24.5k neurons/M in, ~77k/M out), x2 for
 #                      a repair. Replace both with measured values after the cf-vision smoke run.
+# cost_usd is the WORST REACHABLE chain entry (the paid fallback: image_create ends in
+#   openrouter/google/gemini-2.5-flash-image, ~$0.04 per image; a paid LLM fallback call ~$0.001-
+#   0.005). It is counted only when ALLOW_PAID is on (otherwise no paid entry can be reached),
+#   and then it is checked against the plan's cost_cap_usd BEFORE the call. All UNVERIFIED
+#   placeholders. A plan with cost_cap_usd 0 (free) therefore refuses to start when ALLOW_PAID is
+#   on: it fails closed rather than risk a dollar the cap does not allow.
 step_estimates:
-  route: {tokens: 2500, completion_tokens: 600, cost_usd: 0.0, neurons: 5}
-  enhance: {tokens: 6000, completion_tokens: 1500, cost_usd: 0.0, neurons: 15}
-  generate: {tokens: 0, completion_tokens: 0, cost_usd: 0.0, neurons: 60}
-  critique: {tokens: 12000, completion_tokens: 1200, cost_usd: 0.0, neurons: 200}
-  supervise: {tokens: 3000, completion_tokens: 800, cost_usd: 0.0, neurons: 10}
+  route: {tokens: 2500, completion_tokens: 600, cost_usd: 0.001, neurons: 5}
+  enhance: {tokens: 6000, completion_tokens: 1500, cost_usd: 0.002, neurons: 15}
+  generate: {tokens: 0, completion_tokens: 0, cost_usd: 0.04, neurons: 60}
+  critique: {tokens: 12000, completion_tokens: 1200, cost_usd: 0.005, neurons: 200}
+  supervise: {tokens: 3000, completion_tokens: 800, cost_usd: 0.002, neurons: 10}
 
 deadlines_ms: # wall-clock deadline per step (repair included)
   route: 10000

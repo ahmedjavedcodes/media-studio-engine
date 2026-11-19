@@ -4,9 +4,12 @@ from media_engine.schemas.agent_io import (
     EnhancerOutput,
     FailureKind,
     GenerationResult,
+    Lever,
+    LeverChoice,
     MissingItem,
     MissingKind,
     RouteDecision,
+    Verdict,
 )
 
 __all__ = [
@@ -15,7 +18,10 @@ __all__ = [
     "EnhancerOutput",
     "FailureKind",
     "GenerationResult",
+    "Lever",
+    "LeverChoice",
     "MissingItem",
     "MissingKind",
     "RouteDecision",
+    "Verdict",
 ]

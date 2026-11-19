@@ -38,3 +38,7 @@ image_grand_agent: # LLM only for choosing a retry lever and deciding escalation
 image_creator: # no LLM: formats a request and calls the image gateway
   requires: [image]
   models: {free: image_create, pro: image_create, max: image_create, ultra: image_create}
+
+grand_agent: # multi-step planner: a stub for now. Makes no LLM call, so the chain is never used.
+  requires: []
+  models: {free: reasoning, pro: reasoning, max: reasoning, ultra: reasoning}

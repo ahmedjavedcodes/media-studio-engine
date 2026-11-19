@@ -65,16 +65,17 @@ class CloudflareProvider(Provider):
                 fields["steps"] = str(request.steps)
             if request.seed is not None:
                 fields["seed"] = str(request.seed)
-            files = {
-                f"input_image_{i}": (f"input_{i}.png", data, "image/png")
-                for i, data in enumerate(request.input_images)
-            }
+            # EVERY field goes in `files` as a (None, value) part so the request is always
+            # multipart/form-data. With `data=` and no files httpx would send urlencoded, which
+            # FLUX.2 rejects even for a prompt-only request.
+            parts: dict[str, Any] = {key: (None, value) for key, value in fields.items()}
+            for i, data in enumerate(request.input_images):
+                parts[f"input_image_{i}"] = (f"input_{i}.png", data, "image/png")
             response = await self._post(
                 model,
                 url,
                 headers=self._headers(model),
-                data=fields,
-                files=files or None,
+                files=parts,
                 timeout=IMAGE_TIMEOUT,
             )
         else:
@@ -84,7 +85,7 @@ class CloudflareProvider(Provider):
                 steps = min(steps, card.max_steps)
             if steps is not None:
                 body["steps"] = steps
-            if request.seed is not None:
+            if request.seed is not None and card.accepts_seed:
                 body["seed"] = request.seed
             response = await self._post(
                 model, url, headers=self._headers(model), json=body, timeout=IMAGE_TIMEOUT

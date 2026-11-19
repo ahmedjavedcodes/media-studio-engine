@@ -104,6 +104,38 @@ async def test_failover_is_invisible_to_the_image_creator(clock):
     assert alpha.calls == 2  # 5xx: the fallback rules' one retry, then next
 
 
+async def test_chain_offset_starts_the_walk_at_the_next_model(clock):
+    # The switch_model retry lever: skip the first chain entry, even though it is healthy.
+    alpha = FakeProvider("alpha", default=b"alpha-img")
+    beta = FakeProvider("beta", default=b"beta-img")
+    gw, _ = build(alpha, beta, clock)
+
+    result = await model_gateway(gw).generate(
+        "a cozy coffee shop",
+        width=768,
+        height=512,
+        tier="free",
+        seed=7,
+        deadline_ms=60_000,
+        chain_offset=1,
+    )
+
+    assert (result.provider, result.model) == ("beta", "img-b")
+    assert alpha.calls == 0
+
+
+async def test_chain_offset_past_the_end_of_the_chain_is_no_provider(clock):
+    alpha = FakeProvider("alpha", default=b"alpha-img")
+    beta = FakeProvider("beta", default=b"beta-img")
+    gw, _ = build(alpha, beta, clock)
+
+    with pytest.raises(AllProvidersFailed):
+        await model_gateway(gw).generate(
+            "x", width=64, height=64, tier="free", seed=1, deadline_ms=1000, chain_offset=2
+        )
+    assert alpha.calls == beta.calls == 0
+
+
 async def test_first_provider_success_is_not_a_fallback(clock):
     gw, board = build(FakeProvider("alpha"), FakeProvider("beta"), clock)
 

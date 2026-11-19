@@ -8,15 +8,16 @@ inputs:
     seed:         int   (required). The supervisor picks seeds, so N branches get distinct ones.
     tier:         Plan  chain tier (optional, default auth.plan). The raise_tier lever passes
                         the next tier up.
-    is_cancelled: () -> bool  (optional). Checked immediately before the generation call, the
-                        call that costs money. TODO(M9): move this off `inputs`: a callable
-                        can't round-trip through JSON, and RunState must. A cancel token passed
-                        at construction (or a RunStore lookup) is the likely replacement.
+    chain_offset: int   leading chain entries to skip (optional, default 0). The switch_model
+                        lever starts at the next model.
 
 output (envelope): GenerationResult fields (image_id, provider, model, seed, seed_honoured,
     cost_usd, neurons, width, height, mime). Never image bytes.
 
-Returns DONE, CANCELLED (cancel seen before the call; nothing spent), or FAILED with
+Cancellation is not this class's job: the supervisor's step guard checks it immediately before
+the call, and an in-flight cancel aborts the task (a put in progress is finished and orphaned).
+
+Returns DONE, or FAILED with
 `output["failure"]` set (content_refused, no_provider, deadline, bad_request, gateway_error,
 bad_image, storage, invalid_input). A provider refusal is FAILED, not REJECTED: the Image
 Grand Agent decides what it means (Cloudflare's NSFW filter has false positives).
@@ -24,8 +25,8 @@ Grand Agent decides what it means (Cloudflare's NSFW filter has false positives)
 
 from __future__ import annotations
 
+import asyncio
 import time
-from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -49,19 +50,19 @@ from media_engine.ports.event_sink import EventSink
 from media_engine.schemas import GenerationResult
 
 SUMMARY = "Created an image."
-CANCELLED_SUMMARY = "Image creation was cancelled."
 
 log = get_logger("agents.image_creator")
 
 
 class CreatorInputs(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # is_cancelled is read separately
+    model_config = ConfigDict(extra="ignore")
 
     prompt: str = Field(min_length=1)
     width: int = Field(gt=0)
     height: int = Field(gt=0)
     seed: int = Field(ge=0)
     tier: Plan | None = None
+    chain_offset: int = Field(default=0, ge=0)
 
 
 class ImageCreator(Agent):
@@ -88,16 +89,6 @@ class ImageCreator(Agent):
             return self.failed(
                 "invalid inputs:\n" + describe_validation_error(err), Spend(), "invalid_input"
             )
-        is_cancelled: Callable[[], bool] | None = inputs.get("is_cancelled")
-        if is_cancelled is not None and not callable(is_cancelled):
-            return self.failed("is_cancelled must be a callable", Spend(), "invalid_input")
-
-        # Last check before the call that costs money (spec §10).
-        if is_cancelled is not None and is_cancelled():
-            return self.envelope(
-                Status.CANCELLED, {}, CANCELLED_SUMMARY, Spend(), "cancelled before generation"
-            )
-
         started = time.perf_counter()
         try:
             result = await self._images.generate(
@@ -107,6 +98,7 @@ class ImageCreator(Agent):
                 tier=args.tier or auth.plan,
                 seed=args.seed,
                 deadline_ms=stop.deadline_ms,
+                chain_offset=args.chain_offset,
             )
         except GatewayError as err:
             spend = Spend(duration_ms=_elapsed_ms(started))
@@ -129,8 +121,14 @@ class ImageCreator(Agent):
         except NotAnImage as err:
             log.warning("creator.bad_image", provider=result.provider, model=result.model)
             return self.failed(str(err), spend, "bad_image")
+        put = asyncio.ensure_future(self._artifacts.put(data, info.mime))
         try:
-            image_id = await self._artifacts.put(data, info.mime)
+            # Shielded: a cancel must not abandon a put half-way, or the image is stored but its
+            # id is lost and it is never swept.
+            image_id = await asyncio.shield(put)
+        except asyncio.CancelledError:
+            await self._orphan_after_cancel(put)
+            raise
         except Exception as err:  # the store is a backend port: any failure is "storage"
             log.exception("creator.storage_failed")
             return self.failed(f"artifact store failed: {type(err).__name__}", spend, "storage")
@@ -155,6 +153,18 @@ class ImageCreator(Agent):
                 model=result.model,
             )
         return self.envelope(Status.DONE, generated.model_dump(), SUMMARY, spend)
+
+    async def _orphan_after_cancel(self, put: asyncio.Future[str]) -> None:
+        """Cancelled while storing: let the put finish, then mark what it stored as orphaned
+        ("cancelled") so the sweep deletes it. The caller re-raises the cancel."""
+        try:
+            image_id = await put
+        except Exception:  # noqa: BLE001 - the put failed: nothing was stored, nothing to orphan
+            return
+        try:
+            await self._artifacts.mark_orphaned(image_id, "cancelled")
+        except Exception:
+            log.exception("creator.mark_orphaned_failed")
 
 
 def _elapsed_ms(started: float) -> int:

@@ -144,8 +144,15 @@ class Gateway:
 
     @traced("gateway.image", process_inputs=_safe_inputs, process_outputs=_safe_outputs)
     async def image(
-        self, task: str, request: ImageRequest, *, deadline_s: float | None = None
+        self,
+        task: str,
+        request: ImageRequest,
+        *,
+        deadline_s: float | None = None,
+        start_at: int = 0,
     ) -> CallResult:
+        """`start_at` skips that many leading chain entries: the `switch_model` retry lever
+        starts the walk at the next model. 0 is the normal walk."""
         return await self._run(
             task,
             "image",
@@ -154,6 +161,7 @@ class Gateway:
                 card_or_default(ref.provider, ref.model, "image"), request
             ),
             deadline_s=deadline_s,
+            start_at=start_at,
         )
 
     # -- internals --------------------------------------------------------------------------
@@ -165,6 +173,7 @@ class Gateway:
         invoke: Invoke,
         estimate: Callable[[ModelRef], float | None] | None = None,
         deadline_s: float | None = None,
+        start_at: int = 0,
     ) -> CallResult:
         """Walk the chain. `deadline_s` bounds the whole walk, retries, fallbacks and probe
         waits included: each call gets only the time that is left, and is cancelled (httpx
@@ -182,7 +191,9 @@ class Gateway:
 
         attempts: list[Attempt] = []
         deadline = _Deadline.start(deadline_s)
-        entries = list(enumerate(self.chains[task]))
+        if start_at < 0:
+            raise ValueError(f"start_at must be >= 0, got {start_at}")
+        entries = list(enumerate(self.chains[task]))[start_at:]
 
         for walk in (1, 2):
             waiting: list[tuple[int, ModelRef]] = []

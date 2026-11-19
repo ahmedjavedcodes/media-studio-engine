@@ -44,6 +44,10 @@ class ModelCard:
     # Image models: does the same seed reproduce the same image? None = not verified. Check with
     # `playground/smoke_test.py --only cf-seed` before relying on it (the M7 reseed lever).
     honours_seed: bool | None = None
+    # Does the API accept a `seed` field at all? flux-1-schnell on Cloudflare does NOT: a request
+    # with one fails with HTTP 400, code 5006 ("Additional properties '/seed' not allowed").
+    # Verified by a real call on 2026-11-19. Such a model gets no seed and `honours_seed` False.
+    accepts_seed: bool = True
 
 
 def _llm(provider: str, model: str, **kw: object) -> ModelCard:
@@ -64,6 +68,8 @@ _CARDS: list[ModelCard] = [
     _img(
         "cloudflare",
         "@cf/black-forest-labs/flux-1-schnell",
+        accepts_seed=False,  # VERIFIED 2026-11-19: HTTP 400 / 5006 when a seed is sent
+        honours_seed=False,
         max_steps=8,
         max_side=1024,
         neuron_pricing=NeuronPricing(per_out_tile=4.80, per_step=9.60, default_steps=4),
