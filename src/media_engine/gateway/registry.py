@@ -45,6 +45,11 @@ class ModelCard:
     # Gate, Brief, safety-review and Critic schemas (free calls). Unverified models get the
     # schema in the prompt instead.
     json_schema: bool = False
+    # Also put the schema in the prompt. Groq's json_schema mode is best-effort (not strict), and
+    # qwen3.8-27b answered with invented field names when it never SAW the schema (measured
+    # 2026-11-20, vision call: garbage; with the schema in the prompt 2/2 valid). Strict mode
+    # needs additionalProperties:false on every object, which our Pydantic schemas do not set.
+    schema_in_prompt: bool = False
     neuron_pricing: NeuronPricing | None = None  # image models; LLMs report actual neurons
     # Image models: does the same seed reproduce the same image? None = not verified. Check with
     # `playground/smoke_test.py --only cf-seed` before relying on it (the M7 reseed lever).
@@ -74,7 +79,14 @@ _CARDS: list[ModelCard] = [
     _llm("groq", "openai/gpt-oss-safeguard-20b", reasoning=True, gpt_oss=True, json_schema=True),
     # vision VERIFIED 2026-11-20 with the critic's request shape (playground/smoke_test.py
     # --only groq-vision): a 768 px JPEG cost ~1,330 prompt tokens.
-    _llm("groq", "qwen/qwen3.8-27b", reasoning=True, vision=True, json_schema=True),
+    _llm(
+        "groq",
+        "qwen/qwen3.8-27b",
+        reasoning=True,
+        vision=True,
+        json_schema=True,
+        schema_in_prompt=True,
+    ),
     _img(
         "cloudflare",
         "@cf/black-forest-labs/flux-1-schnell",

@@ -55,6 +55,7 @@ from media_engine.contracts import (
     Status,
 )
 from media_engine.core.logging import get_logger
+from media_engine.gateway.budget import dearest_image_usd
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.gateway.router import Gateway
 from media_engine.guardrails.code_checks import check_prompt, check_settings
@@ -310,6 +311,7 @@ async def create_images(
             artifacts=artifacts or LocalArtifactStore(),
             events=sink,
             run_store=run_store or InMemoryRunStore(),
+            price_lookup=dearest_image_usd,
             seed_source=seed_source,
             trace=trace,
         )

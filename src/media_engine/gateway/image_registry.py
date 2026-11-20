@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from media_engine.contracts import Plan
 from media_engine.core.logging import get_logger
@@ -67,9 +67,15 @@ class ModelEntry(BaseModel):
     quality_settings: list[str] = Field(default_factory=list)
     default_quality: str | None = None
     supports_seed: bool
-    seed_verified: bool = False  # same seed reproduced the same image in a real test
-    # False = a real test showed the seed is accepted but does NOT reproduce the image. None =
-    # not tested (honours_seed stays unknown).
+    # Two fields, one question ("does the same seed give the same image?"), kept apart on purpose:
+    #   seed_reproduces: the RESULT of a real test. True = identical pixels twice, False = the
+    #     seed is accepted but the image still differs, None = never tested.
+    #   seed_verified: the flag the rest of the code reads. True only when that test passed.
+    # So `seed_reproduces: true` requires `seed_verified: true`, and `seed_verified` cannot sit
+    # beside `seed_reproduces: false`. `false` and `None` both leave seed_verified False but
+    # differ in what `honours_seed` reports: False (known not to reproduce) versus None
+    # (unknown). Checked by the validator below.
+    seed_verified: bool = False
     seed_reproduces: bool | None = None
     n_per_call: int = Field(ge=1)
     max_input_images: int = Field(ge=0)
@@ -79,6 +85,14 @@ class ModelEntry(BaseModel):
     eval_default: bool = False
     available: bool = True
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _seed_fields_agree(self) -> ModelEntry:
+        if self.seed_reproduces is True and not self.seed_verified:
+            raise ValueError(f"{self.slug}: seed_reproduces is true, so seed_verified must be true")
+        if self.seed_verified and self.seed_reproduces is False:
+            raise ValueError(f"{self.slug}: seed_verified contradicts seed_reproduces: false")
+        return self
 
 
 class ImageModelSpec(BaseModel):

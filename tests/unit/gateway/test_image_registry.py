@@ -241,3 +241,24 @@ def test_unknown_openrouter_models_still_get_a_default_card():
     card = card_or_default("openrouter", "someone/unknown-model", "image")
     assert card.accepts_seed and card.honours_seed is None
     assert get_card("openrouter", "openai/gpt-oss-120b") is None  # a chat model: no image card
+
+
+# -- seed_reproduces (the test result) vs seed_verified (the flag the code reads) ----------------
+
+
+def test_seed_reproduces_true_requires_seed_verified_true():
+    with pytest.raises(ValueError, match="seed_verified must be true"):
+        entry(seed_reproduces=True)
+    ok = entry(seed_reproduces=True, seed_verified=True)
+    assert ok.seed_verified and ok.seed_reproduces
+
+
+def test_seed_verified_cannot_sit_beside_a_failed_test():
+    with pytest.raises(ValueError, match="contradicts seed_reproduces: false"):
+        entry(seed_verified=True, seed_reproduces=False)
+
+
+def test_a_failed_test_and_no_test_are_told_apart():
+    failed, untested = entry(seed_reproduces=False), entry()
+    assert not failed.seed_verified and failed.seed_reproduces is False
+    assert not untested.seed_verified and untested.seed_reproduces is None

@@ -20,6 +20,8 @@ Not run (need approval): E1, E3-E7, M7 live measurements. E2 approved but its co
 
 ---
 
+**Session 2 review round (uncommitted):** per-image Critic fallback, groups of at most 3 images (Groq qwen limit), `json_validate_failed` handled as a bad reply, schema sent to qwen both ways, critique estimate 5,000 tokens/50 neurons per image, price lookup injected into the supervisor, `seed_reproduces` validator, E1/E4 run, E2/E5/E6/E7 scripts written. Findings and the §12 table: [docs/free-path-measurements.md](../../docs/free-path-measurements.md).
+
 ## 1. Where things stand
 
 **Branch `image-create`**, pushed. Commits from session 1:

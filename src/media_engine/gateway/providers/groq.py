@@ -7,6 +7,8 @@ from typing import Any
 import httpx
 
 from media_engine.core.config import Settings
+from media_engine.core.logging import get_logger
+from media_engine.gateway.errors import ProviderError
 from media_engine.gateway.providers.base import (
     DEFAULT_TIMEOUT,
     Provider,
@@ -17,6 +19,7 @@ from media_engine.gateway.registry import card_or_default
 from media_engine.gateway.types import LLMRequest, LLMResponse
 
 BASE_URL = "https://api.groq.com/openai/v1"
+log = get_logger("gateway.groq")
 
 
 class GroqProvider(Provider):
@@ -33,7 +36,7 @@ class GroqProvider(Provider):
         card = card_or_default(self.name, model, "llm")
         messages = request.messages
         schema = request.response_schema
-        if schema is not None and not card.json_schema:
+        if schema is not None and (not card.json_schema or card.schema_in_prompt):
             messages = inject_schema(messages, schema)
         payload: dict[str, Any] = {"model": model, "messages": messages}
         if request.temperature is not None:
@@ -57,11 +60,31 @@ class GroqProvider(Provider):
         else:
             # Others: "parsed" splits reasoning out of content. Never "raw" with tools / JSON mode.
             payload["reasoning_format"] = "parsed" if request.include_reasoning else "hidden"
-        response = await self._post(
-            model,
-            f"{BASE_URL}/chat/completions",
-            headers=self._bearer(model, self._key, "GROQ_API_KEY"),
-            json=payload,
-            timeout=DEFAULT_TIMEOUT,
-        )
+        try:
+            response = await self._post(
+                model,
+                f"{BASE_URL}/chat/completions",
+                headers=self._bearer(model, self._key, "GROQ_API_KEY"),
+                json=payload,
+                timeout=DEFAULT_TIMEOUT,
+            )
+        except ProviderError as err:
+            # Groq's json_schema mode answers a reply it could not validate with HTTP 400
+            # `json_validate_failed` (measured: qwen emitted `{~~ ...`). That is the MODEL's
+            # bad output, not our bad request: hand the broken text back as an ordinary reply
+            # so the agent's repair path runs, instead of failing the step with a 400.
+            if err.status == 400 and err.code == "json_validate_failed":
+                log.warning("groq.json_validate_failed", model=model)
+                return LLMResponse(text=getattr(err, "failed_generation", "") or "", usage={})
+            raise
         return parse_chat_completion(self.name, model, response.json())
+
+    def _error_from_response(self, model: str, response: httpx.Response) -> ProviderError:
+        error = super()._error_from_response(model, response)
+        try:
+            detail = response.json().get("error", {})
+            text = detail.get("failed_generation") if isinstance(detail, dict) else None
+        except ValueError:
+            text = None
+        error.failed_generation = text if isinstance(text, str) else ""  # type: ignore[attr-defined]
+        return error

@@ -287,3 +287,167 @@ def test_verdict_case_and_whitespace_are_normalised(raw):
         f'"technical":1,"safety_verdict":"{raw}"}}]}}'
     )
     assert CriticOutput.model_validate_json(body).images[0].safety_verdict == "block"
+
+
+# -- a real batch reply, not folded by the test double ------------------------------------------
+
+
+def entry(index: int, score: int, verdict_: str = "allow", rank: int | None = None) -> dict:
+    return {
+        "index": index,
+        "prompt_adherence": score,
+        "craft": score,
+        "visual_interest": score,
+        "technical": score,
+        "safety_verdict": verdict_,
+        "safety_reason": "gore" if verdict_ == "block" else None,
+        "rank": rank,
+    }
+
+
+def batch(*entries: dict) -> str:
+    import json
+
+    return json.dumps({"images": list(entries)})
+
+
+async def test_a_duplicate_index_keeps_the_first_review(store):
+    reply = batch(entry(1, 8, rank=1), entry(1, 2, rank=2), entry(2, 5, rank=2))
+    ids, env = await review(ScriptedChat([reply]), store, images=2)
+
+    scores = {r["image_id"]: r["quality_score"] for r in env.output["reviews"]}
+    assert scores == {ids[0]: 8, ids[1]: 5}
+
+
+async def test_one_block_among_several_in_a_real_reply(store):
+    reply = batch(entry(1, 9, rank=1), entry(2, 7, "block"), entry(3, 6, rank=2))
+    ids, env = await review(ScriptedChat([reply]), store, images=3)
+
+    verdicts = {r["image_id"]: r["verdict"] for r in env.output["reviews"]}
+    assert verdicts == {ids[0]: "allow", ids[1]: "block", ids[2]: "allow"}
+    assert [r["image_id"] for r in env.output["reviews"]][-1] == ids[1]  # blocked last
+    assert await store.orphaned() == [ids[1]]  # that one image only
+
+
+# -- the per-image fallback ---------------------------------------------------------------------
+
+
+async def test_a_failed_batch_falls_back_to_one_call_per_image_on_the_same_step(store):
+    # batch + its repair, the in-step retry + its repair, then one call per image
+    backend = ScriptedChat(["junk"] * 4 + [verdict(4), verdict(9), verdict(6)])
+
+    ids, env = await review(backend, store, images=3)
+
+    assert env.state.status is Status.DONE
+    assert [r["image_id"] for r in env.output["reviews"]] == [ids[1], ids[2], ids[0]]
+    assert [r["rank"] for r in env.output["reviews"]] == [1, 2, 3]
+    assert env.state.spend.llm_calls == 7  # every call is on this step's account
+    last = [len(user_parts(backend, i)) for i in (4, 5, 6)]
+    assert last == [3, 3, 3]  # text, label, image: one image each
+
+
+async def test_the_fallback_keeps_what_it_got_when_one_image_fails(store):
+    backend = ScriptedChat(["junk"] * 4 + [verdict(7), "junk", "junk", verdict(5)])
+
+    ids, env = await review(backend, store, images=3)
+
+    got = [r["image_id"] for r in env.output["reviews"]]
+    assert got == [ids[0], ids[2]]  # the middle image has no review: unchecked, never delivered
+
+
+async def test_a_single_image_has_no_fallback(store):
+    backend = ScriptedChat(["junk"] * 4)  # a fallback call would raise: no replies left
+    _, env = await review(backend, store, images=1)
+    assert env.state.status is Status.FAILED and len(backend.requests) == 4
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        AllProvidersFailed("vision", []),
+        ContentRefused(
+            ProviderError("cloudflare", "m", "filtered", status=200, refused=True), "vision"
+        ),
+    ],
+)
+async def test_no_fallback_for_a_missing_provider_or_a_refusal(store, error):
+    backend = ScriptedChat([error])  # any further call would raise
+    _, env = await review(backend, store, images=3)
+    assert env.state.status is Status.FAILED and len(backend.requests) == 1
+
+
+async def test_no_fallback_after_an_unreadable_block(store):
+    backend = ScriptedChat(['{"images":[{"safety_verdict":"block"', "junk"])  # reply + repair
+    _, env = await review(backend, store, images=3)
+    assert env.state.status is Status.FAILED and len(backend.requests) == 2
+
+
+async def test_a_block_inside_the_fallback_still_stands(store):
+    backend = ScriptedChat(
+        ["junk"] * 4 + [verdict(9), verdict(9, safety_verdict="block", safety_reason="gore")]
+    )
+    ids, env = await review(backend, store, images=2)
+
+    verdicts = {r["image_id"]: r["verdict"] for r in env.output["reviews"]}
+    assert verdicts == {ids[0]: "allow", ids[1]: "block"}
+    assert await store.orphaned() == [ids[1]]
+
+
+# -- the unreadable block is logged every time --------------------------------------------------
+
+
+async def test_an_unreadable_block_fails_the_batch_and_is_logged(store):
+    from structlog.testing import capture_logs
+
+    bad = '{"images": [{"index": 1, "safety_verdict": "block"}]}'
+    with capture_logs() as logs:
+        _, env = await review(ScriptedChat([bad, verdict(10)]), store)
+
+    assert env.state.status is Status.FAILED
+    assert "said block" in env.state.reason
+    events = [e for e in logs if e["event"] == "critic.unattributed_block"]
+    assert len(events) == 1 and events[0]["log_level"] == "warning"
+
+
+# -- the vision model's image limit: balanced groups, one call each ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("count", "most", "sizes"),
+    [(1, 3, [1]), (3, 3, [3]), (4, 3, [2, 2]), (5, 3, [3, 2]), (7, 3, [3, 2, 2]), (4, 1, [1] * 4)],
+)
+def test_split_evenly(count, most, sizes):
+    from media_engine.agents.critic.critic import split_evenly
+
+    groups = split_evenly(count, most)
+    assert [len(g) for g in groups] == sizes
+    assert [i for g in groups for i in g] == list(range(count))  # every image, in order, once
+
+
+async def test_four_images_are_two_calls_of_two_and_ranked_across_both(store):
+    backend = ScriptedChat([verdict(5), verdict(9), verdict(7), verdict(3)])
+
+    ids, env = await review(backend, store, images=4)
+
+    assert len(backend.requests) == 2 and env.state.spend.llm_calls == 2
+    for call in (0, 1):  # never more than the model's limit in one request
+        assert sum(p["type"] == "image_url" for p in user_parts(backend, call)) == 2
+    got = [(r["image_id"], r["rank"], r["quality_score"]) for r in env.output["reviews"]]
+    assert got == [(ids[1], 1, 9), (ids[2], 2, 7), (ids[0], 3, 5), (ids[3], 4, 3)]
+
+
+async def test_a_group_that_fails_leaves_the_other_groups_reviews(store):
+    # group 1 (images 1-2): no provider left (no retry, no fallback); group 2 (images 3-4) is fine
+    backend = ScriptedChat([AllProvidersFailed("vision", []), verdict(8), verdict(6)])
+
+    ids, env = await review(backend, store, images=4)
+
+    assert env.state.status is Status.DONE
+    assert [r["image_id"] for r in env.output["reviews"]] == [ids[2], ids[3]]  # 1-2: unchecked
+
+
+async def test_an_unreadable_block_in_one_group_fails_the_whole_step(store):
+    bad = '{"images":[{"index":1,"safety_verdict":"block"'
+    backend = ScriptedChat([bad, bad, verdict(9), verdict(9)])  # group 1 unreadable, group 2 fine
+    _, env = await review(backend, store, images=4)
+    assert env.state.status is Status.FAILED and "said block" in env.state.reason

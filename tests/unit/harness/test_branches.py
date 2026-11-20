@@ -57,6 +57,14 @@ def rich(**policy: Any) -> Any:
     )
 
 
+def tight() -> Any:
+    """CFG whose free budget (14,000 tokens) can afford two images at the measured 5,000 tokens a
+    critique, not four: free now fits n=4 for real, so budget refusals need a smaller budget."""
+    free = CFG.policy.budgets["free"].model_copy(update={"tokens_total": 14000})
+    budgets = {**CFG.policy.budgets, "free": free}
+    return CFG.model_copy(update={"policy": CFG.policy.model_copy(update={"budgets": budgets})})
+
+
 class SlowImages(ScriptedImages):
     """Every call takes a moment, so calls that are allowed to overlap do overlap."""
 
@@ -176,7 +184,8 @@ async def test_n_images_are_all_returned_ranked_best_first(store):
     assert len(env.output["image_ids"]) == 4 == len(set(env.output["image_ids"]))
     assert env.output["quality_scores"] == [9, 7, 5, 3]  # best first
     assert env.output["quality_score"] == 9
-    assert chains(llm) == {ENHANCER: 1, CRITIC: 1}  # ONE enhancement, ONE ranking call
+    # ONE enhancement; the vision model takes 3 images a request, so 4 images are two calls
+    assert chains(llm) == {ENHANCER: 1, CRITIC: 2}
     assert sorted(r.seed for _, r, _ in images.requests) == [100, 101, 102, 103]  # distinct seeds
     plan = final_state(run_store).plan
     assert (plan[1].branches_total, plan[1].branches_done, plan[1].branches_aborted) == (4, 4, 0)
@@ -306,13 +315,13 @@ async def test_every_image_blocked_rejects_the_run_and_logs_a_gate_miss(store):
 
 
 async def test_the_budget_is_checked_before_each_branchs_generation_call(store):
-    # Free's placeholder budget cannot cover four images: later branches are refused BEFORE
+    # A small free budget cannot cover four images: later branches are refused BEFORE
     # their paid call, never after, and the budget is never exceeded.
     llm = ScriptedChat([enhanced(), *[verdict(9)] * 4])
     images = ScriptedImages(pics(4))
     run_store = RecordingStore()
 
-    env = await create(build(llm, images, store, run_store=run_store), "free", n=4)
+    env = await create(build(llm, images, store, run_store=run_store, cfg=tight()), "free", n=4)
 
     state = final_state(run_store)
     assert 1 <= len(images.requests) < 4
@@ -632,10 +641,42 @@ async def test_the_one_guard_funds_what_it_can_and_refuses_the_rest_before_any_c
     images = ScriptedImages(pics(4))
     run_store = RecordingStore()
 
-    env = await create(build(llm, images, store, run_store=run_store), "free", n=4)
+    env = await create(build(llm, images, store, run_store=run_store, cfg=tight()), "free", n=4)
 
     state = final_state(run_store)
     funded = len(images.requests)
     assert 1 <= funded < 4  # free cannot afford four: the rest never reach a provider
     assert [r.failure for r in state.round].count("budget") == 4 - funded
     assert len(env.output["image_ids"]) == funded
+
+
+async def test_the_real_free_budget_now_funds_four_images(store):
+    # Measured (2026-11-20): a critique costs ~5,000 tokens per image at worst, not 12,000, so the
+    # free plan's own budget covers n=4 (it used to refuse two of the four).
+    llm = ScriptedChat([enhanced(), *[verdict(9)] * 4])
+    images = ScriptedImages(pics(4))
+    run_store = RecordingStore()
+
+    env = await create(build(llm, images, store, run_store=run_store), "free", n=4)
+
+    assert len(images.requests) == 4 and len(env.output["image_ids"]) == 4
+    assert [r.failure for r in final_state(run_store).round] == [None] * 4
+
+
+@pytest.mark.parametrize("n", [1, 3])
+async def test_the_critic_step_budget_grows_with_the_number_of_images(store, n):
+    llm = ScriptedChat([enhanced(), *[verdict(9)] * n])
+    agent = build(llm, ScriptedImages(pics(n)), store)
+    seen: list[int] = []
+    real_run = agent._critic.run
+
+    async def spy(goal: Any, stop: Any, auth: Any, inputs: Any) -> Any:
+        seen.append(stop.max_tokens)
+        return await real_run(goal, stop, auth, inputs)
+
+    agent._critic.run = spy  # type: ignore[method-assign]
+
+    await create(agent, "free", n=n)
+
+    per_image = CFG.policy.stopping_condition("critique", "free", "x").max_tokens
+    assert seen == [per_image * n]  # one call; a repair of it re-sends every image

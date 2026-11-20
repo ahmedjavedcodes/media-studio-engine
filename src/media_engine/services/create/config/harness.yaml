@@ -35,7 +35,7 @@ cancel_poll_ms: 200
 # a held-back reserve (the Critic's one retry is inside its own step and its estimate). The field
 # stays in the Budget contract. History: 0.30 refused images the plans are meant to give (free
 # n=2 got 1, pro n=4 got 3); 0.10 fixed that while the Critic re-ask existed (review round 2).
-# The critique estimate below (12,000 tokens) still drives the free plan's headroom: D3.
+# The critique estimate below (5,000 tokens per image, measured) sizes the free plan's headroom: D3.
 budgets:
   free: {tokens_total: 30000, cost_cap_usd: 0.0, neurons_total: 600, reserve_fraction: 0.0}
   pro: {tokens_total: 60000, cost_cap_usd: 0.20, neurons_total: 1500, reserve_fraction: 0.0}
@@ -49,11 +49,14 @@ budgets:
 #                      Must cover gpt-oss reasoning tokens as well as the JSON.
 #   neurons:           pre-flight neuron estimate. generate = flux-1-schnell 1024x1024 @ 4 steps
 #                      (4 tiles x 4.80 + 4 steps x 9.60 = 57.6), rounded up.
-#   critique:          the image makes each call large (~2,500 prompt tokens incl. a 768px image),
-#                      and the repair re-sends all of it plus the first reply. 12,000 tokens lets
-#                      the repair fit (6,000 never did). Neurons: ~100 per vision call at
-#                      llama-4-scout prices (UNVERIFIED: ~24.5k neurons/M in, ~77k/M out), x2 for
-#                      a repair. Replace both with measured values after the cf-vision smoke run.
+#   critique:          PER IMAGE, from the live free-path run of 2026-11-20 (Groq qwen3.8-27b, 512 px
+#                      thumbnails, schema sent twice): prompt tokens = ~560 fixed + ~1,280 per
+#                      image, ~70 + ~25 per image in the reply. Worst case in one step is a batch
+#                      plus its repair (the repair re-sends the prompt, the first reply and the
+#                      schema): N=1 ~4.5K tokens, N=4 ~12.5K. 5,000 per image covers both, and
+#                      the Critic's own step budget is this figure x the number of images.
+#                      Neurons: only a Cloudflare fallback spends any (llama-4-scout, measured 50
+#                      for 1 image, 70 for 2): 50 per image is the worst case.
 # cost_usd is the WORST REACHABLE chain entry (the paid fallback: image_create ends in
 #   openrouter/google/gemini-2.5-flash-image, ~$0.04 per image; a paid LLM fallback call ~$0.001-
 #   0.005). It is counted only when ALLOW_PAID is on (otherwise no paid entry can be reached),
@@ -67,9 +70,7 @@ step_estimates:
   # plan's registry models can bill at default settings (M4; a flat 0.04 under-estimated the
   # ultra models). neurons 57.6 = flux-1-schnell, 1024x1024, 4 steps (verified Cloudflare rate).
   generate: {tokens: 0, completion_tokens: 0, cost_usd: 0.04, neurons: 57.6}
-  # critique: per IMAGE, sized for a Cloudflare fallback plus a repair (Groq qwen measured ~1,330
-  # prompt tokens per 768 px image). One batched call covers all images, so this over-counts.
-  critique: {tokens: 12000, completion_tokens: 1200, cost_usd: 0.005, neurons: 200}
+  critique: {tokens: 5000, completion_tokens: 1200, cost_usd: 0.005, neurons: 50}
   supervise: {tokens: 3000, completion_tokens: 800, cost_usd: 0.002, neurons: 10}
 
 deadlines_ms: # wall-clock deadline per step (repair included)

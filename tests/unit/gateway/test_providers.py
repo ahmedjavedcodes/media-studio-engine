@@ -136,3 +136,50 @@ async def test_providers_without_structured_output_get_the_schema_in_the_system_
     system = body["messages"][0]["content"]
     assert system.startswith("sys") and json.dumps(SCHEMA, separators=(",", ":")) in system
     assert request.messages[0]["content"] == "sys"  # the caller's messages are not mutated
+
+
+@respx.mock
+async def test_groq_qwen_gets_the_schema_both_natively_and_in_the_prompt(gateway):
+    # qwen invented field names when it never saw the schema (measured), so it sees it twice
+    respx.post(CF_CHAT).mock(return_value=cf_error(429, 3036))
+    route = respx.post(GROQ_CHAT).mock(return_value=chat_ok())
+    request = LLMRequest(
+        messages=[{"role": "system", "content": "sys"}, *USER_MSG], response_schema=SCHEMA
+    )
+    await gateway.chat("vision", request)
+    body = json.loads(route.calls[0].request.content)
+    assert body["response_format"]["type"] == "json_schema"
+    assert json.dumps(SCHEMA, separators=(",", ":")) in body["messages"][0]["content"]
+
+
+@respx.mock
+async def test_groq_json_validate_failed_is_a_bad_reply_not_a_bad_request(gateway):
+    # Groq's json_schema mode 400s when the model's JSON is broken. That must reach the agent as
+    # text it can repair, not stop the step as our own bad request.
+    respx.post(CF_CHAT).mock(return_value=cf_error(429, 3036))
+    body = {
+        "error": {
+            "message": "Failed to generate JSON.",
+            "type": "invalid_request_error",
+            "code": "json_validate_failed",
+            "failed_generation": '{~~ "images": [',
+        }
+    }
+    respx.post(GROQ_CHAT).mock(return_value=httpx.Response(400, json=body))
+    result = await gateway.chat("fast_llm", LLMRequest(messages=USER_MSG, response_schema=SCHEMA))
+    assert result.output.text == '{~~ "images": ['
+    assert result.provider == "groq"  # no fallback, no exception
+
+
+@respx.mock
+async def test_other_groq_400s_still_fail_loudly(gateway):
+    import pytest
+
+    from media_engine.gateway.errors import BadRequestError
+
+    respx.post(CF_CHAT).mock(return_value=cf_error(429, 3036))
+    respx.post(GROQ_CHAT).mock(
+        return_value=httpx.Response(400, json={"error": {"message": "nope", "code": "other"}})
+    )
+    with pytest.raises(BadRequestError):
+        await gateway.chat("fast_llm", LLMRequest(messages=USER_MSG))

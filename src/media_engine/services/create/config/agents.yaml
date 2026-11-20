@@ -50,6 +50,9 @@ critic:
     # One more attempt, inside the Critic, when a review ends with no verdict (create is linear:
     # the supervisor never re-runs a step). Not after a block or an unfixable failure.
     retries: 1
+    # Groq qwen3.8-27b takes at most 3 images in one request (a 4th is an HTTP 400, measured
+    # 2026-11-20). n=4 is reviewed as two groups of 2, run together.
+    max_images_per_call: 3
   models: {free: vision, pro: vision, max: vision, ultra: vision}
 
 image_grand_agent: # the supervisor: makes NO LLM call (create is linear, v2.2), so the chain is never used

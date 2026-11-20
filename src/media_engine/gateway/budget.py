@@ -16,7 +16,8 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from media_engine.gateway.image_registry import ImageModelSpec
+from media_engine.contracts import Plan
+from media_engine.gateway.image_registry import ImageModelSpec, image_registry
 from media_engine.gateway.registry import ModelCard
 from media_engine.gateway.types import ImageRequest
 
@@ -126,6 +127,17 @@ def estimate_image_usd(
     refs = len(request.input_images)
     inputs = refs * (_listed_input_price(spec, "image") + _listed_input_price(spec, "megapixel"))
     return round(per_image * max(1, request.n) + inputs, 6)
+
+
+def dearest_image_usd(plan: Plan) -> float | None:
+    """The dearest image a plan's registry models can bill at default settings (None: none is
+    priced). The entry point hands this to the supervisor for its step guard."""
+    prices = [
+        usd
+        for spec in image_registry().for_plan(plan)
+        if (usd := estimate_image_usd(spec, ImageRequest(prompt="x"))) is not None
+    ]
+    return max(prices) if prices else None
 
 
 class DailyNeuronMeter:

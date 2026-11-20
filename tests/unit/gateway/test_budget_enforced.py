@@ -22,14 +22,16 @@ def test_the_estimate_is_declared_enforced():
     assert "ENFORCED" in (budget.__doc__ or "")
 
 
-def test_only_the_gateway_and_the_step_guard_call_the_usd_estimate():
+def test_only_the_gateway_router_calls_the_usd_estimate():
     users = sorted(
         str(path.relative_to(SRC))
         for path in SRC.rglob("*.py")
         if path.name != "budget.py" and "estimate_image_usd" in path.read_text(encoding="utf-8")
     )
-    # the router checks every paid call; the supervisor sizes the step guard with the same figure
-    assert users == ["agents/image_grand/supervisor.py", "gateway/router.py"]
+    # the router checks every paid call; the supervisor gets its step-guard figure injected
+    assert users == ["gateway/router.py"]
+    supervisor = (SRC / "agents/image_grand/supervisor.py").read_text(encoding="utf-8")
+    assert "image_registry" not in supervisor  # the price lookup is injected, not imported
 
 
 def test_the_estimate_matches_a_real_bill():

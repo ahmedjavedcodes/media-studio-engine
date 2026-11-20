@@ -73,11 +73,8 @@ from media_engine.contracts import (
 )
 from media_engine.core.config import get_settings
 from media_engine.core.logging import get_logger
-from media_engine.gateway.budget import estimate_image_usd
-from media_engine.gateway.image_registry import image_registry
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.gateway.model_gateway import ImageBackend, ModelGateway
-from media_engine.gateway.types import ImageRequest
 from media_engine.harness import trace as tracing
 from media_engine.harness.run_state import (
     AttemptRecord,
@@ -243,6 +240,7 @@ class ImageGrandAgent(Agent):
         run_store: RunStore | None = None,
         paid_providers: Iterable[str] = (),
         allow_paid: bool = False,
+        price_lookup: Callable[[Plan], float | None] | None = None,
         seed_source: Callable[[], int] | None = None,
         trace: Trace | None = None,
     ) -> None:
@@ -257,6 +255,9 @@ class ImageGrandAgent(Agent):
         self._store = run_store
         self._paid = frozenset(paid_providers)
         self._allow_paid = allow_paid
+        # plan -> the dearest image that plan can be billed (USD), or None when unknown. Passed in
+        # by the entry point, so the supervisor does not reach into the gateway's registry.
+        self._price_lookup = price_lookup
         self._trace = trace  # developer trace for this run (create_images passes one in)
         # Tests may inject a seed source; otherwise each round's base seed is DERIVED from the
         # run id (spec §5.3 / D1), so a run can be replayed from its id alone.
@@ -314,6 +315,12 @@ class ImageGrandAgent(Agent):
                 "run_id": state.run_id,
                 "image_ids": [],
                 **outcome.output,
+                # why a FAILED run failed (e.g. "bad_request"), for the backend's retry decision
+                **(
+                    {"failure": outcome.failure}
+                    if outcome.failure and outcome.status is Status.FAILED
+                    else {}
+                ),
                 "billable": billable,
             },
             summary=outcome.summary or SUMMARIES[outcome.status],
@@ -577,6 +584,12 @@ class ImageGrandAgent(Agent):
 
     # -- nodes ----------------------------------------------------------------------------------
 
+    def _critique_stop(self, ctx: RunContext, images: int) -> StoppingCondition:
+        """The Critic reviews every image in ONE call, so its token budget is the per-image
+        estimate times the number of images (a repair of a 4-image call re-sends all four)."""
+        stop = self._stop(ctx, "critique")
+        return stop.model_copy(update={"max_tokens": stop.max_tokens * max(1, images)})
+
     def _stop(self, ctx: RunContext, kind: StepKind) -> StoppingCondition:
         return self._policy.stopping_condition(kind, ctx.auth.plan, SUCCESS[kind])
 
@@ -650,16 +663,11 @@ class ImageGrandAgent(Agent):
         )
 
     def _generate_usd(self, plan: Plan) -> float:
-        """The dearest image the plan's models can bill at default settings (M4: a flat figure
-        under-estimated the ultra models). Falls back to harness.yaml's flat figure when the
-        registry has nothing priced for the plan."""
-        registry = image_registry()
-        prices = [
-            usd
-            for spec in registry.for_plan(plan)
-            if (usd := estimate_image_usd(spec, ImageRequest(prompt="x"))) is not None
-        ]
-        return max(prices) if prices else self._policy.step_estimates["generate"].cost_usd
+        """The dearest image the plan can be billed (M4: a flat figure under-estimated the ultra
+        models). The entry point supplies the lookup; with none, or no price known for the plan,
+        harness.yaml's flat figure stands."""
+        priced = self._price_lookup(plan) if self._price_lookup is not None else None
+        return priced if priced is not None else self._policy.step_estimates["generate"].cost_usd
 
     def _call_cap_usd(self, ctx: RunContext) -> float | None:
         """What one generate call may cost: the dollars left for steps, shared out among the
@@ -757,7 +765,7 @@ class ImageGrandAgent(Agent):
             with tracing.scope(ctx.trace, "critique", records[0].number, 0):
                 env = await self._critic.run(
                     Goal(task="critique", instructions="Review and rank the images."),
-                    self._stop(ctx, "critique"),
+                    self._critique_stop(ctx, len(records)),
                     ctx.auth,
                     {
                         "image_ids": [r.image_id for r in records],
@@ -1173,6 +1181,7 @@ def create_image_grand_agent(
     run_store: RunStore | None = None,
     paid_providers: Iterable[str] | None = None,
     allow_paid: bool | None = None,
+    price_lookup: Callable[[Plan], float | None] | None = None,
     seed_source: Callable[[], int] | None = None,
     trace: Trace | None = None,
 ) -> ImageGrandAgent:
@@ -1208,6 +1217,7 @@ def create_image_grand_agent(
         run_store=run_store,
         paid_providers=get_settings().paid_providers if paid_providers is None else paid_providers,
         allow_paid=get_settings().allow_paid if allow_paid is None else allow_paid,
+        price_lookup=price_lookup,
         seed_source=seed_source,
         trace=trace,
     )

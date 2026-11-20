@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -43,6 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from media_engine.agents.base import (
     Agent,
     AgentConfig,
+    Structured,
     describe_validation_error,
 )
 from media_engine.contracts import AuthContext, Envelope, Goal, Spend, Status, StoppingCondition
@@ -57,6 +59,9 @@ from media_engine.schemas import CriticOutput, ImageReview
 INPUT_TEMPLATE = PROMPTS_DIR / "image_create" / "critic.input.md"
 DEFAULT_SUMMARY = "Reviewed your image."
 DEFAULT_BLOCK_REASON = "safety policy"
+# Why a batch failed when a reply said "block" that no valid answer carried. Logged
+# (critic.unattributed_block) on every occurrence, so its rate can be counted.
+UNATTRIBUTED_BLOCK = "a reply said block and the final answer did not"
 NONE_GIVEN = "none"
 ORPHAN_REASON = "safety_block"
 
@@ -81,6 +86,9 @@ class CriticParams(BaseModel):
     # Fallback only, when the thumbnail is missing: shrink the original to `thumbnail_size`.
     jpeg_quality: int = Field(ge=1, le=95)
     retries: int = Field(ge=0, le=1)  # extra attempts after a review with no usable output
+    # The most images the vision model takes in ONE request (Groq qwen3.8-27b: 3). More images
+    # are reviewed in balanced groups, one call each.
+    max_images_per_call: int = Field(ge=1)
 
 
 # Failures another attempt cannot fix: retrying would only repeat them (or route around a
@@ -102,6 +110,20 @@ class CriticInputs(BaseModel):
 
 def _clean_reason(reason: object) -> str:
     return reason.strip() if isinstance(reason, str) and reason.strip() else DEFAULT_BLOCK_REASON
+
+
+def split_evenly(count: int, most: int) -> list[list[int]]:
+    """Positions 0..count-1 in the fewest groups of at most `most`, as even as possible
+    (4 images, most 3 -> [0, 1], [2, 3]; never 3 + 1)."""
+    groups = -(-count // most)
+    size, extra = divmod(count, groups)
+    out: list[list[int]] = []
+    start = 0
+    for g in range(groups):
+        end = start + size + (1 if g < extra else 0)
+        out.append(list(range(start, end)))
+        start = end
+    return out
 
 
 def says_block(text: str) -> bool:
@@ -156,6 +178,83 @@ class Critic(Agent):
             downscale, data, self.params.thumbnail_size, self.params.jpeg_quality
         )
 
+    async def _one_call_per_image(
+        self,
+        auth: AuthContext,
+        stop: StoppingCondition,
+        system: str,
+        contents: list[list[dict[str, Any]]],
+        failed_batch: Structured[CriticOutput],
+    ) -> Structured[CriticOutput]:
+        """One call per image, after the batch failed. All spend, calls and trace records join
+        the failed batch's, so the step accounts for everything. Each call reviews one image;
+        its entry is re-indexed to the image's real position. An image whose call fails has no
+        review (unchecked). An unreadable "block" in any call stops the fallback at once."""
+        total = failed_batch
+        reviews: list[ImageReview] = []
+        for position, content in enumerate(contents, start=1):
+            one = await self.call_structured(auth, stop, content, CriticOutput, system=system)
+            total.spend = total.spend.plus(one.spend)
+            total.calls.extend(one.calls)
+            total.records.extend(one.records)
+            if any(says_block(c.text) for c in one.calls):
+                if one.output is not None:
+                    reviews.extend(
+                        r.model_copy(update={"index": position}) for r in one.output.images[:1]
+                    )
+                break  # the caller's block rule decides; do not spend on the rest
+            if one.output is not None and one.output.images:
+                reviews.append(one.output.images[0].model_copy(update={"index": position}))
+        if reviews:
+            total.output = CriticOutput(images=reviews)
+            total.failure, total.error = None, None
+        return total
+
+    async def _review_group(
+        self,
+        auth: AuthContext,
+        stop: StoppingCondition,
+        system: str,
+        content_for: Callable[[list[tuple[bytes, str]]], list[dict[str, Any]]],
+        sent: list[tuple[bytes, str]],
+    ) -> tuple[Structured[CriticOutput], bool]:
+        """One group of images: a call, its in-step retry, and (for more than one image) the
+        per-image fallback. Returns (result, unattributed): `unattributed` is True when a reply
+        said "block" and the answer we kept blocks nothing."""
+        content = content_for(sent)
+        result = await self.call_structured(auth, stop, content, CriticOutput, system=system)
+        for _ in range(self.params.retries):
+            if result.output is not None or any(says_block(c.text) for c in result.calls):
+                break
+            if result.failure in NO_RETRY:
+                break
+            log.info("critic.retry", failure=result.failure)
+            again = await self.call_structured(auth, stop, content, CriticOutput, system=system)
+            # One step, one account: both attempts' spend, calls and trace records.
+            again.spend = result.spend.plus(again.spend)
+            again.calls = [*result.calls, *again.calls]
+            again.records = [*result.records, *again.records]
+            result = again
+        # The group gave nothing usable (after its retry): one call per image, so images already
+        # paid for are not lost. Not after a refusal, a missing provider or our own bad request
+        # (another call would only repeat them), and never after an unreadable "block". Spend
+        # stays on this step.
+        if (
+            result.output is None
+            and len(sent) > 1
+            and result.failure not in NO_RETRY
+            and not any(says_block(c.text) for c in result.calls)
+        ):
+            log.warning("critic.per_image_fallback", images=len(sent), failure=result.failure)
+            result = await self._one_call_per_image(
+                auth, stop, system, [content_for([item]) for item in sent], result
+            )
+        said_block = any(says_block(c.text) for c in result.calls)
+        blocks_something = result.output is not None and any(
+            r.safety_verdict == "block" for r in result.output.images
+        )
+        return result, said_block and not blocks_something
+
     async def run(
         self, goal: Goal, stop: StoppingCondition, auth: AuthContext, inputs: dict[str, Any]
     ) -> Envelope:
@@ -182,47 +281,61 @@ class Critic(Agent):
             return self.failed(f"could not load image: {type(err).__name__}", Spend(), "storage")
 
         must_have = [m for m in (sanitize(item) for item in args.must_have) if m]
-        text = render(
-            load_prompt(INPUT_TEMPLATE),
-            prompt=user_prompt,
-            must_have="\n".join(f"- {m}" for m in must_have) or NONE_GIVEN,
-            count=str(len(ids)),
-        )
-        # OpenAI-style multimodal content: the text, then a label and an image per image.
-        content: list[dict[str, Any]] = [{"type": "text", "text": text}]
-        for number, (data, mime) in enumerate(sent, start=1):
-            content.append({"type": "text", "text": f"Image {number}"})
-            content.append({"type": "image_url", "image_url": {"url": data_url(data, mime)}})
         system = render(load_prompt(PROMPTS_DIR / rubric))
 
-        result = await self.call_structured(auth, stop, content, CriticOutput, system=system)
-        for _ in range(self.params.retries):
-            if result.output is not None or any(says_block(c.text) for c in result.calls):
-                break
-            if result.failure in NO_RETRY:
-                break
-            log.info("critic.retry", failure=result.failure)
-            again = await self.call_structured(auth, stop, content, CriticOutput, system=system)
-            # One step, one account: both attempts' spend, calls and trace records.
-            again.spend = result.spend.plus(again.spend)
-            again.calls = [*result.calls, *again.calls]
-            again.records = [*result.records, *again.records]
-            result = again
+        def content_for(picked: list[tuple[bytes, str]]) -> list[dict[str, Any]]:
+            """OpenAI-style multimodal content: the text, then a label and an image per image."""
+            text = render(
+                load_prompt(INPUT_TEMPLATE),
+                prompt=user_prompt,
+                must_have="\n".join(f"- {m}" for m in must_have) or NONE_GIVEN,
+                count=str(len(picked)),
+            )
+            parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
+            for number, (data, mime) in enumerate(picked, start=1):
+                parts.append({"type": "text", "text": f"Image {number}"})
+                parts.append({"type": "image_url", "image_url": {"url": data_url(data, mime)}})
+            return parts
 
-        if result.output is None:
+        # The vision model takes a limited number of images per request (Groq qwen3.8-27b: 3,
+        # measured 2026-11-20: a 4-image request is an HTTP 400). Split into balanced groups, one
+        # call each, run together. Within a group the model ranks; across groups the scores do.
+        groups = split_evenly(len(sent), self.params.max_images_per_call)
+        outcomes = await asyncio.gather(
+            *[
+                self._review_group(auth, stop, system, content_for, [sent[i] for i in group])
+                for group in groups
+            ]
+        )
+        result: Structured[CriticOutput] = Structured(output=None, spend=Spend())
+        merged: list[ImageReview] = []
+        for group, (got, unattributed) in zip(groups, outcomes, strict=True):
+            result.spend = result.spend.plus(got.spend)
+            result.calls.extend(got.calls)
+            result.records.extend(got.records)
+            if unattributed:
+                # An unreadable "block" cannot be attributed to an image, and a repair, retry or
+                # fallback must never turn it into "allow": fail the WHOLE step (safety first).
+                log.warning("critic.unattributed_block", calls=len(result.calls), images=len(ids))
+                return self.failed(UNATTRIBUTED_BLOCK, result.spend, "invalid_output")
+            if got.output is None:
+                result.error, result.failure = got.error, got.failure
+                continue
+            for review in got.output.images:
+                if 1 <= review.index <= len(group):  # position inside the group -> global
+                    merged.append(
+                        review.model_copy(
+                            update={
+                                "index": group[review.index - 1] + 1,
+                                "rank": review.rank if len(groups) == 1 else None,
+                            }
+                        )
+                    )
+        if not merged:
             return self.failed(
                 result.error or "critic produced no output", result.spend, result.failure
             )
-        # An unreadable reply that said "block" cannot be attributed to an image, and a repair
-        # (or retry) must never turn it into "allow": if any reply said block and the answer
-        # we kept blocks nothing, nothing in this batch is trusted.
-        if any(says_block(c.text) for c in result.calls) and not any(
-            r.safety_verdict == "block" for r in result.output.images
-        ):
-            log.warning("critic.unattributed_block", calls=len(result.calls))
-            return self.failed(
-                "a reply said block and the final answer did not", result.spend, "invalid_output"
-            )
+        result.output = CriticOutput(images=merged)
         # One review per image: drop unknown or repeated indexes, keep the first.
         seen: dict[int, ImageReview] = {}
         for review in result.output.images:
