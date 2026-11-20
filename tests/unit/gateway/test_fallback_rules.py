@@ -14,7 +14,17 @@ from media_engine.gateway.fallback import AvailabilityState
 from media_engine.gateway.router import Gateway
 from media_engine.gateway.types import ImageRequest, LLMRequest
 
-from .conftest import CF_CHAT, CF_FIRST_CHAINS, CF_RUN, GROQ_CHAT, NOW, cf_error, chat_ok
+from .conftest import (
+    CF_CHAT,
+    CF_FIRST_CHAINS,
+    CF_FIRST_FAST_LLM,
+    CF_FIRST_LLM,
+    CF_RUN,
+    GROQ_CHAT,
+    NOW,
+    cf_error,
+    chat_ok,
+)
 
 REQ = LLMRequest(messages=[{"role": "user", "content": "hello"}])
 CF_SCHNELL = f"{CF_RUN}/@cf/black-forest-labs/flux-1-schnell"
@@ -27,7 +37,7 @@ async def test_happy_path_uses_cloudflare_first(gateway):
     cf = respx.post(CF_CHAT).mock(return_value=chat_ok("from cf"))
     groq = respx.post(GROQ_CHAT).mock(return_value=chat_ok("from groq"))
 
-    result = await gateway.chat("reasoning", REQ)
+    result = await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert result.provider == "cloudflare"
     assert result.model == CF_120B
@@ -41,7 +51,7 @@ async def test_cf_3036_marks_exhausted_until_midnight_and_skips_without_retry(ga
     cf = respx.post(CF_CHAT).mock(return_value=cf_error(429, 3036, "daily limit"))
     groq = respx.post(GROQ_CHAT).mock(return_value=chat_ok("from groq"))
 
-    result = await gateway.chat("reasoning", REQ)
+    result = await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert result.provider == "groq" and result.is_fallback is True
     assert cf.call_count == 1  # no retry
@@ -49,7 +59,7 @@ async def test_cf_3036_marks_exhausted_until_midnight_and_skips_without_retry(ga
     assert state.unavailable_reason("cloudflare", CF_120B) == f"provider_exhausted_until_{until}"
 
     # The next call (any task) doesn't even touch Cloudflare.
-    await gateway.chat("fast_llm", REQ)
+    await gateway.chat(CF_FIRST_FAST_LLM, REQ)
     assert cf.call_count == 1
     assert groq.call_count == 2
 
@@ -66,9 +76,9 @@ async def test_cf_exhaustion_ends_at_utc_midnight(settings, sleeps):
 
     gw = Gateway(settings, chains=CF_FIRST_CHAINS, state=state, sleep=fake_sleep)
     try:
-        assert (await gw.chat("reasoning", REQ)).provider == "groq"
+        assert (await gw.chat(CF_FIRST_LLM, REQ)).provider == "groq"
         clock["now"] = datetime(2026, 11, 14, 0, 0, 1, tzinfo=UTC)
-        assert (await gw.chat("reasoning", REQ)).provider == "cloudflare"
+        assert (await gw.chat(CF_FIRST_LLM, REQ)).provider == "cloudflare"
         assert cf.call_count == 2
     finally:
         await gw.aclose()
@@ -81,7 +91,7 @@ async def test_cf_3040_retries_once_with_backoff_then_succeeds(gateway, sleeps):
     )
     groq = respx.post(GROQ_CHAT).mock(return_value=chat_ok("groq"))
 
-    result = await gateway.chat("reasoning", REQ)
+    result = await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert result.provider == "cloudflare" and result.output.text == "second try"
     assert cf.call_count == 2 and groq.call_count == 0
@@ -93,7 +103,7 @@ async def test_cf_3040_retries_once_then_next_provider(gateway, sleeps):
     cf = respx.post(CF_CHAT).mock(return_value=cf_error(429, 3040, "capacity"))
     groq = respx.post(GROQ_CHAT).mock(return_value=chat_ok("groq"))
 
-    result = await gateway.chat("reasoning", REQ)
+    result = await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert result.provider == "groq" and result.is_fallback is True
     assert cf.call_count == 2 and groq.call_count == 1
@@ -105,7 +115,7 @@ async def test_cf_5035_drops_model_and_goes_next(gateway, state):
     cf = respx.post(CF_CHAT).mock(return_value=cf_error(400, 5035, "needs paid plan"))
     respx.post(GROQ_CHAT).mock(return_value=chat_ok("groq"))
 
-    result = await gateway.chat("reasoning", REQ)  # 5035 must win over the 400 rule
+    result = await gateway.chat(CF_FIRST_LLM, REQ)  # 5035 must win over the 400 rule
 
     assert result.provider == "groq"
     assert cf.call_count == 1
@@ -124,7 +134,7 @@ async def test_groq_429_short_retry_after_is_honoured(gateway, sleeps):
         ]
     )
 
-    result = await gateway.chat("reasoning", REQ)
+    result = await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert result.provider == "groq" and result.output.text == "after wait"
     assert groq.call_count == 2
@@ -139,7 +149,7 @@ async def test_groq_429_long_retry_after_goes_next_and_cools_down(gateway, state
     )
 
     with pytest.raises(AllProvidersFailed):  # reasoning chain ends in an openrouter placeholder
-        await gateway.chat("reasoning", REQ)
+        await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert groq.call_count == 1  # no sleeping through 10 minutes, no retry
     assert sleeps == []
@@ -152,7 +162,7 @@ async def test_5xx_retries_once_then_next(gateway, sleeps, failure):
     cf = respx.post(CF_CHAT).mock(return_value=failure)
     groq = respx.post(GROQ_CHAT).mock(return_value=chat_ok("groq"))
 
-    result = await gateway.chat("reasoning", REQ)
+    result = await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert result.provider == "groq"
     assert cf.call_count == 2 and groq.call_count == 1
@@ -164,7 +174,7 @@ async def test_timeout_retries_once_then_next(gateway):
     cf = respx.post(CF_CHAT).mock(side_effect=httpx.ReadTimeout("slow"))
     respx.post(GROQ_CHAT).mock(return_value=chat_ok("groq"))
 
-    result = await gateway.chat("reasoning", REQ)
+    result = await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert result.provider == "groq"
     assert cf.call_count == 2
@@ -174,7 +184,7 @@ async def test_timeout_retries_once_then_next(gateway):
 async def test_5xx_then_success_on_retry_stays_on_provider(gateway):
     cf = respx.post(CF_CHAT).mock(side_effect=[httpx.Response(502), chat_ok("ok")])
 
-    result = await gateway.chat("reasoning", REQ)
+    result = await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert result.provider == "cloudflare" and cf.call_count == 2
 
@@ -185,7 +195,7 @@ async def test_400_does_not_fall_back_and_raises_clear_error(gateway):
     groq = respx.post(GROQ_CHAT).mock(return_value=chat_ok("never"))
 
     with pytest.raises(BadRequestError) as exc:
-        await gateway.chat("reasoning", REQ)
+        await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert "bad param: foo" in str(exc.value)
     assert exc.value.provider == "cloudflare"
@@ -199,7 +209,7 @@ async def test_groq_400_does_not_fall_back(gateway):
         return_value=httpx.Response(400, json={"error": {"message": "bad", "code": "x"}})
     )
     with pytest.raises(BadRequestError):
-        await gateway.chat("reasoning", REQ)
+        await gateway.chat(CF_FIRST_LLM, REQ)
 
 
 @respx.mock

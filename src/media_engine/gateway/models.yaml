@@ -20,6 +20,14 @@
 # Catalogue values checked against GET /api/v1/images/models on 2026-11-20 (all 15 slugs
 # present). Where the catalogue differed from the spec, the catalogue value is used and noted.
 
+# Plan guard for settings that MULTIPLY price, enforced by the gateway before any call
+# (image_registry.plan_block). setting -> value -> lowest tier allowed. Applies to every model
+# that has the setting; a model's own `min_tier_for` overrides it per value. The values checked
+# are the ones actually SENT (registry defaults included), so an unset quality is checked as
+# its default (`low`).
+setting_policy:
+  resolution: {"4K": ultra} # 4K output bills the top resolution rate (e.g. Riverflow $0.17)
+
 models:
   # -- ENTRY: paid fallback for free-plan users ----------------------------------------------
 
@@ -29,7 +37,9 @@ models:
     billing_unit: token
     price_measured_usd: 0.006 # at quality low (196 image tokens)
     price_by_quality: {low: 0.006, high: 0.211} # high: 7,024 tokens, ~123 s per image
-    min_tier_for_quality: {high: ultra} # high is a batch-quality option, ultra only
+    # high is ~35x low and ~123 s: ultra only. medium was never measured, so it is gated like
+    # high until it is (fail closed).
+    min_tier_for: {quality: {high: ultra, medium: ultra}}
     quality_settings: [auto, low, medium, high]
     default_quality: low # always sent explicitly; never let the model pick
     supports_seed: false

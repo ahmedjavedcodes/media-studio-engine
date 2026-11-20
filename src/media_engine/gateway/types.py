@@ -52,6 +52,16 @@ class ImageResponse(BaseModel):
 
 
 @dataclass(frozen=True)
+class Route:
+    """A provider's answer to "may this chain entry serve this image request?", decided BEFORE
+    any call. `model` None = no (the entry is skipped, never called; `reason` names the limit).
+    `model` differs from the entry's = served by a substitute (`reason` says why)."""
+
+    model: str | None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class ModelRef:
     provider: str
     model: str

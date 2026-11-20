@@ -40,17 +40,20 @@ designer:
   - cloudflare/@cf/openai/gpt-oss-120b
   - anthropic/claude
 
+# Paid image slots are placeholders until the per-tier models are chosen (after E2/E3). The
+# gateway refuses any OpenRouter image model missing from models.yaml (unknown price and tier),
+# so naming an unregistered model here would only look like a fallback that never runs.
 image_create:
   - cloudflare/@cf/black-forest-labs/flux-1-schnell
   - cloudflare/@cf/black-forest-labs/flux-2-klein-4b
-  - openrouter/google/gemini-2.5-flash-image
+  - openrouter/<paid image model per tier, pending E2/E3>
 
 image_edit:
   - cloudflare/@cf/black-forest-labs/flux-2-klein-4b
-  - openrouter/google/gemini-2.5-flash-image
+  - openrouter/<paid edit model per tier, pending E2/E3>
 
 # klein-4b handles two input images (verified 2026-11-13) at ~105 neurons vs ~1,364 for klein-9b
 image_merge:
   - cloudflare/@cf/black-forest-labs/flux-2-klein-4b
   - cloudflare/@cf/black-forest-labs/flux-2-klein-9b
-  - openrouter/bytedance-seed/seedream-4.5
+  - openrouter/<paid multi-reference model per tier, pending E2/E3>

@@ -18,6 +18,7 @@ import httpx
 import yaml
 from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_after_attempt
 
+from media_engine.contracts import Plan
 from media_engine.core.config import Settings, get_settings
 from media_engine.core.logging import get_logger
 from media_engine.core.telemetry import traced
@@ -29,6 +30,7 @@ from media_engine.gateway.errors import (
     ContentRefused,
     DeadlineExceeded,
     ProviderError,
+    RequestNotAllowed,
 )
 from media_engine.gateway.fallback import (
     CF_UNCLASSIFIED_400,
@@ -47,6 +49,7 @@ from media_engine.gateway.types import (
     LLMRequest,
     LLMResponse,
     ModelRef,
+    Route,
 )
 
 CHAINS_PATH = Path(__file__).with_name("chains.yaml")
@@ -54,6 +57,11 @@ CHAINS_PATH = Path(__file__).with_name("chains.yaml")
 log = get_logger("gateway")
 
 Invoke = Callable[[Provider, str], Awaitable[LLMResponse | ImageResponse]]
+RouteCheck = Callable[[Provider, ModelRef], Route]
+
+# Plan assumed when an image caller does not say: the most restrictive one (fail closed). A bug
+# that drops the plan can then only make a request cheaper, never dearer.
+DEFAULT_PLAN: Plan = "free"
 
 
 def parse_ref(entry: str) -> ModelRef:
@@ -150,9 +158,16 @@ class Gateway:
         *,
         deadline_s: float | None = None,
         start_at: int = 0,
+        plan: Plan | None = None,
     ) -> CallResult:
         """`start_at` skips that many leading chain entries: the `switch_model` retry lever
-        starts the walk at the next model. 0 is the normal walk."""
+        starts the walk at the next model. 0 is the normal walk.
+
+        `plan` is enforced HERE, not by the agents: before any entry is called, its provider's
+        `route_image` checks the model's tier, every price-multiplying setting that would be
+        sent (e.g. gpt-image-2 quality high is ultra only), and `n`. A refused entry is
+        skipped and never called. No plan given = "free" (fail closed)."""
+        effective_plan: Plan = plan or DEFAULT_PLAN
         return await self._run(
             task,
             "image",
@@ -162,6 +177,7 @@ class Gateway:
             ),
             deadline_s=deadline_s,
             start_at=start_at,
+            route=lambda p, ref: p.route_image(ref.model, request, effective_plan),
         )
 
     # -- internals --------------------------------------------------------------------------
@@ -174,6 +190,7 @@ class Gateway:
         estimate: Callable[[ModelRef], float | None] | None = None,
         deadline_s: float | None = None,
         start_at: int = 0,
+        route: RouteCheck | None = None,
     ) -> CallResult:
         """Walk the chain. `deadline_s` bounds the whole walk, retries, fallbacks and probe
         waits included: each call gets only the time that is left, and is cancelled (httpx
@@ -194,12 +211,26 @@ class Gateway:
         if start_at < 0:
             raise ValueError(f"start_at must be >= 0, got {start_at}")
         entries = list(enumerate(self.chains[task]))[start_at:]
+        limits: list[str] = []  # pre-call guard refusals (plan, paid setting, n)
 
         for walk in (1, 2):
             waiting: list[tuple[int, ModelRef]] = []
             probes: dict[str, CircuitBreaker] = {}
             for index, ref in entries:
                 skip = self._skip_reason(ref)
+                if skip is None and route is not None:
+                    decided = route(self.providers[ref.provider], ref)
+                    if decided.model is None:
+                        skip = f"not_allowed: {decided.reason}"
+                        if decided.reason and decided.reason not in limits:
+                            limits.append(decided.reason)
+                    elif decided.model != ref.model:
+                        attempts.append(
+                            Attempt(ref.provider, ref.model, "skipped", reason=decided.reason)
+                        )
+                        log.info("gateway.routed", task=task, reason=decided.reason)
+                        ref = ModelRef(ref.provider, decided.model)
+                        skip = self.state.unavailable_reason(ref.provider, ref.model)
                 permit: Permit | None = None
                 if skip is None:
                     # Breaker last: a PROBE permit claims the half-open slot, and every path in
@@ -233,6 +264,8 @@ class Gateway:
             entries = waiting
 
         log.error("gateway.all_failed", task=task, attempts=[vars(a) for a in attempts])
+        if limits and all(a.outcome == "skipped" for a in attempts):
+            raise RequestNotAllowed(task, attempts, limits)
         raise AllProvidersFailed(task, attempts)
 
     async def _await_probes(

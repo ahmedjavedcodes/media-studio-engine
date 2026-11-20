@@ -137,12 +137,33 @@ def test_entry_models_are_open_to_the_free_plan_and_pro_models_are_not():
     assert QWEN in {s.slug for s in registry.for_plan("pro")}
 
 
-def test_gpt_image_high_quality_is_ultra_only():
+def test_gpt_image_high_and_unmeasured_medium_quality_are_ultra_only():
     spec = ImageRegistry.load(None).get(GPT_IMAGE)
     assert spec is not None
-    assert spec.allowed_for("free", "low")
-    assert not spec.allowed_for("max", "high")
-    assert spec.allowed_for("ultra", "high")
+    assert spec.allowed_for("free", {"quality": "low"})
+    assert spec.allowed_for("free")  # nothing price-multiplying sent
+    for quality in ("high", "medium"):  # medium unmeasured: gated like high (fail closed)
+        assert not spec.allowed_for("max", {"quality": quality})
+        assert spec.allowed_for("ultra", {"quality": quality})
+    reason = spec.plan_block("free", {"quality": "high"})
+    assert reason is not None and "needs the ultra plan" in reason
+
+
+def test_4k_resolution_is_ultra_only_on_every_model_that_offers_it():
+    registry = ImageRegistry.load(None)
+    for spec in registry.all():
+        assert spec.min_tier_for.get("resolution", {}).get("4K") == "ultra", spec.slug
+    riverflow = registry.get("sourceful/riverflow-v2.5-pro")
+    assert riverflow is not None
+    assert not riverflow.allowed_for("max", {"resolution": "4K"})
+    assert riverflow.allowed_for("max", {"resolution": "2K"})
+
+
+def test_a_model_tier_above_the_plan_is_blocked():
+    spec = ImageRegistry.load(None).get(QWEN)  # pro tier
+    assert spec is not None
+    assert spec.plan_block("free") == f"{QWEN} is a pro-tier model; plan free may not use it"
+    assert spec.allowed_for("pro")
 
 
 # -- merging with the catalogue ---------------------------------------------------------------

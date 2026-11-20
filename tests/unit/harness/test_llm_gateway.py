@@ -13,7 +13,6 @@ from media_engine.gateway.errors import AllProvidersFailed
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver, token_counts
 from media_engine.gateway.router import Gateway
 from media_engine.services.create.loader import load_create_config
-from tests.unit.gateway.conftest import CF_FIRST_CHAINS
 from tests.unit.harness.fakes import ScriptedChat
 
 ACCOUNT = "acct123"
@@ -84,13 +83,18 @@ async def test_through_real_gateway_reports_tokens_and_neurons() -> None:
             },
         )
     )
-    gw = Gateway(_settings(), chains=CF_FIRST_CHAINS)  # Cloudflare first: it reports neurons
+    # Production chains: the router's Groq model is rate-limited, so Cloudflare (which reports
+    # neurons) serves it as the fallback.
+    respx.post(GROQ_CHAT).mock(
+        return_value=httpx.Response(429, headers={"retry-after": "120"}, json={"error": {}})
+    )
+    gw = Gateway(_settings())
     try:
         llm = LLMGateway(gw, chain_resolver(load_create_config().agents))
         out = await llm.complete("router", auth("free"), [{"role": "user", "content": "x"}])
     finally:
         await gw.aclose()
-    assert out.provider == "cloudflare"
+    assert out.provider == "cloudflare" and out.is_fallback
     assert (out.prompt_tokens, out.completion_tokens, out.tokens) == (30, 12, 42)
     assert out.neurons == 4.0
     assert out.cost_usd == 0.0

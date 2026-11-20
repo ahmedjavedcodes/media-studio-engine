@@ -7,8 +7,15 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
+from media_engine.contracts import Plan
 from media_engine.gateway.errors import ProviderError
-from media_engine.gateway.types import ImageRequest, ImageResponse, LLMRequest, LLMResponse
+from media_engine.gateway.types import (
+    ImageRequest,
+    ImageResponse,
+    LLMRequest,
+    LLMResponse,
+    Route,
+)
 
 DEFAULT_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 IMAGE_TIMEOUT = httpx.Timeout(180.0, connect=10.0)
@@ -30,6 +37,14 @@ class Provider(ABC):
 
     async def generate_image(self, model: str, request: ImageRequest) -> ImageResponse:
         raise ProviderError(self.name, model, "images not supported by this provider", status=400)
+
+    def route_image(self, model: str, request: ImageRequest, plan: Plan) -> Route:
+        """Checked by the gateway BEFORE calling: can this entry serve the request for `plan`?
+        Default: one image per call and no paid settings. A provider that returns fewer images
+        than asked would silently shrink `n`, which the user paid for, so it refuses instead."""
+        if request.n > 1:
+            return Route(None, f"n={request.n}: {self.name}/{model} returns 1 image per call")
+        return Route(model)
 
     # -- shared helpers ---------------------------------------------------------------------
 

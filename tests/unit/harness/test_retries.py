@@ -28,10 +28,16 @@ from media_engine.gateway.errors import (
     DeadlineExceeded,
     ProviderError,
 )
-from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
+from media_engine.gateway.llm_gateway import chain_resolver
 from media_engine.harness.run_state import RunState
 from media_engine.ports import ListEventSink, LocalArtifactStore
-from tests.unit.harness.fakes import RaisingSink, ScriptedChat, ScriptedImages, image_bytes
+from tests.unit.harness.fakes import (
+    AgentRecordingLLMGateway,
+    RaisingSink,
+    ScriptedChat,
+    ScriptedImages,
+    image_bytes,
+)
 from tests.unit.harness.test_supervisor import (
     AGENT_NAMES,
     CFG,
@@ -82,7 +88,7 @@ def build(
     seeds = itertools.count(100)  # 100 for the first attempt, 101 for the next, ...
     return create_image_grand_agent(
         cfg,
-        llm=LLMGateway(llm, chain_resolver(cfg.agents)),
+        llm=AgentRecordingLLMGateway(llm, chain_resolver(cfg.agents)),
         images=images,
         artifacts=store,
         events=events if events is not None else ListEventSink(),
@@ -106,28 +112,10 @@ def orphan_reasons(store: LocalArtifactStore) -> dict[str, str]:
     return {row["image_id"]: row["reason"] for row in rows}
 
 
-# Each agent's system prompt opens with its role ("You are the prompt enhancer for ..."). Calls
-# are counted per AGENT by that opening, not per chain: the enhancer and the lever picker share
-# the `reasoning` chain, so counting by chain would merge them.
-_ROLE_OPENINGS = {
-    "You are the prompt enhancer": "prompt_enhancer",
-    "You are the reviewer": "critic",
-    "You are the retry planner": "image_grand_agent",
-    "You are the request classifier": "router",
-}
-
-
-def _agent_of(request: Any) -> str:
-    system = request.messages[0]["content"]
-    for opening, agent in _ROLE_OPENINGS.items():
-        if system.startswith(opening):
-            return agent
-    raise AssertionError(f"unrecognised system prompt: {system[:60]!r}")
-
-
 def chains(llm: ScriptedChat) -> Counter[str]:
-    """LLM calls per agent."""
-    return Counter(_agent_of(request) for _, request in llm.requests)
+    """LLM calls per AGENT, by name (see AgentRecordingLLMGateway). Not per chain: the enhancer
+    and the lever picker share the `reasoning` chain, so a chain count would merge them."""
+    return Counter(llm.agents)
 
 
 ENHANCER = "prompt_enhancer"

@@ -16,7 +16,13 @@ from media_engine.core.config import Settings
 from media_engine.core.images import sniff_media_type
 from media_engine.gateway.budget import EDIT_MARKUP_DEFAULT, estimate_image_usd
 from media_engine.gateway.errors import ProviderError
-from media_engine.gateway.image_registry import ImageModelSpec, ImageRegistry, ModelEntry, merge
+from media_engine.gateway.image_registry import (
+    ImageModelSpec,
+    ImageRegistry,
+    ModelEntry,
+    merge,
+    use_image_registry,
+)
 from media_engine.gateway.openrouter_models import ImageModelInfo, ModelCache
 from media_engine.gateway.providers.openrouter import OpenRouterProvider
 from media_engine.gateway.types import ImageRequest
@@ -55,11 +61,13 @@ def ok(*items: dict, cost: float = 0.01) -> httpx.Response:
 
 @pytest.fixture
 async def provider(tmp_path):
+    # THE registry: the real models.yaml with a test catalogue (two models).
     cache = ModelCache(tmp_path / "models.json")
     cache.save([GPT_IMAGE_INFO, KLEIN_INFO])
+    use_image_registry(ImageRegistry.load(cache))
     settings = Settings(_env_file=None, openrouter_api_key="or-test-key", allow_paid=True)
     async with httpx.AsyncClient() as client:
-        yield OpenRouterProvider(client, settings, cache=cache)
+        yield OpenRouterProvider(client, settings)
 
 
 def sent(route: respx.Route) -> dict:
@@ -89,8 +97,9 @@ async def test_seed_support_of_an_unregistered_model_comes_from_the_catalogue(tm
     other = ImageModelInfo(id="x/y", supported_parameters={"n": {"type": "range", "max": 1}})
     cache = ModelCache(tmp_path / "c.json")
     cache.save([other])
+    use_image_registry(ImageRegistry.load(cache))
     async with httpx.AsyncClient() as client:
-        p = OpenRouterProvider(client, Settings(_env_file=None), cache=cache)
+        p = OpenRouterProvider(client, Settings(_env_file=None))
         assert not p.accepts_seed("x/y")
         assert p.accepts_seed("not/listed")  # unknown everywhere: send it, validation decides
 
@@ -129,8 +138,9 @@ async def test_an_unsupported_quality_is_rejected_locally_without_a_paid_call(pr
 
 
 @respx.mock
-async def test_n_above_the_models_per_call_limit_is_rejected_locally(provider):
-    # Not silently clamped: a caller asking for 4 must not quietly get 1.
+async def test_a_direct_provider_call_with_n_above_the_limit_is_rejected_locally(provider):
+    # The gateway routes this case to another model first (test_plan_guard.py); a call that
+    # bypasses the gateway still never silently clamps: a caller asking for 2 must not get 1.
     route = respx.post(OR_IMAGES)
     with pytest.raises(ProviderError, match="out of range"):
         await provider.generate_image(KLEIN, ImageRequest(prompt="a fox", n=2))

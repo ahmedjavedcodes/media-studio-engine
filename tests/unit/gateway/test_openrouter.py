@@ -14,7 +14,8 @@ from PIL import Image
 from structlog.testing import capture_logs
 
 from media_engine.core.config import Settings
-from media_engine.gateway.errors import BadRequestError
+from media_engine.gateway.errors import BadRequestError, RequestNotAllowed
+from media_engine.gateway.image_registry import ImageRegistry, use_image_registry
 from media_engine.gateway.openrouter_models import ImageModelInfo, ModelCache, sync_image_models
 from media_engine.gateway.providers.cloudflare import CloudflareProvider
 from media_engine.gateway.providers.groq import GroqProvider
@@ -22,7 +23,17 @@ from media_engine.gateway.providers.openrouter import OpenRouterProvider
 from media_engine.gateway.router import Gateway, parse_ref
 from media_engine.gateway.types import ImageRequest, LLMRequest
 
-from .conftest import ACCOUNT, CF_CHAT, CF_RUN, GROQ_CHAT, NOW, cf_error, chat_ok
+from .conftest import (
+    ACCOUNT,
+    CF_CHAT,
+    CF_RUN,
+    GROQ_CHAT,
+    NOW,
+    cf_error,
+    chat_ok,
+    entry_model,
+    install_registry,
+)
 
 OR_IMAGES = "https://openrouter.ai/api/v1/images"
 OR_CHAT = "https://openrouter.ai/api/v1/chat/completions"
@@ -76,10 +87,18 @@ def or_settings() -> Settings:
     )
 
 
+# Both test models are REGISTERED (as entry-tier models): the gateway refuses any OpenRouter
+# image model missing from the registry, since its price and tier are unknown.
+TEST_MODELS = [
+    entry_model(GEMINI, max_input_images=3),
+    entry_model(SEEDREAM, supports_seed=True, n_per_call=10, max_input_images=14),
+]
+
+
 @pytest.fixture
-def or_cache(tmp_path) -> ModelCache:
-    cache = ModelCache(tmp_path / "models.json")
-    cache.save(
+def or_registry(tmp_path) -> ImageRegistry:
+    return install_registry(
+        tmp_path,
         [
             ImageModelInfo(
                 id=GEMINI,
@@ -106,13 +125,13 @@ def or_cache(tmp_path) -> ModelCache:
                 input_modalities=["image", "text"],
                 output_modalities=["image"],
             ),
-        ]
+        ],
+        TEST_MODELS,
     )
-    return cache
 
 
 @pytest.fixture
-async def gw(or_settings, or_cache, sleeps, state):
+async def gw(or_settings, or_registry, sleeps, state):
     client = httpx.AsyncClient()
 
     async def fake_sleep(seconds: float) -> None:
@@ -121,7 +140,7 @@ async def gw(or_settings, or_cache, sleeps, state):
     providers = {
         "cloudflare": CloudflareProvider(client, or_settings),
         "groq": GroqProvider(client, or_settings),
-        "openrouter": OpenRouterProvider(client, or_settings, cache=or_cache),
+        "openrouter": OpenRouterProvider(client, or_settings),
     }
     chains = {
         # OpenRouter first so its failures exercise "next provider".
@@ -352,17 +371,21 @@ async def test_model_missing_from_cache_is_rejected_locally(gw):
     route = respx.post(OR_IMAGES).mock(return_value=image_ok())
     gw.chains["image_create"] = [parse_ref("openrouter/some/unknown-model")]
 
-    with pytest.raises(BadRequestError) as exc:
+    # Refused before any call by the gateway's guard: no registry entry = unknown price/tier.
+    with pytest.raises(RequestNotAllowed) as exc:
         await gw.image("image_create", ImageRequest(prompt="a"))
 
-    assert "not in the OpenRouter image model cache" in str(exc.value)
+    assert "not in the image registry" in str(exc.value)
     assert route.call_count == 0
 
 
 @respx.mock
 async def test_no_cache_file_skips_validation_and_sends_everything(or_settings, tmp_path):
+    path = tmp_path / "models.yaml"
+    path.write_text(json.dumps({"models": TEST_MODELS}))  # JSON is valid YAML
+    use_image_registry(ImageRegistry.load(ModelCache(tmp_path / "missing.json"), path=path))
     client = httpx.AsyncClient()
-    provider = OpenRouterProvider(client, or_settings, cache=ModelCache(tmp_path / "missing.json"))
+    provider = OpenRouterProvider(client, or_settings)
     route = respx.post(OR_IMAGES).mock(return_value=image_ok())
     try:
         await provider.generate_image(GEMINI, ImageRequest(prompt="a", resolution="8K"))

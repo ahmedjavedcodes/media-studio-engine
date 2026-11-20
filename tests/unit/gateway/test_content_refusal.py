@@ -22,7 +22,15 @@ from media_engine.gateway.fallback import Action, decide
 from media_engine.gateway.providers.openrouter import OpenRouterProvider
 from media_engine.gateway.types import ImageRequest, LLMRequest
 
-from .conftest import CF_CHAT, CF_RUN, GROQ_CHAT, NOW, cf_error, chat_ok
+from .conftest import (
+    CF_CHAT,
+    CF_FIRST_LLM,
+    CF_RUN,
+    GROQ_CHAT,
+    NOW,
+    cf_error,
+    chat_ok,
+)
 
 CF_SCHNELL = f"{CF_RUN}/@cf/black-forest-labs/flux-1-schnell"
 CF_KLEIN_4B = f"{CF_RUN}/@cf/black-forest-labs/flux-2-klein-4b"
@@ -71,7 +79,7 @@ async def test_chat_content_filter_finish_reason_is_a_refusal(gateway):
     groq = respx.post(GROQ_CHAT).mock(return_value=chat_ok("never"))
 
     with pytest.raises(ContentRefused):
-        await gateway.chat("reasoning", REQ)
+        await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert groq.call_count == 0
 
@@ -121,7 +129,7 @@ async def test_3036_exhaustion_is_fallback_state_not_a_breaker_failure(gateway, 
     respx.post(CF_CHAT).mock(return_value=cf_error(429, 3036))
     respx.post(GROQ_CHAT).mock(return_value=chat_ok())
 
-    await gateway.chat("reasoning", REQ)
+    await gateway.chat(CF_FIRST_LLM, REQ)
 
     until = datetime(2026, 11, 14, tzinfo=UTC).isoformat()
     assert state.unavailable_reason("cloudflare", "x") == f"provider_exhausted_until_{until}"
@@ -222,7 +230,7 @@ async def test_other_providers_400_keeps_the_plain_bad_request_event(gateway):
     respx.post(GROQ_CHAT).mock(return_value=httpx.Response(400, json={"error": {"message": "x"}}))
 
     with capture_logs() as logs, pytest.raises(BadRequestError):
-        await gateway.chat("reasoning", REQ)
+        await gateway.chat(CF_FIRST_LLM, REQ)
 
     events = [e["event"] for e in logs]
     assert "gateway.bad_request" in events
@@ -242,7 +250,7 @@ async def test_a_billed_content_filter_reply_is_metered(gateway):
     )
 
     with pytest.raises(ContentRefused) as exc:
-        await gateway.chat("reasoning", REQ)
+        await gateway.chat(CF_FIRST_LLM, REQ)
 
     assert exc.value.neurons == pytest.approx(14.5)
     assert gateway.meter.total_today == pytest.approx(14.5)

@@ -11,11 +11,20 @@ Two layers, merged at load time (IMAGE-CREATE-OPTIMIZE v2.1 §6.3):
 
 When both state a capability and disagree, the catalogue wins and a warning is recorded. With
 no cache file, the yaml values are used as they are. Loading never makes a network call.
+
+ONE registry per process (`image_registry()`), built from ONE cache file. The OpenRouter
+provider, the model cards (`registry.card_or_default`) and the gateway's plan guard all read
+this same instance, so they cannot disagree. Tests swap it with `use_image_registry`; the
+manual refresh path is the sync script, then `reload_image_registry()`.
+
+Plan guard: a model's `tier` says which plans may call it, and `min_tier_for` says which plans
+may use a price-multiplying SETTING of it (gpt-image-2 `quality: high` is ~35x `low`). The
+gateway enforces both before any call (`plan_block`); the agents are not trusted with it.
 """
 
 from __future__ import annotations
 
-from functools import lru_cache
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -52,7 +61,9 @@ class ModelEntry(BaseModel):
     price_measured_usd: float | None
     price_edit_usd: float | None = None
     price_by_quality: dict[str, float] = Field(default_factory=dict)
-    min_tier_for_quality: dict[str, Tier] = Field(default_factory=dict)
+    # setting -> value -> lowest tier allowed to use it, e.g. {quality: {high: ultra}}. Merged
+    # over models.yaml's top-level `setting_policy` (which applies to every model).
+    min_tier_for: dict[str, dict[str, Tier]] = Field(default_factory=dict)
     quality_settings: list[str] = Field(default_factory=list)
     default_quality: str | None = None
     supports_seed: bool
@@ -79,7 +90,7 @@ class ImageModelSpec(BaseModel):
     price_measured_usd: float | None
     price_edit_usd: float | None
     price_by_quality: dict[str, float]
-    min_tier_for_quality: dict[str, Tier]
+    min_tier_for: dict[str, dict[str, Tier]]
     supports_seed: bool
     seed_verified: bool
     n_per_call: int
@@ -98,13 +109,22 @@ class ImageModelSpec(BaseModel):
     in_catalogue: bool  # False: no cache, or the cache does not list this slug
     listed_pricing: list[dict[str, Any]]  # catalogue /endpoints pricing (listed, not billed)
 
-    def allowed_for(self, plan: Plan, quality: str | None = None) -> bool:
-        """Whether `plan` may call this model (and at this quality setting)."""
+    def plan_block(self, plan: Plan, settings: Mapping[str, str] | None = None) -> str | None:
+        """Why `plan` may NOT call this model with these billed settings; None = allowed.
+        `settings` are the values that will actually be SENT (defaults included)."""
         rank = _PLAN_RANK[plan]
+        if not self.available:
+            return f"{self.slug} is marked unavailable"
         if rank < _TIER_RANK[self.tier]:
-            return False
-        needed = self.min_tier_for_quality.get(quality or "")
-        return needed is None or rank >= _TIER_RANK[needed]
+            return f"{self.slug} is a {self.tier}-tier model; plan {plan} may not use it"
+        for name, value in (settings or {}).items():
+            needed = self.min_tier_for.get(name, {}).get(str(value))
+            if needed is not None and rank < _TIER_RANK[needed]:
+                return f"{name}={value} on {self.slug} needs the {needed} plan; plan is {plan}"
+        return None
+
+    def allowed_for(self, plan: Plan, settings: Mapping[str, str] | None = None) -> bool:
+        return self.plan_block(plan, settings) is None
 
 
 def _range_max(info: ImageModelInfo, name: str) -> int | None:
@@ -119,7 +139,21 @@ def _enum(info: ImageModelInfo, name: str) -> list[str]:
     return [str(v) for v in descriptor.get("values") or []]
 
 
-def merge(entry: ModelEntry, info: ImageModelInfo | None) -> tuple[ImageModelSpec, list[str]]:
+def _setting_tiers(
+    policy: Mapping[str, Mapping[str, Tier]], entry: ModelEntry
+) -> dict[str, dict[str, Tier]]:
+    """The global setting policy, overridden per value by the model's own `min_tier_for`."""
+    merged: dict[str, dict[str, Tier]] = {k: dict(v) for k, v in policy.items()}
+    for name, values in entry.min_tier_for.items():
+        merged.setdefault(name, {}).update(values)
+    return merged
+
+
+def merge(
+    entry: ModelEntry,
+    info: ImageModelInfo | None,
+    policy: Mapping[str, Mapping[str, Tier]] | None = None,
+) -> tuple[ImageModelSpec, list[str]]:
     """Merge one yaml entry with its catalogue record. Returns the spec and any warnings."""
     warnings: list[str] = []
     seed, n_per_call, max_refs = entry.supports_seed, entry.n_per_call, entry.max_input_images
@@ -180,7 +214,7 @@ def merge(entry: ModelEntry, info: ImageModelInfo | None) -> tuple[ImageModelSpe
         price_measured_usd=entry.price_measured_usd,
         price_edit_usd=entry.price_edit_usd,
         price_by_quality=dict(entry.price_by_quality),
-        min_tier_for_quality=dict(entry.min_tier_for_quality),
+        min_tier_for=_setting_tiers(policy or {}, entry),
         supports_seed=seed,
         seed_verified=entry.seed_verified and seed,
         n_per_call=n_per_call,
@@ -202,14 +236,31 @@ def merge(entry: ModelEntry, info: ImageModelInfo | None) -> tuple[ImageModelSpe
     return spec, warnings
 
 
+class SettingPolicy(BaseModel):
+    """models.yaml `setting_policy`: setting -> value -> lowest tier, for every model."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tiers: dict[str, dict[str, Tier]] = Field(default_factory=dict)
+
+
 class ImageRegistry:
-    def __init__(self, specs: list[ImageModelSpec], warnings: list[str]) -> None:
+    def __init__(
+        self,
+        specs: list[ImageModelSpec],
+        warnings: list[str],
+        cache: ModelCache | None = None,
+    ) -> None:
         self._by_slug = {s.slug: s for s in specs}
         self.warnings = warnings
+        # The catalogue cache this registry was built from. The OpenRouter provider validates
+        # requests against THIS cache, never a second one. None = built from models.yaml only.
+        self.cache = cache
 
     @classmethod
     def load(cls, cache: ModelCache | None = None, path: Path = MODELS_PATH) -> ImageRegistry:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        policy = SettingPolicy(tiers=raw.get("setting_policy") or {}).tiers
         entries = [ModelEntry.model_validate(m) for m in raw.get("models", [])]
         slugs = [e.slug for e in entries]
         duplicates = sorted({s for s in slugs if slugs.count(s) > 1})
@@ -228,12 +279,12 @@ class ImageRegistry:
                 warnings.append(
                     f"{entry.slug}: not in the catalogue cache (synced {cache.synced_at})"  # type: ignore[union-attr]
                 )
-            spec, problems = merge(entry, info)
+            spec, problems = merge(entry, info, policy)
             specs.append(spec)
             warnings.extend(problems)
         for warning in warnings:
             log.warning("image_registry.mismatch", detail=warning)
-        return cls(specs, warnings)
+        return cls(specs, warnings, cache if cache_loaded else None)
 
     def get(self, slug: str) -> ImageModelSpec | None:
         return self._by_slug.get(slug)
@@ -241,14 +292,50 @@ class ImageRegistry:
     def all(self) -> list[ImageModelSpec]:
         return list(self._by_slug.values())
 
+    def info(self, slug: str) -> ImageModelInfo | None:
+        """The catalogue record (from this registry's cache), registered or not."""
+        return self.cache.get(slug) if self.cache is not None else None
+
     def for_plan(self, plan: Plan) -> list[ImageModelSpec]:
-        return [s for s in self._by_slug.values() if s.available and s.allowed_for(plan)]
+        return [s for s in self._by_slug.values() if s.allowed_for(plan)]
+
+    def same_tier(self, spec: ImageModelSpec) -> list[ImageModelSpec]:
+        """Other available models in `spec`'s tier, cheapest measured first (unmeasured last)."""
+        others = [
+            s
+            for s in self._by_slug.values()
+            if s.tier == spec.tier and s.slug != spec.slug and s.available
+        ]
+        return sorted(
+            others,
+            key=lambda s: (s.price_measured_usd is None, s.price_measured_usd or 0.0, s.slug),
+        )
 
     def eval_default(self) -> ImageModelSpec | None:
         return next((s for s in self._by_slug.values() if s.eval_default), None)
 
 
-@lru_cache(maxsize=1)
+_active: ImageRegistry | None = None
+
+
 def image_registry() -> ImageRegistry:
-    """Process-wide registry from models.yaml and the default catalogue cache file."""
-    return ImageRegistry.load(ModelCache())
+    """THE process-wide registry: models.yaml merged with the default catalogue cache file.
+    Built on first use (file reads only, no network)."""
+    global _active
+    if _active is None:
+        _active = ImageRegistry.load(ModelCache())
+    return _active
+
+
+def use_image_registry(registry: ImageRegistry | None) -> ImageRegistry | None:
+    """Swap the process-wide registry (tests, or after a refresh). None = rebuild on next use.
+    Returns the previous one so a test can put it back."""
+    global _active
+    previous, _active = _active, registry
+    return previous
+
+
+def reload_image_registry() -> ImageRegistry:
+    """Rebuild from disk after `playground/sync_openrouter_models.py` rewrote the cache."""
+    use_image_registry(None)
+    return image_registry()

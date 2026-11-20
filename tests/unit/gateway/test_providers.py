@@ -8,7 +8,7 @@ import respx
 
 from media_engine.gateway.types import ImageRequest, LLMRequest
 
-from .conftest import CF_CHAT, CF_RUN, GROQ_CHAT, cf_error, chat_ok
+from .conftest import CF_CHAT, CF_FIRST_FAST_LLM, CF_RUN, GROQ_CHAT, cf_error, chat_ok
 
 USER_MSG = [{"role": "user", "content": "x"}]
 
@@ -20,7 +20,7 @@ def _image_ok(data: bytes = b"img") -> httpx.Response:
 @respx.mock
 async def test_cloudflare_chat_sends_bearer_and_model(gateway):
     route = respx.post(CF_CHAT).mock(return_value=chat_ok())
-    await gateway.chat("fast_llm", LLMRequest(messages=USER_MSG))
+    await gateway.chat(CF_FIRST_FAST_LLM, LLMRequest(messages=USER_MSG))
     sent = route.calls[0].request
     assert sent.headers["authorization"] == "Bearer cf-test-token"
     assert json.loads(sent.content)["model"] == "@cf/openai/gpt-oss-20b"

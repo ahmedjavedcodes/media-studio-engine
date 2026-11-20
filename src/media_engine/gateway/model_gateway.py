@@ -43,6 +43,7 @@ class ImageBackend(Protocol):
         *,
         deadline_s: float | None = None,
         start_at: int = 0,
+        plan: Plan | None = None,
     ) -> Awaitable[CallResult]: ...
 
 
@@ -95,8 +96,9 @@ class ModelGateway:
         chain = self._resolve_chain(self._agent, tier)
         request = ImageRequest(prompt=prompt, width=width, height=height, seed=seed, steps=steps)
         started = time.perf_counter()
+        # The plan travels to the gateway, which enforces it (model tier, paid settings).
         result = await self._backend.image(
-            chain, request, deadline_s=deadline_ms / 1000, start_at=chain_offset
+            chain, request, deadline_s=deadline_ms / 1000, start_at=chain_offset, plan=tier
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
         output = result.output

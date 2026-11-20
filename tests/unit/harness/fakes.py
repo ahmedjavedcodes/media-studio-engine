@@ -9,6 +9,7 @@ from typing import Any
 from PIL import Image
 
 from media_engine.gateway.errors import GatewayError
+from media_engine.gateway.llm_gateway import ChainResolver, LLMGateway, LLMResult
 from media_engine.gateway.types import (
     CallResult,
     ImageRequest,
@@ -39,6 +40,7 @@ class ScriptedChat:
         self.provider = provider
         self.model = model
         self.requests: list[tuple[str, LLMRequest]] = []
+        self.agents: list[str] = []  # filled by AgentRecordingLLMGateway: who made each call
 
     async def chat(self, task: str, request: LLMRequest) -> CallResult:
         self.requests.append((task, request))
@@ -111,6 +113,7 @@ class ScriptedImages:
         self.cost_usd = cost_usd
         self.requests: list[tuple[str, ImageRequest, float | None]] = []
         self.start_at: list[int] = []  # the chain offset of each call
+        self.plans: list[str | None] = []  # the plan each call was made for (gateway-enforced)
 
     async def image(
         self,
@@ -119,9 +122,11 @@ class ScriptedImages:
         *,
         deadline_s: float | None = None,
         start_at: int = 0,
+        plan: str | None = None,
     ) -> CallResult:
         self.requests.append((task, request, deadline_s))
         self.start_at.append(start_at)
+        self.plans.append(plan)
         if not self.replies:
             raise AssertionError("ScriptedImages ran out of replies (unexpected extra image call)")
         reply = self.replies.pop(0)
@@ -137,3 +142,16 @@ class ScriptedImages:
             neurons_est=self.neurons_est,
             cost_usd=self.cost_usd,
         )
+
+
+class AgentRecordingLLMGateway(LLMGateway):
+    """An LLMGateway that records, on the ScriptedChat behind it, which AGENT made each call:
+    by the name `complete` is called with, never by prompt text (prompts get rewritten)."""
+
+    def __init__(self, backend: ScriptedChat, resolve_chain: ChainResolver) -> None:
+        super().__init__(backend, resolve_chain)
+        self._recorder = backend
+
+    async def complete(self, agent: str, *args: Any, **kwargs: Any) -> LLMResult:
+        self._recorder.agents.append(agent)
+        return await super().complete(agent, *args, **kwargs)

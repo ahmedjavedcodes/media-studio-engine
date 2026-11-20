@@ -91,6 +91,19 @@ class AllProvidersFailed(GatewayError):
         self.attempts = attempts
 
 
+class RequestNotAllowed(AllProvidersFailed):
+    """No chain entry was even tried, and at least one was refused by the pre-call guard: the
+    plan may not use that model or setting (e.g. gpt-image-2 quality high below ultra), or no
+    model can return `n` images in one call. Nothing was sent and nothing was billed.
+    `limits` names each refusal. A subclass of AllProvidersFailed, so existing handlers keep
+    working; catch this first to tell the user what to change."""
+
+    def __init__(self, task: str, attempts: list[Attempt], limits: list[str]) -> None:
+        super().__init__(task, attempts)
+        self.args = (f"Request not allowed for task '{task}': " + "; ".join(limits),)
+        self.limits = limits
+
+
 # Spec name (IMAGE-CREATE.md §9). Same class: existing callers catch AllProvidersFailed.
 NoProviderAvailable = AllProvidersFailed
 

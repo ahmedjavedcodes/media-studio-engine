@@ -5,9 +5,13 @@ request `model`, `prompt`, `n`, `seed`, `aspect_ratio`, `resolution`, `quality`,
 `input_references` (`[{"type": "image_url", "image_url": {"url": <data URL | https URL>}}]`);
 response `data[].b64_json`, `usage.cost` (USD).
 
-What a model accepts comes from the image registry (`image_registry.py`: models.yaml merged
-with the catalogue cache): a seed is sent only to a model that takes one, and a model with
-quality settings always gets one explicitly (its registry default unless the request names one).
+What a model accepts comes from THE image registry (`image_registry.image_registry()`:
+models.yaml merged with the catalogue cache; one instance per process, shared with the model
+cards and the gateway): a seed is sent only to a model that takes one, and a model with quality
+settings always gets one explicitly (its registry default unless the request names one).
+
+`route_image` is the gateway's pre-call guard: plan tier, price-multiplying settings, and `n`
+(routed to a same-tier model that can return that many in one call, never silently reduced).
 """
 
 from __future__ import annotations
@@ -18,18 +22,25 @@ from typing import Any
 
 import httpx
 
+from media_engine.contracts import Plan
 from media_engine.core.config import Settings
 from media_engine.core.images import sniff_media_type
 from media_engine.gateway.errors import ProviderError
-from media_engine.gateway.image_registry import ImageModelSpec, ImageRegistry
-from media_engine.gateway.openrouter_models import ModelCache, validate_image_params
+from media_engine.gateway.image_registry import ImageModelSpec, ImageRegistry, image_registry
+from media_engine.gateway.openrouter_models import validate_image_params
 from media_engine.gateway.providers.base import (
     DEFAULT_TIMEOUT,
     IMAGE_TIMEOUT,
     Provider,
     parse_chat_completion,
 )
-from media_engine.gateway.types import ImageRequest, ImageResponse, LLMRequest, LLMResponse
+from media_engine.gateway.types import (
+    ImageRequest,
+    ImageResponse,
+    LLMRequest,
+    LLMResponse,
+    Route,
+)
 
 # Normalised resolution tiers from the API reference, as (max long side in px, tier).
 _RESOLUTION_TIERS = [(512, "512"), (768, "768"), (1024, "1K"), (1536, "1.5K"), (2048, "2K")]
@@ -100,24 +111,15 @@ def encode_reference(data: bytes) -> dict[str, Any]:
 class OpenRouterProvider(Provider):
     name = "openrouter"
 
-    def __init__(
-        self,
-        client: httpx.AsyncClient,
-        settings: Settings,
-        cache: ModelCache | None = None,
-        registry: ImageRegistry | None = None,
-    ) -> None:
+    def __init__(self, client: httpx.AsyncClient, settings: Settings) -> None:
         super().__init__(client)
         self._key = settings.openrouter_api_key
         self._base = settings.openrouter_base_url.rstrip("/")
-        self.cache = cache or ModelCache()
-        self._registry = registry  # built lazily from self.cache (no network, file read only)
 
     @property
     def registry(self) -> ImageRegistry:
-        if self._registry is None:
-            self._registry = ImageRegistry.load(self.cache)
-        return self._registry
+        """Always the process-wide registry: never a second copy that could drift."""
+        return image_registry()
 
     def spec(self, model: str) -> ImageModelSpec | None:
         return self.registry.get(model)
@@ -127,10 +129,51 @@ class OpenRouterProvider(Provider):
         spec = self.spec(model)
         if spec is not None:
             return spec.supports_seed
-        info = self.cache.get(model)
+        info = self.registry.info(model)
         if info is not None:
             return "seed" in info.supported_parameters
         return True
+
+    def billed_settings(self, model: str, request: ImageRequest) -> dict[str, str]:
+        """The price-relevant settings this request would SEND to `model` (defaults included):
+        what the plan guard checks. Never the raw request: an unset quality is sent as the
+        registry default, and that default is what gets billed."""
+        payload = self.build_image_payload(model, request, encode_references=False)
+        return {k: str(payload[k]) for k in ("quality", "resolution") if k in payload}
+
+    def route_image(self, model: str, request: ImageRequest, plan: Plan) -> Route:
+        """Pre-call guard (the gateway calls this before every OpenRouter image entry).
+
+        1. A model missing from the registry is refused: its price and tier are unknown, so no
+           plan may spend on it (fail closed).
+        2. Plan guard: the model's tier, and every price-multiplying setting actually sent
+           (`min_tier_for`, e.g. gpt-image-2 quality high = ultra only).
+        3. `n`: (a) the model returns that many per call: use it; (b) else the cheapest
+           available same-tier model that can, and that passes the plan guard; (c) else refuse,
+           naming the limit. Never silently reduced.
+        """
+        spec = self.spec(model)
+        if spec is None:
+            return Route(None, f"{model} is not in the image registry (unknown price and tier)")
+        blocked = spec.plan_block(plan, self.billed_settings(model, request))
+        if blocked is not None:
+            return Route(None, blocked)
+        if request.n <= spec.n_per_call:
+            return Route(model)
+        for other in self.registry.same_tier(spec):
+            if other.n_per_call < request.n:
+                continue
+            if other.plan_block(plan, self.billed_settings(other.slug, request)) is None:
+                return Route(
+                    other.slug,
+                    f"n={request.n} > {model} per-call max {spec.n_per_call}; "
+                    f"routed to {other.slug} (same {spec.tier} tier, max {other.n_per_call})",
+                )
+        return Route(
+            None,
+            f"n={request.n} exceeds the per-call max of {model} ({spec.n_per_call}) and of "
+            f"every other {spec.tier}-tier model allowed for plan {plan}",
+        )
 
     def is_configured(self) -> bool:
         return self._key is not None
@@ -176,12 +219,14 @@ class OpenRouterProvider(Provider):
 
     # -- images -------------------------------------------------------------------------------
 
-    def build_image_payload(self, model: str, request: ImageRequest) -> dict[str, Any]:
+    def build_image_payload(
+        self, model: str, request: ImageRequest, *, encode_references: bool = True
+    ) -> dict[str, Any]:
         """Build the request body. Explicit request fields are sent as given (and validated);
         values derived from width/height are adapted to what the model supports, and dropped
         when the model has no such parameter (e.g. gemini-2.5-flash-image has no `resolution`).
         """
-        info = self.cache.get(model)
+        info = self.registry.info(model)
         supported = info.supported_parameters if info else None
 
         def allowed(name: str) -> list[str] | None:
@@ -211,7 +256,7 @@ class OpenRouterProvider(Provider):
             payload["quality"] = request.quality  # explicit: sent as given, then validated
         elif spec is not None and spec.default_quality is not None:
             payload["quality"] = spec.default_quality
-        if request.input_images:
+        if request.input_images and encode_references:
             payload["input_references"] = [encode_reference(b) for b in request.input_images]
         return payload
 
@@ -222,7 +267,8 @@ class OpenRouterProvider(Provider):
             if k in {"aspect_ratio", "resolution", "n", "seed", "quality"}
         }
         n_refs = len(payload.get("input_references") or [])
-        problems = validate_image_params(self.cache, model, params, n_refs)
+        cache = self.registry.cache
+        problems = validate_image_params(cache, model, params, n_refs) if cache else []
         if problems:
             # Raised as a 400 so the gateway applies the "400 never falls back" rule, without
             # sending (and paying for) a call that would fail.

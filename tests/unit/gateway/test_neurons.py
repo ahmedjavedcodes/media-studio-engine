@@ -14,7 +14,15 @@ from media_engine.gateway.budget import DailyNeuronMeter, estimate_image_neurons
 from media_engine.gateway.registry import get_card
 from media_engine.gateway.types import ImageRequest, LLMRequest
 
-from .conftest import CF_CHAT, CF_RUN, GROQ_CHAT, NOW, cf_error, chat_ok
+from .conftest import (
+    CF_CHAT,
+    CF_FIRST_FAST_LLM,
+    CF_RUN,
+    GROQ_CHAT,
+    NOW,
+    cf_error,
+    chat_ok,
+)
 
 REQ = LLMRequest(messages=[{"role": "user", "content": "x"}])
 SCHNELL = f"{CF_RUN}/@cf/black-forest-labs/flux-1-schnell"
@@ -44,7 +52,7 @@ def _png(size: int = 256) -> bytes:
 async def test_cloudflare_llm_uses_actual_neurons_not_estimate(gateway):
     respx.post(CF_CHAT).mock(return_value=_llm_with_neurons(2.5))
 
-    result = await gateway.chat("fast_llm", REQ)
+    result = await gateway.chat(CF_FIRST_FAST_LLM, REQ)
 
     assert result.neurons == 2.5
     assert result.neurons_est is None
@@ -70,7 +78,7 @@ async def test_daily_total_mixes_actual_and_estimate(gateway):
     respx.post(CF_CHAT).mock(return_value=_llm_with_neurons(2.5))
     respx.post(SCHNELL).mock(return_value=_image_ok())
 
-    await gateway.chat("fast_llm", REQ)
+    await gateway.chat(CF_FIRST_FAST_LLM, REQ)
     result = await gateway.image("image_create", ImageRequest(prompt="p", steps=8))
 
     # image: 4 * 4.80 + 8 * 9.60 = 96.0 ; total = 2.5 + 96.0
@@ -83,7 +91,7 @@ async def test_daily_total_mixes_actual_and_estimate(gateway):
 async def test_cloudflare_llm_without_neurons_in_usage_counts_nothing(gateway):
     respx.post(CF_CHAT).mock(return_value=chat_ok())
 
-    result = await gateway.chat("fast_llm", REQ)
+    result = await gateway.chat(CF_FIRST_FAST_LLM, REQ)
 
     assert result.neurons is None and result.neurons_est is None
     assert gateway.meter.total_today == 0
@@ -94,7 +102,7 @@ async def test_groq_calls_are_not_counted_against_cloudflare(gateway):
     respx.post(CF_CHAT).mock(return_value=cf_error(429, 3036))
     respx.post(GROQ_CHAT).mock(return_value=_llm_with_neurons(999))
 
-    result = await gateway.chat("fast_llm", REQ)
+    result = await gateway.chat(CF_FIRST_FAST_LLM, REQ)
 
     assert result.provider == "groq"
     assert result.neurons is None and result.daily_neurons_total is None
