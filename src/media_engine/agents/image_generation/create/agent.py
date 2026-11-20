@@ -32,7 +32,8 @@ returned (they are marked orphaned); only actual spend is reported.
 inputs:
     prompt:   str             the user's request (required)
     settings: dict[str, str]  user-chosen values, e.g. {"aspect_ratio": "16:9"} (optional)
-    n:        int             images wanted (optional, default 1, at most max_images_per_request)
+    n:        int             images wanted (optional, default 1, at most the plan's
+                              max_images_per_request)
     run_id / user_id: str     (optional) identifiers for RunState
 
 output (envelope): run_id, image_ids (best first; empty unless delivered), plus on delivery
@@ -338,7 +339,7 @@ class ImageCreateAgent(Agent):
         """A fresh RunState (every step pending, the first round open) and its context.
         Raises ValidationError."""
         args = SupervisorInputs.model_validate(
-            inputs, context={"max_images": self._policy.max_images_per_request}
+            inputs, context={"max_images": self._policy.max_images_per_request[auth.plan]}
         )
         state = RunState(
             run_id=args.run_id or f"run_{uuid.uuid4().hex}",

@@ -104,8 +104,9 @@ async def create_images(
     cfg = cfg or get_create_config()
     if not prompt.strip():
         return invalid("no prompt given")
-    if not 1 <= n <= cfg.policy.max_images_per_request:
-        return invalid(f"n must be between 1 and {cfg.policy.max_images_per_request}")
+    cap = cfg.policy.max_images_per_request[auth.plan]
+    if not 1 <= n <= cap:
+        return invalid(f"n must be between 1 and {cap} on the {auth.plan} plan")
     if operation is not None and operation not in OPERATIONS:
         return invalid(f"operation must be one of {', '.join(OPERATIONS)}")
 

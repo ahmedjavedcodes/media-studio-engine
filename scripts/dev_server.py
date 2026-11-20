@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field
 from media_engine.contracts import AuthContext, Envelope
 from media_engine.harness.trace import Trace
 from media_engine.ports import ArtifactNotFound, InMemoryRunStore, LocalArtifactStore
+from media_engine.services.catalog import catalog
 from media_engine.services.create.entry import create_images
 
 # Tests inject a fake gateway here. None = the shared real Gateway (real provider calls).
@@ -161,6 +162,13 @@ def get_run(run_id: str) -> Run:
     if run is None:
         raise HTTPException(404, "unknown run")
     return run
+
+
+@app.get("/catalog")
+async def get_catalog(plan: Literal["free", "pro", "max", "ultra"] = "free") -> dict[str, Any]:
+    """What the prompt bar may offer this plan (services/catalog.py). TODO(backend): the real
+    endpoint is the backend's; locks are UX only, the gateway enforces the plan on every call."""
+    return catalog(plan).model_dump()
 
 
 @app.post("/runs", status_code=202)

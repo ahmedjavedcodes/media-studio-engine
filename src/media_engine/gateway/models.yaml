@@ -40,6 +40,7 @@ models:
     # high is ~35x low and ~123 s: ultra only. medium was never measured, so it is gated like
     # high until it is (fail closed).
     min_tier_for: {quality: {high: ultra, medium: ultra}}
+    batch_only_for: {quality: [high]} # ~123 s per image: batch quality, never interactive
     quality_settings: [auto, low, medium, high]
     default_quality: low # always sent explicitly; never let the model pick
     supports_seed: false
@@ -75,11 +76,9 @@ models:
     prompt_max_words: 60
     eval_default: true # cheapest paid model; NOT a reproducible one: no model reproduces from a seed (measured), so evals compare scores over several images, not pixels
 
-  # -- PRO -------------------------------------------------------------------------------------
-
   - slug: bytedance-seed/seedream-5-0-flash
     name: Seedream 5.0 Flash
-    tier: pro
+    tier: entry # catalog decision 2026-11-20: offered on Basic (free) and up
     billing_unit: image
     price_measured_usd: 0.018 # "from": the base rate
     supports_seed: true
@@ -87,6 +86,8 @@ models:
     max_input_images: 14
     prompt_style: sentences
     prompt_max_words: 70 # inside Seedream's 30-80 range
+
+  # -- PRO -------------------------------------------------------------------------------------
 
   - slug: black-forest-labs/flux.2-pro
     name: FLUX.2 Pro
@@ -203,6 +204,7 @@ models:
     max_input_images: 14
     prompt_style: sentences
     prompt_max_words: 50
+    offered: false # catalog decision 2026-11-20: no measured price; add it deliberately
 
   - slug: google/gemini-3-pro-image
     name: Gemini 3 Pro Image

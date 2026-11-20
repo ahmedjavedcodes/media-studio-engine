@@ -86,6 +86,13 @@ class ModelEntry(BaseModel):
     lead_order: Lead = "subject"  # which part opens the prompt (compiler)
     eval_default: bool = False
     available: bool = True
+    # False: kept in the registry but not offered in the plan catalogue (services/catalog.py),
+    # e.g. no measured price yet. `available` is about whether an endpoint serves it at all.
+    offered: bool = True
+    # setting -> values that are batch quality only (slow, e.g. gpt-image-2 high: ~123 s per
+    # image): never on the interactive path. The catalogue marks them; batch (b)'s model pick
+    # must refuse them on an interactive run.
+    batch_only_for: dict[str, list[str]] = Field(default_factory=dict)
     notes: str | None = None
 
     @model_validator(mode="after")
@@ -127,6 +134,8 @@ class ImageModelSpec(BaseModel):
     lead_order: Lead
     eval_default: bool
     available: bool
+    offered: bool
+    batch_only_for: dict[str, list[str]]
     in_catalogue: bool  # False: no cache, or the cache does not list this slug
     listed_pricing: list[dict[str, Any]]  # catalogue /endpoints pricing (listed, not billed)
 
@@ -146,6 +155,13 @@ class ImageModelSpec(BaseModel):
 
     def allowed_for(self, plan: Plan, settings: Mapping[str, str] | None = None) -> bool:
         return self.plan_block(plan, settings) is None
+
+    def is_batch_only(self, settings: Mapping[str, str] | None = None) -> bool:
+        """True when any of these settings is batch quality only (too slow for interactive)."""
+        return any(
+            str(value) in self.batch_only_for.get(name, [])
+            for name, value in (settings or {}).items()
+        )
 
 
 def _range_max(info: ImageModelInfo, name: str) -> int | None:
@@ -253,6 +269,8 @@ def merge(
         lead_order=entry.lead_order,
         eval_default=entry.eval_default,
         available=entry.available,
+        offered=entry.offered,
+        batch_only_for=entry.batch_only_for,
         in_catalogue=info is not None,
         listed_pricing=list(info.pricing) if info is not None else [],
     )

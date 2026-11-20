@@ -74,7 +74,7 @@ class HarnessPolicy(_Strict):
     routing: RoutingPolicy
     negative_prompt: str
     max_parallel_branches: int = Field(gt=0)
-    max_images_per_request: int = Field(gt=0)
+    max_images_per_request: dict[Plan, int]  # by plan; every value > 0
     max_seed: int = Field(gt=0)
     aspect_ratio_tolerance: float = Field(ge=0.0)
     cancel_poll_ms: int = Field(gt=0)
@@ -86,6 +86,9 @@ class HarnessPolicy(_Strict):
     def _complete(self) -> HarnessPolicy:
         _all_plans(self.quality_threshold, "quality_threshold")
         _all_plans(self.budgets, "budgets")
+        _all_plans(self.max_images_per_request, "max_images_per_request")
+        if any(v <= 0 for v in self.max_images_per_request.values()):
+            raise ValueError("max_images_per_request values must be > 0")
         for name, table in (
             ("step_estimates", self.step_estimates),
             ("deadlines_ms", self.deadlines_ms),

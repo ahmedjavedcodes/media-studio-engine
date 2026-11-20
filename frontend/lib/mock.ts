@@ -3,12 +3,25 @@
  * results the real API sends, with placeholder images from /public/mock.
  *
  * Pick the outcome with a word in the prompt:
- *   "reject" -> rejected       "fail" -> failed          "complex" -> escalate
- *   "issues" -> done_with_issues
+ *   "reject" -> rejected       "fail" -> failed          "issues" -> done_with_issues
  *   "question" (manual mode) -> needs_input, then done once an answer is in settings
- * anything else -> done.
+ * anything else -> done. An operation other than create (edit / merge / restyle) -> escalate,
+ * with that operation's own "not available yet" message, as the real API returns.
+ * A "complex" prompt is NOT special any more: the API makes one image for it.
+ *
+ * Images stream in as they pass the check (image_ready), one at a time, before the result.
  */
-import type { CreateRequest, Handlers, PublicLabel, RunEvent, RunResult, Status } from "./api";
+import type {
+  Catalog,
+  CreateRequest,
+  Handlers,
+  Operation,
+  Plan,
+  PublicLabel,
+  RunEvent,
+  RunResult,
+  Status,
+} from "./api";
 
 type Scenario = Status | "running";
 interface MockRun {
@@ -23,9 +36,38 @@ const LABELS: PublicLabel[] = ["Understanding your request", "Creating your imag
 const STEP_MS = 1100;
 const BRANCH_MS = 350;
 
+// The real API's per-operation messages (agents/image_generation/agent.py).
+const STUB_SUMMARY: Record<Exclude<Operation, "create">, string> = {
+  edit: "Editing an image is not available yet.",
+  merge: "Merging images is not available yet.",
+  restyle: "Restyling an image is not available yet.",
+};
+
+const PLACEHOLDERS = 4;
+
+/** Mock images live in /public/mock: img_mock_<k> maps onto placeholder <k>. */
+export function mockImageUrl(imageId: string): string {
+  const k = Number(imageId.replace(/\D+/g, "")) || 1;
+  return `/mock/placeholder-${((k - 1) % PLACEHOLDERS) + 1}.svg`;
+}
+
+export async function mockCatalog(plan: Plan): Promise<Catalog> {
+  return {
+    plan,
+    default_model: "auto",
+    models: [], // the model picker comes with batch (b)
+    max_images: plan === "free" ? 2 : 4,
+    aspect_ratios: ["1:1", "4:3", "3:4", "16:9", "9:16", "4:5", "3:2"],
+    default_aspect_ratio: "1:1",
+    max_resolution: plan === "ultra" ? "4K" : "2K",
+    modes: ["auto", "manual"],
+    operations: { create: "live", edit: "coming_soon", merge: "coming_soon", restyle: "coming_soon" },
+  };
+}
+
 function scenarioFor(req: CreateRequest): Scenario {
   const text = req.prompt.toLowerCase();
-  if (text.includes("complex")) return "escalate";
+  if (req.operation !== "create") return "escalate";
   if (text.includes("reject")) return "rejected";
   if (text.includes("fail")) return "failed";
   if (text.includes("issues")) return "done_with_issues";
@@ -37,7 +79,7 @@ function scenarioFor(req: CreateRequest): Scenario {
 function images(count: number): RunResult["images"] {
   return Array.from({ length: count }, (_, i) => ({
     image_id: `img_mock_${i + 1}`,
-    url: `/mock/placeholder-${(i % 4) + 1}.svg`,
+    url: mockImageUrl(`img_mock_${i + 1}`),
     quality_score: Math.max(3, 9 - i),
   }));
 }
@@ -72,13 +114,10 @@ function resultFor(runId: string, run: MockRun, checked: number): RunResult {
       };
     case "failed":
       return { ...base, status: "failed", summary: "The image could not be created.", reason: "provider unavailable" };
-    case "escalate":
-      return {
-        ...base,
-        status: "escalate",
-        summary: "This request needs more than one step, which is not available yet.",
-        reason: "multi-step planning not implemented",
-      };
+    case "escalate": {
+      const op = run.req.operation as Exclude<Operation, "create">;
+      return { ...base, status: "escalate", summary: STUB_SUMMARY[op], reason: `${op} not implemented` };
+    }
     default:
       return { ...base, status: "cancelled", summary: "Image creation was cancelled.", images: images(checked) };
   }
@@ -120,6 +159,11 @@ export function mockSubscribe(runId: string, handlers: Handlers): () => void {
     phase,
     ts: new Date().toISOString(),
   });
+  // A checked image can be shown at once (image_ready), before the run's result.
+  const streamImage = (k: number) => {
+    if (run.scenario !== "done" && run.scenario !== "done_with_issues") return;
+    handlers.onEvent({ ...event(3, "progress"), phase: "image_ready", image_id: `img_mock_${k}` });
+  };
   const later = (ms: number, fn: () => void) => {
     timers.push(
       setTimeout(() => {
@@ -158,12 +202,16 @@ export function mockSubscribe(runId: string, handlers: Handlers): () => void {
           if (run.cancelled) return;
           handlers.onEvent(event(step, "progress"));
           if (step === 2) checked = 0;
-          if (step === 3) checked = b;
+          if (step === 3) {
+            checked = b;
+            streamImage(b);
+          }
         });
       }
     }
     later(at + duration, () => {
       if (run.cancelled) return;
+      if (step === 3 && branches === 1) streamImage(1);
       handlers.onEvent(event(step, "finished"));
     });
     at += duration;

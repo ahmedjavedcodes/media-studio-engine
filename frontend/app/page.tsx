@@ -7,14 +7,18 @@ import Stepper, { type StepState } from "@/components/Stepper";
 import {
   cancelRun,
   createRun,
+  getCatalog,
   getTrace,
   imageUrl,
   INSPECTOR,
   MOCK,
+  OPERATIONS,
   subscribe,
   type AspectRatio,
+  type Catalog,
   type CreateRequest,
   type Mode,
+  type Operation,
   type Plan,
   type RunEvent,
   type RunResult,
@@ -23,8 +27,17 @@ import {
 
 const PLANS: Plan[] = ["free", "pro", "max", "ultra"];
 const MODES: Mode[] = ["auto", "manual"];
-const RATIOS: AspectRatio[] = ["1:1", "4:3", "3:4", "16:9", "9:16"];
 const select = "w-full rounded-md border border-neutral-300 bg-white px-3 py-2";
+const LABEL: Record<Operation, string> = { create: "Create", edit: "Edit", merge: "Merge", restyle: "Restyle" };
+// A slash command at the start of the prompt picks the operation explicitly: "/edit make it blue".
+const SLASH = /^\/(create|edit|merge|restyle)\b\s*/i;
+
+/** The operation a slash command asks for, and the prompt without it. */
+function parseSlash(text: string): { operation: Operation | null; prompt: string } {
+  const match = SLASH.exec(text);
+  if (!match) return { operation: null, prompt: text };
+  return { operation: match[1].toLowerCase() as Operation, prompt: text.slice(match[0].length) };
+}
 
 type Phase = "idle" | "running" | "finished";
 
@@ -34,6 +47,10 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("auto");
   const [n, setN] = useState(1);
   const [ratio, setRatio] = useState<AspectRatio>("1:1");
+  const [operation, setOperation] = useState<Operation>("create");
+  // What this plan may pick (sizes, image cap, live operations). Locks are UX only: the backend
+  // enforces the plan on every call.
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [steps, setSteps] = useState<StepState[]>(["pending", "pending", "pending"]);
@@ -52,6 +69,25 @@ export default function Home() {
   const last = useRef<CreateRequest | null>(null);
 
   useEffect(() => () => stop.current?.(), []);
+
+  useEffect(() => {
+    let alive = true;
+    getCatalog(plan)
+      .then((next) => {
+        if (!alive) return;
+        setCatalog(next);
+        setN((v) => Math.min(v, next.max_images));
+        setRatio((r) => (next.aspect_ratios.includes(r) ? r : next.default_aspect_ratio));
+      })
+      .catch(() => alive && setCatalog(null));
+    return () => {
+      alive = false;
+    };
+  }, [plan]);
+
+  const maxImages = catalog?.max_images ?? 1;
+  const ratios = catalog?.aspect_ratios ?? [ratio];
+  const live = (op: Operation) => (catalog ? catalog.operations[op] === "live" : op === "create");
 
   // Inspector (NEXT_PUBLIC_INSPECTOR=1): poll the run's trace every 500 ms while it runs, then
   // once more when it ends. A separate channel from the events: the public UI never reads it.
@@ -124,8 +160,12 @@ export default function Home() {
   }
 
   function generate() {
-    if (!prompt.trim()) return;
-    void start({ prompt: prompt.trim(), plan, mode, n, settings: { aspect_ratio: ratio } });
+    const slash = parseSlash(prompt.trim());
+    const text = slash.prompt.trim();
+    if (!text) return;
+    // A slash command overrides the selected button for this request.
+    const op = slash.operation ?? operation;
+    void start({ prompt: text, plan, mode, n, operation: op, settings: { aspect_ratio: ratio } });
   }
 
   function answer(answers: Record<string, string>) {
@@ -143,6 +183,8 @@ export default function Home() {
   }
 
   const running = phase === "running";
+  // What would be sent: a bare slash command ("/edit") has no prompt, so nothing to generate.
+  const sendable = parseSlash(prompt.trim()).prompt.trim().length > 0;
 
   return (
     <>
@@ -153,12 +195,36 @@ export default function Home() {
         {MOCK && (
           <p className="mt-2 rounded bg-neutral-200 px-2 py-1 text-xs text-neutral-700">
             Mock mode: no backend. Words in the prompt pick the outcome: question (manual mode), issues, reject,
-            fail, complex.
+            fail. A slash command (/edit, /merge, /restyle) shows the &quot;not available yet&quot; result.
           </p>
         )}
       </header>
 
       <section className="space-y-4 rounded-lg border border-neutral-200 bg-white p-4">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Operation">
+          {OPERATIONS.map((op) => {
+            const available = live(op);
+            const selected = operation === op;
+            return (
+              <button
+                key={op}
+                type="button"
+                disabled={running || !available}
+                aria-pressed={selected}
+                title={available ? undefined : "Coming soon"}
+                onClick={() => setOperation(op)}
+                className={
+                  "rounded-md border px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed " +
+                  (selected ? "border-indigo-600 bg-indigo-50 text-indigo-700" : "border-neutral-300 bg-white") +
+                  (available ? "" : " opacity-50")
+                }
+              >
+                {LABEL[op]}
+                {!available && <span className="ml-1.5 text-xs font-normal text-neutral-500">soon</span>}
+              </button>
+            );
+          })}
+        </div>
         <textarea
           className="h-28 w-full resize-none rounded-md border border-neutral-300 p-3"
           placeholder="A cozy coffee shop at dusk, warm lamps, wooden tables"
@@ -186,7 +252,7 @@ export default function Home() {
           <label className="text-sm">
             Images
             <select className={select} value={n} disabled={running} onChange={(e) => setN(Number(e.target.value))}>
-              {[1, 2, 3, 4].map((v) => (
+              {Array.from({ length: maxImages }, (_, i) => i + 1).map((v) => (
                 <option key={v}>{v}</option>
               ))}
             </select>
@@ -199,7 +265,7 @@ export default function Home() {
               disabled={running}
               onChange={(e) => setRatio(e.target.value as AspectRatio)}
             >
-              {RATIOS.map((r) => (
+              {ratios.map((r) => (
                 <option key={r}>{r}</option>
               ))}
             </select>
@@ -208,7 +274,7 @@ export default function Home() {
         <div className="flex items-center gap-3">
           <button
             onClick={generate}
-            disabled={running || !prompt.trim()}
+            disabled={running || !sendable}
             className="rounded-md bg-indigo-600 px-5 py-2 font-medium text-white disabled:opacity-40"
           >
             Generate

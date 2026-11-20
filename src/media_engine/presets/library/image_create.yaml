@@ -1,6 +1,9 @@
 # Defaults the Image Grand Agent uses to answer the Enhancer's `missing_info` locally before
 # escalating. Keys under `defaults` are the questions it can answer on its own.
-# Sizes stay <= 1024 per side (flux-1-schnell max_side).
+# Sizes stay <= 1024 per side (flux-1-schnell max_side), in multiples of 16, and within
+# harness.yaml aspect_ratio_tolerance of the named ratio.
+# RULE: every ratio the Brief prompt (prompts/brief/brief.md) can emit must be listed here, or a
+# Brief that picks it silently falls back to the default (tests/unit/harness/test_presets.py).
 
 defaults:
   aspect_ratio: "1:1"
@@ -13,3 +16,5 @@ aspect_ratios:
   "3:4": {width: 768, height: 1024}
   "16:9": {width: 1024, height: 576}
   "9:16": {width: 576, height: 1024}
+  "4:5": {width: 816, height: 1024}
+  "3:2": {width: 1024, height: 688}

@@ -43,9 +43,20 @@ def store(tmp_path: Path) -> LocalArtifactStore:
     return LocalArtifactStore(tmp_path / ".artifacts")
 
 
+# Branch mechanics are tested on the free plan with up to four images, so these helpers lift the
+# free plan's own cap (2, by the catalog decision); the cap itself is tested in test_supervisor.
+UNCAPPED = {"free": 4, "pro": 4, "max": 4, "ultra": 4}
+
+
+def uncapped(cfg: Any) -> Any:
+    return cfg.model_copy(
+        update={"policy": cfg.policy.model_copy(update={"max_images_per_request": UNCAPPED})}
+    )
+
+
 def rich(**policy: Any) -> Any:
     """CFG with room in every budget for several images (the placeholder estimates are sized for
-    one), and any other policy field overridden."""
+    one), the per-plan image cap lifted, and any other policy field overridden."""
     budgets = {
         plan: b.model_copy(
             update={"tokens_total": b.tokens_total * 20, "neurons_total": b.neurons_total * 20}
@@ -53,7 +64,11 @@ def rich(**policy: Any) -> Any:
         for plan, b in CFG.policy.budgets.items()
     }
     return CFG.model_copy(
-        update={"policy": CFG.policy.model_copy(update={"budgets": budgets, **policy})}
+        update={
+            "policy": CFG.policy.model_copy(
+                update={"budgets": budgets, "max_images_per_request": UNCAPPED, **policy}
+            )
+        }
     )
 
 
@@ -62,7 +77,9 @@ def tight() -> Any:
     critique, not four: free now fits n=4 for real, so budget refusals need a smaller budget."""
     free = CFG.policy.budgets["free"].model_copy(update={"tokens_total": 14000})
     budgets = {**CFG.policy.budgets, "free": free}
-    return CFG.model_copy(update={"policy": CFG.policy.model_copy(update={"budgets": budgets})})
+    return uncapped(
+        CFG.model_copy(update={"policy": CFG.policy.model_copy(update={"budgets": budgets})})
+    )
 
 
 class SlowImages(ScriptedImages):
@@ -612,7 +629,7 @@ async def test_the_gate_counts_a_generated_image_as_owing_only_its_critique(stor
         for plan, b in CFG.policy.budgets.items()
     }
     cfg = CFG.model_copy(update={"policy": CFG.policy.model_copy(update={"budgets": budgets})})
-    agent = build(ScriptedChat([]), ScriptedImages([]), store, cfg=cfg)
+    agent = build(ScriptedChat([]), ScriptedImages([]), store, cfg=uncapped(cfg))
     ctx = agent.new_context(auth_for_tests(), {"prompt": "x", "n": 4})
 
     assert agent._affordable(ctx, "generate", units=1, owed=owed) is True  # fits exactly
@@ -650,23 +667,25 @@ async def test_the_one_guard_funds_what_it_can_and_refuses_the_rest_before_any_c
     assert len(env.output["image_ids"]) == funded
 
 
-async def test_the_real_free_budget_now_funds_four_images(store):
-    # Measured (2026-11-20): a critique costs ~5,000 tokens per image at worst, not 12,000, so the
-    # free plan's own budget covers n=4 (it used to refuse two of the four).
-    llm = ScriptedChat([enhanced(), *[verdict(9)] * 4])
-    images = ScriptedImages(pics(4))
+@pytest.mark.parametrize(("plan", "n"), [("free", 2), ("pro", 4)])
+async def test_the_real_budget_funds_each_plans_own_image_cap(store, plan, n):
+    # Measured (2026-11-20): a critique costs ~5,000 tokens per image at worst, so each plan's own
+    # budget covers its own image cap (free 2, paid 4) with nothing refused.
+    assert CFG.policy.max_images_per_request[plan] == n
+    llm = ScriptedChat([enhanced(), *[verdict(9)] * n])
+    images = ScriptedImages(pics(n))
     run_store = RecordingStore()
 
-    env = await create(build(llm, images, store, run_store=run_store), "free", n=4)
+    env = await create(build(llm, images, store, run_store=run_store), plan, n=n)
 
-    assert len(images.requests) == 4 and len(env.output["image_ids"]) == 4
-    assert [r.failure for r in final_state(run_store).round] == [None] * 4
+    assert len(images.requests) == n and len(env.output["image_ids"]) == n
+    assert [r.failure for r in final_state(run_store).round] == [None] * n
 
 
 @pytest.mark.parametrize("n", [1, 3])
 async def test_the_critic_step_budget_grows_with_the_number_of_images(store, n):
     llm = ScriptedChat([enhanced(), *[verdict(9)] * n])
-    agent = build(llm, ScriptedImages(pics(n)), store)
+    agent = build(llm, ScriptedImages(pics(n)), store, cfg=uncapped(CFG))
     seen: list[int] = []
     real_run = agent._critic.run
 

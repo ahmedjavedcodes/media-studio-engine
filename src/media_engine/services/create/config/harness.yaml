@@ -21,7 +21,9 @@ routing: {ambiguous_to_stubs: false}
 negative_prompt: "text, letters, words, captions, signage with writing, logos, watermark, signature"
 
 max_parallel_branches: 4
-max_images_per_request: 4
+# Images per request, by plan (catalog decision 2026-11-20): Basic 2, paid 4. Credits scale with
+# N on the backend. Checked by create_images() before any model call.
+max_images_per_request: {free: 2, pro: 4, max: 4, ultra: 4}
 
 # Seeds are drawn uniformly from [0, max_seed]. 2^31 - 1: the int32 range providers accept.
 max_seed: 2147483647

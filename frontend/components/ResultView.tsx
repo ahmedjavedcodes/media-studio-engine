@@ -72,9 +72,12 @@ export default function ResultView({ result, onAnswers, onRetry }: Props) {
       );
 
     case "escalate":
+      // Only an operation that is not built yet escalates (edit / merge / restyle). The API sends
+      // that operation's own message in `summary`, e.g. "Editing an image is not available yet."
       return (
         <div className={box + "border-neutral-300 bg-white"}>
-          <p className="font-medium">This request needs more than one step, which is not available yet.</p>
+          <p className="font-medium">{result.summary || "This is not available yet."}</p>
+          <p className="text-sm text-neutral-600">It is coming soon. You can create a new image in the meantime.</p>
         </div>
       );
   }

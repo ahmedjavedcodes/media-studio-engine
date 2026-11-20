@@ -502,10 +502,15 @@ async def test_an_unexpected_exception_inside_a_node_becomes_a_failed_envelope(s
     assert [s.status for s in final.plan] == ["done", "failed", "skipped"]
 
 
-async def test_more_images_than_the_configured_cap_is_rejected(store):
-    too_many = CFG.policy.max_images_per_request + 1
-    env = await create(build(ScriptedChat([]), ScriptedImages([]), store), n=too_many)
+@pytest.mark.parametrize("plan", ["free", "pro", "max", "ultra"])
+async def test_more_images_than_the_plans_cap_is_rejected(store, plan):
+    too_many = CFG.policy.max_images_per_request[plan] + 1
+    env = await create(build(ScriptedChat([]), ScriptedImages([]), store), plan, n=too_many)
     assert env.output == {"failure": "invalid_input"}
+
+
+def test_the_image_cap_is_two_on_basic_and_four_on_paid_plans():
+    assert CFG.policy.max_images_per_request == {"free": 2, "pro": 4, "max": 4, "ultra": 4}
 
 
 # -- budget: refused BEFORE a generation call, never after --------------------------------------

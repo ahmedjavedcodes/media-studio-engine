@@ -108,6 +108,39 @@ def test_unknown_run_and_image_are_404(shim):
         assert client.post("/runs", json={"prompt": "x", "n": 9}).status_code == 422
 
 
+def test_the_catalog_endpoint_serves_the_plans_catalogue(shim):
+    with TestClient(shim.app) as client:
+        free = client.get("/catalog", params={"plan": "free"}).json()
+        ultra = client.get("/catalog", params={"plan": "ultra"}).json()
+        assert client.get("/catalog", params={"plan": "gold"}).status_code == 422
+    assert free["max_images"] == 2 and ultra["max_images"] == 4
+    assert free["default_model"] == "auto" and free["operations"]["edit"] == "coming_soon"
+    assert any(m["locked"] for m in free["models"])
+    assert not any(m["locked"] for m in ultra["models"])
+
+
+@pytest.mark.parametrize(("plan", "want"), [("pro", "done"), ("free", "failed")])
+def test_the_plan_in_the_request_body_sets_the_runs_image_cap(shim, plan, want):
+    # The shim threads `plan` into AuthContext, so the cap varies by plan end to end.
+    from dev_fake_backend import FakeBackend
+
+    shim.GATEWAY = FakeBackend(delay=0)
+    with TestClient(shim.app) as client:
+        body = {"prompt": "a cozy cafe", "plan": plan, "n": 4}
+        run_id = client.post("/runs", json=body).json()["run_id"]
+        (result,) = [d for name, d in sse(client, run_id) if name == "result"]
+    assert result["status"] == want, result["reason"]
+    assert len(result["images"]) == (4 if plan == "pro" else 0)
+
+
+def test_a_free_run_above_the_plans_image_cap_is_refused_before_any_call(shim):
+    shim.GATEWAY = Backend(ScriptedChat([]), ScriptedImages([]))  # any call would raise
+    with TestClient(shim.app) as client:
+        run_id = client.post("/runs", json={"prompt": "a cat", "n": 3}).json()["run_id"]
+        (result,) = [d for name, d in sse(client, run_id) if name == "result"]
+    assert result["status"] == "failed" and "free plan" in result["reason"]
+
+
 def test_the_fake_backend_drives_every_outcome_over_the_contract(shim):
     from dev_fake_backend import FakeBackend
 

@@ -1,6 +1,7 @@
 /**
  * Typed client for the contract in project-status/ARCHITECTURE.md, section 8.
  *
+ *   GET  /catalog?plan=      -> Catalog (what the prompt bar may offer this plan)
  *   POST /runs               -> { run_id }
  *   GET  /runs/:id/events    -> SSE: "step" (RunEvent, many) then "result" (RunResult, once)
  *   POST /runs/:id/cancel
@@ -10,11 +11,15 @@
  * NEXT_PUBLIC_MOCK=1 (the default) replays scripted events and placeholder images instead, so
  * the UI works without a backend. Set NEXT_PUBLIC_MOCK=0 to use the real API.
  */
-import { mockCancel, mockCreateRun, mockGetRun, mockSubscribe } from "./mock";
+import { mockCancel, mockCatalog, mockCreateRun, mockGetRun, mockImageUrl, mockSubscribe } from "./mock";
 
 export type Plan = "free" | "pro" | "max" | "ultra";
 export type Mode = "auto" | "manual";
-export type AspectRatio = "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
+export type AspectRatio = string; // one of the plan's Catalog.aspect_ratios
+
+/** What the request asks for. Set by a button or a slash command; only create is live. */
+export const OPERATIONS = ["create", "edit", "merge", "restyle"] as const;
+export type Operation = (typeof OPERATIONS)[number];
 
 /** Envelope statuses, plus "running" while a run is in progress (RunState only). */
 export type Status =
@@ -41,9 +46,35 @@ export interface CreateRequest {
   prompt: string;
   plan: Plan;
   mode: Mode;
-  n: number; // 1..4
+  n: number; // 1..Catalog.max_images for the plan
+  operation: Operation;
   /** aspect_ratio, plus one entry per answered question (keyed by the question text). */
   settings: Record<string, string>;
+}
+
+/** GET /catalog?plan=. UI locks are UX only: the backend enforces the plan on every call. */
+export interface CatalogModel {
+  id: string; // what the client sends back as its pick
+  slug: string;
+  name: string;
+  plan: Plan; // the lowest plan that may use it
+  settings: Record<string, string>;
+  price_usd: number | null;
+  locked: boolean;
+  upgrade_to: Plan | null;
+  batch_only: boolean; // too slow for an interactive run (e.g. GPT Image 2 high)
+}
+
+export interface Catalog {
+  plan: Plan;
+  default_model: "auto";
+  models: CatalogModel[];
+  max_images: number;
+  aspect_ratios: AspectRatio[];
+  default_aspect_ratio: AspectRatio;
+  max_resolution: string;
+  modes: Mode[];
+  operations: Record<Operation, "live" | "coming_soon">;
 }
 
 export interface RunEvent {
@@ -87,7 +118,7 @@ function isPublicLabel(value: unknown): value is PublicLabel {
 
 /** URL of a stored image, for an <img> (never bytes). */
 export function imageUrl(imageId: string): string {
-  return absolute(`/images/${imageId}`);
+  return MOCK ? mockImageUrl(imageId) : absolute(`/images/${imageId}`);
 }
 
 function absolute(url: string): string {
@@ -105,6 +136,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 function normalise(result: RunResult): RunResult {
   return { ...result, images: result.images.map((i) => ({ ...i, url: absolute(i.url) })) };
+}
+
+export async function getCatalog(plan: Plan): Promise<Catalog> {
+  return MOCK ? mockCatalog(plan) : request<Catalog>(`/catalog?plan=${plan}`);
 }
 
 export async function createRun(req: CreateRequest): Promise<{ run_id: string }> {
