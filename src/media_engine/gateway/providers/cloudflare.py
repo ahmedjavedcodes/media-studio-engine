@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from media_engine.core.config import Settings
+from media_engine.core.images import sniff_media_type
 from media_engine.gateway.errors import ProviderError
 from media_engine.gateway.providers.base import (
     DEFAULT_TIMEOUT,
@@ -96,6 +97,7 @@ class CloudflareProvider(Provider):
         try:
             result = response.json()["result"]
             encoded = result["image"]
-            return ImageResponse(images=[base64.b64decode(encoded)])
+            image = base64.b64decode(encoded)
+            return ImageResponse(images=[image], media_types=[sniff_media_type(image)])
         except (KeyError, TypeError, ValueError) as exc:
             raise ProviderError(self.name, model, "malformed image response", status=502) from exc

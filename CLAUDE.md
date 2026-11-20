@@ -27,6 +27,7 @@ Rule: **Groq first for agents, Cloudflare first for free-tier images.** Cloudfla
   - `reasoning_effort`: low/medium/high. `reasoning_format` is not supported on GPT-OSS; use `include_reasoning` there. Never use `reasoning_format: "raw"` with tools or JSON mode.
 - **Paid fallbacks**
   - OpenRouter (`OPENROUTER_API_KEY`): images via `POST https://openrouter.ai/api/v1/images` (`input_references` for edit/merge); LLMs via `/api/v1/chat/completions`
+    - Image model registry: `gateway/models.yaml` (measured price, tier, prompt style, word budget) merged with the catalogue cache (what each model accepts: seed, n, references, sizes, quality) by `gateway/image_registry.py`. Every model there is paid; `tier` (entry/pro/max/ultra) is which plan may call it. Refresh the cache MANUALLY with `playground/sync_openrouter_models.py` (free GET calls only); never at startup or on a call.
   - Anthropic Claude (`ANTHROPIC_API_KEY`): designer agent and the hardest planning
   - fal (`FAL_KEY`): SAM masks, background removal, upscalers
   - Google AI / OpenAI: last-resort direct fallback

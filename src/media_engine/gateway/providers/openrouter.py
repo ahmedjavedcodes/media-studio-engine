@@ -1,9 +1,13 @@
 """OpenRouter (paid fallback): images via POST /api/v1/images, chat via /api/v1/chat/completions.
 
 Image request/response shapes follow OpenRouter's API reference (checked 2026-11-13):
-request `model`, `prompt`, `n`, `seed`, `aspect_ratio`, `resolution`, `input_references`
-(`[{"type": "image_url", "image_url": {"url": <data URL | https URL>}}]`); response
-`data[].b64_json`, `usage.cost` (USD).
+request `model`, `prompt`, `n`, `seed`, `aspect_ratio`, `resolution`, `quality`,
+`input_references` (`[{"type": "image_url", "image_url": {"url": <data URL | https URL>}}]`);
+response `data[].b64_json`, `usage.cost` (USD).
+
+What a model accepts comes from the image registry (`image_registry.py`: models.yaml merged
+with the catalogue cache): a seed is sent only to a model that takes one, and a model with
+quality settings always gets one explicitly (its registry default unless the request names one).
 """
 
 from __future__ import annotations
@@ -15,7 +19,9 @@ from typing import Any
 import httpx
 
 from media_engine.core.config import Settings
+from media_engine.core.images import sniff_media_type
 from media_engine.gateway.errors import ProviderError
+from media_engine.gateway.image_registry import ImageModelSpec, ImageRegistry
 from media_engine.gateway.openrouter_models import ModelCache, validate_image_params
 from media_engine.gateway.providers.base import (
     DEFAULT_TIMEOUT,
@@ -85,18 +91,9 @@ def derive_resolution(width: int, height: int) -> str:
     return "4K"
 
 
-def _mime(data: bytes) -> str:
-    if data.startswith(b"\x89PNG"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8"):
-        return "image/jpeg"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return "image/png"
-
-
 def encode_reference(data: bytes) -> dict[str, Any]:
-    url = f"data:{_mime(data)};base64,{base64.b64encode(data).decode()}"
+    mime = sniff_media_type(data) or "image/png"
+    url = f"data:{mime};base64,{base64.b64encode(data).decode()}"
     return {"type": "image_url", "image_url": {"url": url}}
 
 
@@ -108,11 +105,32 @@ class OpenRouterProvider(Provider):
         client: httpx.AsyncClient,
         settings: Settings,
         cache: ModelCache | None = None,
+        registry: ImageRegistry | None = None,
     ) -> None:
         super().__init__(client)
         self._key = settings.openrouter_api_key
         self._base = settings.openrouter_base_url.rstrip("/")
         self.cache = cache or ModelCache()
+        self._registry = registry  # built lazily from self.cache (no network, file read only)
+
+    @property
+    def registry(self) -> ImageRegistry:
+        if self._registry is None:
+            self._registry = ImageRegistry.load(self.cache)
+        return self._registry
+
+    def spec(self, model: str) -> ImageModelSpec | None:
+        return self.registry.get(model)
+
+    def accepts_seed(self, model: str) -> bool:
+        """Registry first; else the catalogue cache; else unknown, so the seed is sent."""
+        spec = self.spec(model)
+        if spec is not None:
+            return spec.supports_seed
+        info = self.cache.get(model)
+        if info is not None:
+            return "seed" in info.supported_parameters
+        return True
 
     def is_configured(self) -> bool:
         return self._key is not None
@@ -186,15 +204,22 @@ class OpenRouterProvider(Provider):
             )
         if request.n > 1:
             payload["n"] = request.n
-        if request.seed is not None:
+        if request.seed is not None and self.accepts_seed(model):
             payload["seed"] = request.seed
+        spec = self.spec(model)
+        if request.quality is not None:
+            payload["quality"] = request.quality  # explicit: sent as given, then validated
+        elif spec is not None and spec.default_quality is not None:
+            payload["quality"] = spec.default_quality
         if request.input_images:
             payload["input_references"] = [encode_reference(b) for b in request.input_images]
         return payload
 
     def _validate(self, model: str, payload: dict[str, Any]) -> None:
         params = {
-            k: v for k, v in payload.items() if k in {"aspect_ratio", "resolution", "n", "seed"}
+            k: v
+            for k, v in payload.items()
+            if k in {"aspect_ratio", "resolution", "n", "seed", "quality"}
         }
         n_refs = len(payload.get("input_references") or [])
         problems = validate_image_params(self.cache, model, params, n_refs)
@@ -221,12 +246,26 @@ class OpenRouterProvider(Provider):
         )
         try:
             data = response.json()
-            images = [base64.b64decode(item["b64_json"]) for item in data["data"]]
+            items = data["data"]
+            images = [base64.b64decode(item["b64_json"]) for item in items]
         except (KeyError, TypeError, ValueError) as exc:
             raise ProviderError(self.name, model, "malformed image response", status=502) from exc
         if not images:
             raise ProviderError(self.name, model, "response contained no images", status=502)
-        return ImageResponse(images=images, cost_usd=_cost(data))
+        media_types = [_media_type(item, image) for item, image in zip(items, images, strict=True)]
+        return ImageResponse(images=images, cost_usd=_cost(data), media_types=media_types)
+
+
+def _media_type(item: dict[str, Any], image: bytes) -> str | None:
+    """The response's own media type when it gives one, else read from the bytes."""
+    for key in ("media_type", "mime_type", "content_type"):
+        value = item.get(key)
+        if isinstance(value, str) and value.startswith("image/"):
+            return value
+    fmt = item.get("output_format")
+    if isinstance(fmt, str) and fmt:
+        return {"jpg": "image/jpeg", "svg": "image/svg+xml"}.get(fmt, f"image/{fmt}")
+    return sniff_media_type(image)
 
 
 def _moderation_reasons(response: httpx.Response) -> list[Any]:

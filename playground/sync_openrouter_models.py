@@ -1,10 +1,11 @@
-"""Refresh the local OpenRouter model cache and check chains.yaml model IDs against it.
+"""Refresh the local OpenRouter model cache; check chains.yaml and models.yaml against it.
 
     uv run python playground/sync_openrouter_models.py
 
-Makes only free listing calls (GET /images/models, per-model /endpoints for models used in
-chains.yaml, and GET /models for chat models). No generation, no cost. Writes
+Makes only free listing calls (GET /images/models, per-model /endpoints for the image models in
+chains.yaml AND models.yaml, and GET /models for chat models). No generation, no cost. Writes
 .cache/openrouter_image_models.json. Prints model IDs and parameter NAMES only, never keys.
+Manual on purpose: the registry only ever READS the cache, never refreshes it at startup.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import asyncio
 import httpx
 
 from media_engine.core.config import get_settings
+from media_engine.gateway.image_registry import MODELS_PATH, ImageRegistry
 from media_engine.gateway.openrouter_models import BASE_URL, ModelCache, sync_image_models
 from media_engine.gateway.router import load_chains, task_kind
 
@@ -30,6 +32,8 @@ async def main() -> None:
         for ref in refs:
             if ref.provider == "openrouter" and not ref.is_placeholder:
                 wanted[task_kind(task)].append(ref.model)
+    registry_slugs = [s.slug for s in ImageRegistry.load(None).all()]  # yaml only, no cache
+    wanted["image"] = sorted(set(wanted["image"]) | set(registry_slugs))
 
     cache = ModelCache()
     async with httpx.AsyncClient() as client:
@@ -42,7 +46,7 @@ async def main() -> None:
     print(f"image models in list: {len(image_ids)}   chat models in list: {len(chat_ids)}")
     print(f"cache written: {cache.path}\n")
 
-    print("== chains.yaml OpenRouter IDs ==")
+    print("== OpenRouter IDs (chains.yaml + models.yaml) ==")
     for model_id in sorted(set(wanted["image"])):
         info = next((m for m in models if m.id == model_id), None)
         if info is None:
@@ -63,6 +67,25 @@ async def main() -> None:
         print(
             f"{status} chat   {model_id}" + ("" if model_id in chat_ids else "  (not in /models)")
         )
+
+    print(f"\n== models.yaml registry ({MODELS_PATH.name}) merged with the fresh cache ==")
+    registry = ImageRegistry.load(cache)
+    for spec in registry.all():
+        flags = []
+        if not spec.in_catalogue:
+            flags.append("NOT IN CATALOGUE")
+        if not spec.available:
+            flags.append("unavailable")
+        if spec.in_catalogue and not spec.listed_pricing:
+            flags.append("no endpoints/pricing")
+        print(
+            f"{spec.tier:<6} {spec.slug:<40} seed={spec.supports_seed!s:<5} n<={spec.n_per_call:<2} "
+            f"refs<={spec.max_input_images:<2} sizes={spec.supported_sizes or '-'} "
+            f"measured=${spec.price_measured_usd} {' '.join(flags)}"
+        )
+    print(f"\n{len(registry.warnings)} registry warning(s)")
+    for warning in registry.warnings:
+        print(f"WARN  {warning}")
 
 
 if __name__ == "__main__":

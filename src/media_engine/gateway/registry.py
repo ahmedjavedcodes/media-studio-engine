@@ -101,9 +101,36 @@ _CARDS: list[ModelCard] = [
 _BY_KEY = {(c.provider, c.model): c for c in _CARDS}
 
 
+def _openrouter_image_card(model: str) -> ModelCard | None:
+    """A card for an OpenRouter image model, from the image registry (models.yaml + catalogue)."""
+    from media_engine.gateway.image_registry import image_registry  # avoid an import cycle
+
+    spec = image_registry().get(model)
+    if spec is None:
+        return None
+    return ModelCard(
+        "openrouter",
+        model,
+        "image",
+        free=False,  # every OpenRouter image model costs money
+        supports_edit=spec.supports_edit,
+        supports_merge=spec.max_input_images > 1,
+        supports_mask=spec.supports_mask,
+        accepts_seed=spec.supports_seed,
+        # True only when verified by a real call; a model with no seed never reproduces.
+        honours_seed=True if spec.seed_verified else (None if spec.supports_seed else False),
+    )
+
+
 def get_card(provider: str, model: str) -> ModelCard | None:
-    return _BY_KEY.get((provider, model))
+    card = _BY_KEY.get((provider, model))
+    if card is None and provider == "openrouter":
+        card = _openrouter_image_card(model)
+    return card
 
 
 def card_or_default(provider: str, model: str, kind: Kind) -> ModelCard:
-    return _BY_KEY.get((provider, model)) or ModelCard(provider, model, kind)
+    card = _BY_KEY.get((provider, model))
+    if card is None and provider == "openrouter" and kind == "image":
+        card = _openrouter_image_card(model)
+    return card or ModelCard(provider, model, kind)

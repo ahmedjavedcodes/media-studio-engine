@@ -39,11 +39,16 @@ class ImageRequest(BaseModel):
     resolution: str | None = (
         None  # OpenRouter tier ('512','768','1K','1.5K','2K','4K'); derived when omitted
     )
+    # OpenRouter quality setting (e.g. gpt-image-2: low/medium/high). None = the registry's
+    # default_quality for that model; never left to the model's own default.
+    quality: str | None = None
 
 
 class ImageResponse(BaseModel):
     images: list[bytes]  # decoded image bytes
     cost_usd: float | None = None  # actual USD cost when the provider reports it (OpenRouter)
+    # One per image, read from the response or the bytes; None = unrecognised. Never assume PNG.
+    media_types: list[str | None] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,205 @@
+# OpenRouter image model registry, curated layer (IMAGE-CREATE-OPTIMIZE v2.1 §6.2, §6.3, §15).
+# Config, not code. Merged at load time with the catalogue cache written by
+# playground/sync_openrouter_models.py (gateway/image_registry.py):
+#   - the CATALOGUE is the source of truth for what a model accepts: seed, n range, max input
+#     references, aspect ratios, resolutions, quality values, mask. The values below are what
+#     we EXPECT; a disagreement is logged as a warning and the catalogue wins.
+#   - THIS FILE is the source of truth for measured price, tier, prompt style and word budget.
+#
+# EVERY model here costs money. OpenRouter has no free image model. `tier` says which PLAN may
+# call a model, not that it is free:
+#   entry  paid fallback for free-plan users, only when Cloudflare's allocation is exhausted
+#   pro / max / ultra  that plan and above
+# Free-plan images come from Cloudflare flux-1-schnell (chains.yaml image_create), not from here.
+#
+# price_measured_usd: OpenRouter's billed `usage.cost` for one 1:1 image at default settings,
+# measured 2026-09-11. Listed prices are NOT billed prices (Riverflow listed $0.13, billed
+# $0.064). Re-measure before fixing tiers. null = not measured (estimates fall back to the
+# catalogue's listed price, or to "unknown").
+#
+# Catalogue values checked against GET /api/v1/images/models on 2026-11-20 (all 15 slugs
+# present). Where the catalogue differed from the spec, the catalogue value is used and noted.
+
+models:
+  # -- ENTRY: paid fallback for free-plan users ----------------------------------------------
+
+  - slug: openai/gpt-image-2
+    name: GPT Image 2
+    tier: entry
+    billing_unit: token
+    price_measured_usd: 0.006 # at quality low (196 image tokens)
+    price_by_quality: {low: 0.006, high: 0.211} # high: 7,024 tokens, ~123 s per image
+    min_tier_for_quality: {high: ultra} # high is a batch-quality option, ultra only
+    quality_settings: [auto, low, medium, high]
+    default_quality: low # always sent explicitly; never let the model pick
+    supports_seed: false
+    n_per_call: 10
+    max_input_images: 16
+    prompt_style: sentences
+    prompt_max_words: 40 # billed per token: length nearly doubles the bill
+
+  - slug: meta/muse-image
+    name: Muse Image
+    tier: entry
+    billing_unit: image
+    price_measured_usd: 0.01
+    supports_seed: false
+    n_per_call: 1
+    max_input_images: 0
+    prompt_style: sentences
+    prompt_max_words: 50 # UNVERIFIED: no style guidance known for this model
+    available: false # 2026-11-20: listed, but no parameters and no endpoints serve it
+    notes: re-check with the sync script before use
+
+  - slug: black-forest-labs/flux.2-klein-4b
+    name: FLUX.2 Klein 4B
+    tier: entry
+    billing_unit: megapixel
+    price_measured_usd: 0.014
+    supports_seed: true
+    seed_verified: true # same seed gave byte-identical images (spec §6.4)
+    n_per_call: 1
+    max_input_images: 4
+    prompt_style: nouns
+    prompt_max_words: 60
+    eval_default: true # every experiment runs on this model (cheapest verified seed)
+
+  # -- PRO -------------------------------------------------------------------------------------
+
+  - slug: bytedance-seed/seedream-5-0-flash
+    name: Seedream 5.0 Flash
+    tier: pro
+    billing_unit: image
+    price_measured_usd: 0.018 # "from": the base rate
+    supports_seed: true
+    n_per_call: 1 # catalogue: n 1..1 (spec left it blank)
+    max_input_images: 14
+    prompt_style: nouns
+    prompt_max_words: 60
+
+  - slug: black-forest-labs/flux.2-pro
+    name: FLUX.2 Pro
+    tier: pro
+    billing_unit: megapixel
+    price_measured_usd: 0.030
+    price_edit_usd: 0.045 # measured: editing costs 50% more
+    supports_seed: true
+    n_per_call: 1
+    max_input_images: 8
+    prompt_style: nouns
+    prompt_max_words: 60
+
+  - slug: qwen/qwen-image-3
+    name: Qwen Image 3
+    tier: pro
+    billing_unit: image
+    price_measured_usd: 0.030
+    supports_seed: true
+    n_per_call: 6
+    max_input_images: 3 # catalogue: 3 (spec said 4)
+    prompt_style: nouns
+    prompt_max_words: 60
+
+  - slug: google/gemini-3.1-flash-lite-image
+    name: Nano Banana 2 Lite
+    tier: pro
+    billing_unit: token
+    price_measured_usd: 0.034
+    supports_seed: false
+    n_per_call: 1
+    max_input_images: 14
+    prompt_style: sentences
+    prompt_max_words: 50
+
+  # -- MAX -------------------------------------------------------------------------------------
+
+  - slug: recraft/recraft-v4.1
+    name: Recraft v4.1
+    tier: max
+    billing_unit: image
+    price_measured_usd: 0.035
+    supports_seed: false
+    n_per_call: 6
+    max_input_images: 1
+    prompt_style: tags
+    prompt_max_words: 30
+
+  - slug: bytedance-seed/seedream-5-0-lite
+    name: Seedream 5.0 Lite
+    tier: max
+    billing_unit: image
+    price_measured_usd: 0.035
+    supports_seed: true
+    n_per_call: 4
+    max_input_images: 14
+    default_size: 2048x2048 # catalogue resolutions are 2K and 4K only: 2K is the floor
+    prompt_style: nouns
+    prompt_max_words: 60
+
+  - slug: black-forest-labs/flux.2-flex
+    name: FLUX.2 Flex
+    tier: max
+    billing_unit: megapixel
+    price_measured_usd: 0.050 # listed $0.06/MP
+    supports_seed: true
+    n_per_call: 1
+    max_input_images: 8
+    prompt_style: nouns
+    prompt_max_words: 60
+
+  - slug: sourceful/riverflow-v2.5-pro
+    name: Riverflow 2.5 Pro
+    tier: max
+    billing_unit: image
+    price_measured_usd: 0.064 # listed $0.13
+    supports_seed: false
+    n_per_call: 1
+    max_input_images: 10
+    prompt_style: sentences
+    prompt_max_words: 60
+
+  # -- ULTRA -----------------------------------------------------------------------------------
+
+  - slug: google/gemini-3.1-flash-image
+    name: Nano Banana 2
+    tier: ultra
+    billing_unit: token
+    price_measured_usd: 0.067
+    supports_seed: false
+    n_per_call: 1
+    max_input_images: 14
+    prompt_style: sentences
+    prompt_max_words: 50
+
+  - slug: black-forest-labs/flux.2-max
+    name: FLUX.2 Max
+    tier: ultra
+    billing_unit: megapixel
+    price_measured_usd: 0.070
+    supports_seed: true
+    n_per_call: 1
+    max_input_images: 8
+    prompt_style: nouns
+    prompt_max_words: 60
+
+  - slug: google/gemini-nano-banana-2.1
+    name: Nano Banana 2.1
+    tier: ultra
+    billing_unit: token
+    price_measured_usd: null # not measured
+    supports_seed: false
+    n_per_call: 1
+    max_input_images: 14
+    prompt_style: sentences
+    prompt_max_words: 50
+
+  - slug: google/gemini-3-pro-image
+    name: Gemini 3 Pro Image
+    tier: ultra
+    billing_unit: token
+    price_measured_usd: 0.134
+    supports_seed: false
+    n_per_call: 1
+    max_input_images: 14
+    prompt_style: sentences
+    prompt_max_words: 50

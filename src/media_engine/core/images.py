@@ -54,6 +54,21 @@ def inspect_image(data: bytes) -> ImageInfo:
     return ImageInfo(mime, width, height)
 
 
+def sniff_media_type(data: bytes) -> str | None:
+    """Media type from the file's magic bytes, without decoding. None when unrecognised.
+    Models return PNG, JPEG, WebP or SVG: never assume one (IMAGE-CREATE-OPTIMIZE §5.3)."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    head = data[:512].lstrip().lower()
+    if head.startswith(b"<svg") or (head.startswith(b"<?xml") and b"<svg" in head):
+        return "image/svg+xml"
+    return None
+
+
 def downscale(data: bytes, max_side: int, jpeg_quality: int) -> tuple[bytes, str]:
     """Shrink so the long side is at most `max_side`, re-encoded as JPEG. Returns the original
     bytes and mime unchanged when the image is already small enough. Blocking: use to_thread."""
