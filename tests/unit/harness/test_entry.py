@@ -31,7 +31,12 @@ from media_engine.schemas import GateDecision
 from media_engine.services.create import entry
 from media_engine.services.create.entry import aclose_gateway, create_images, get_gateway
 from tests.unit.gateway.conftest import ACCOUNT, CF_CHAT, CF_RUN, GROQ_CHAT, NOW, chat_ok
-from tests.unit.harness.fakes import ScriptedChat, ScriptedImages, image_bytes
+from tests.unit.harness.fakes import (
+    ScriptedChat,
+    ScriptedImages,
+    batch_reply,
+    image_bytes,
+)
 from tests.unit.harness.test_supervisor import CFG, auth, enhanced, verdict
 
 SCHNELL = f"{CF_RUN}/@cf/black-forest-labs/flux-1-schnell"
@@ -229,7 +234,7 @@ async def test_first_pass_success_makes_exactly_three_llm_calls_and_writes_a_fil
         side_effect=[
             chat_ok(ROUTE_SIMPLE),  # gate
             chat_ok(enhanced()),  # enhancer
-            chat_ok(verdict(9)),  # critic
+            chat_ok(batch_reply([verdict(9)])),  # critic
         ]
     )
     png = base64.b64encode(image_bytes(1024, 1024)).decode()

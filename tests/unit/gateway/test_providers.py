@@ -103,3 +103,36 @@ async def test_a_text_only_flux2_request_is_still_multipart(gateway):
     assert sent.headers["content-type"].startswith("multipart/form-data")
     for field, value in (("prompt", b"a cat"), ("width", b"512"), ("seed", b"3")):
         assert f'name="{field}"'.encode() in sent.content and value in sent.content
+
+
+SCHEMA = {"type": "object", "properties": {"verdict": {"type": "string"}}}
+
+
+@respx.mock
+async def test_groq_sends_the_schema_natively_and_keeps_the_prompt_clean(gateway):
+    respx.post(CF_CHAT).mock(return_value=cf_error(429, 3036))
+    route = respx.post(GROQ_CHAT).mock(return_value=chat_ok())
+    request = LLMRequest(
+        messages=[{"role": "system", "content": "sys"}, *USER_MSG], response_schema=SCHEMA
+    )
+    await gateway.chat("fast_llm", request)
+    body = json.loads(route.calls[0].request.content)
+    assert body["response_format"]["type"] == "json_schema"
+    assert body["response_format"]["json_schema"]["schema"] == SCHEMA
+    assert body["messages"][0]["content"] == "sys"
+
+
+@respx.mock
+async def test_providers_without_structured_output_get_the_schema_in_the_system_prompt(gateway):
+    route = respx.post(CF_CHAT).mock(return_value=chat_ok())
+    request = LLMRequest(
+        messages=[{"role": "system", "content": "sys"}, *USER_MSG],
+        json_mode=True,
+        response_schema=SCHEMA,
+    )
+    await gateway.chat(CF_FIRST_FAST_LLM, request)
+    body = json.loads(route.calls[0].request.content)
+    assert body["response_format"] == {"type": "json_object"}
+    system = body["messages"][0]["content"]
+    assert system.startswith("sys") and json.dumps(SCHEMA, separators=(",", ":")) in system
+    assert request.messages[0]["content"] == "sys"  # the caller's messages are not mutated

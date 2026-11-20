@@ -189,11 +189,13 @@ class Agent(ABC):
         stop: StoppingCondition,
         user_content: str | list[dict[str, Any]],
         output_model: type[T],
+        *,
+        system: str | None = None,
     ) -> Structured[T]:
         if self._gateway is None:
             raise RuntimeError(f"Agent {self.name!r} has no LLM gateway")
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.system_prompt()},
+            {"role": "system", "content": system or self.system_prompt()},
             {"role": "user", "content": user_content},
         ]
         result: Structured[T] = Structured(output=None, spend=Spend())
@@ -246,7 +248,7 @@ class Agent(ABC):
         # Two quantities, kept apart: stop.max_tokens is the step's TOTAL budget (prompt +
         # completion, all calls); stop.max_completion_tokens is the provider cap on one reply.
         first_cap = min(stop.max_completion_tokens, stop.max_tokens)
-        first = await self._complete(auth, messages, first_cap, result)
+        first = await self._complete(auth, messages, first_cap, result, output_model)
         parsed, error = parse_output(first.text, output_model)
         if parsed is not None:
             result.output = parsed
@@ -287,7 +289,9 @@ class Agent(ABC):
             est_prompt_tokens=est_prompt,
             completion_cap=repair_cap,
         )
-        second = await self._complete(auth, repair_messages, repair_cap, result, was_repair=True)
+        second = await self._complete(
+            auth, repair_messages, repair_cap, result, output_model, was_repair=True
+        )
         if result.spend.tokens > stop.max_tokens:
             log.warning(
                 "agent.token_budget_overrun",
@@ -308,6 +312,7 @@ class Agent(ABC):
         messages: list[dict[str, Any]],
         max_tokens: int,
         result: Structured[T],
+        output_model: type[BaseModel],
         *,
         was_repair: bool = False,
     ) -> LLMResult:
@@ -325,6 +330,7 @@ class Agent(ABC):
                 json_mode=True,
                 reasoning_effort=self.config.model_policy.reasoning_effort,
                 temperature=self.config.model_policy.temperature,
+                response_schema=output_model.model_json_schema(),
             )
         except BaseException as err:  # trace the call that never returned, then re-raise
             self._trace_failed(result, messages, err, was_repair, started_at, started)

@@ -7,7 +7,12 @@ from typing import Any
 import httpx
 
 from media_engine.core.config import Settings
-from media_engine.gateway.providers.base import DEFAULT_TIMEOUT, Provider, parse_chat_completion
+from media_engine.gateway.providers.base import (
+    DEFAULT_TIMEOUT,
+    Provider,
+    inject_schema,
+    parse_chat_completion,
+)
 from media_engine.gateway.registry import card_or_default
 from media_engine.gateway.types import LLMRequest, LLMResponse
 
@@ -26,12 +31,21 @@ class GroqProvider(Provider):
 
     async def chat(self, model: str, request: LLMRequest) -> LLMResponse:
         card = card_or_default(self.name, model, "llm")
-        payload: dict[str, Any] = {"model": model, "messages": request.messages}
+        messages = request.messages
+        schema = request.response_schema
+        if schema is not None and not card.json_schema:
+            messages = inject_schema(messages, schema)
+        payload: dict[str, Any] = {"model": model, "messages": messages}
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.max_tokens is not None:
             payload["max_completion_tokens"] = request.max_tokens
-        if request.json_mode:
+        if schema is not None and card.json_schema:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "reply", "schema": schema},
+            }
+        elif request.json_mode:
             payload["response_format"] = {"type": "json_object"}
         if request.tools:
             payload["tools"] = request.tools

@@ -1,5 +1,7 @@
-"""Prompt Enhancer: turns the user's request into a detailed image prompt plus testable
-`must_have` requirements taken only from the user's own words.
+"""Prompt Enhancer (the Brief agent): turns the user's request into a Brief (subject, action,
+setting, lighting, camera, detail anchors, aspect ratio) plus testable `must_have` requirements
+taken only from the user's own words. It writes fields, not a paragraph: the Compiler
+(gateway/compiler.py) turns the Brief into each image model's prompt.
 
 inputs:
     prompt:   str             the user's raw request (required)
@@ -7,7 +9,8 @@ inputs:
     feedback: str             critique of a previous attempt, for the re_enhance lever (optional)
 
 output (envelope):
-    enhanced_prompt, must_have, must_have_dropped, missing_info (list of {kind, question}),
+    brief, enhanced_prompt (the Brief compiled in a generic style: the fallback prompt and what
+    traces show), must_have, must_have_dropped, missing_info (list of {kind, question}),
     text_wanted, user_prompt
 
 Returns DONE, or NEEDS_INPUT when `missing_info` is non-empty (the Image Grand Agent resolves
@@ -25,12 +28,24 @@ from media_engine.agents.base import Agent, AgentConfig
 from media_engine.contracts import AuthContext, Envelope, Goal, Spend, Status, StoppingCondition
 from media_engine.core.logging import get_logger
 from media_engine.core.prompts import PROMPTS_DIR, load_prompt, render, tag_stripper
+from media_engine.gateway.compiler import DEFAULT_STYLE, compile_prompt
 from media_engine.gateway.llm_gateway import LLMGateway
 from media_engine.ports.event_sink import EventSink
 from media_engine.schemas import EnhancerOutput, MissingItem
 
 INPUT_TEMPLATE = PROMPTS_DIR / "image_create" / "prompt_enhancer.input.md"
 DEFAULT_SUMMARY = "Prepared a detailed description of your image."
+BRIEF_FIELDS = {
+    "subject",
+    "action",
+    "setting",
+    "lighting",
+    "camera",
+    "detail_anchors",
+    "aspect_ratio",
+    "assumptions",
+}
+GENERIC_MAX_WORDS = 80  # the fallback prompt; each model's own budget is applied by the gateway
 NONE_GIVEN = "none"
 
 log = get_logger("agents.prompt_enhancer")
@@ -192,8 +207,11 @@ class PromptEnhancer(Agent):
             log.info("enhancer.must_have_dropped", dropped=len(dropped), kept=len(must_have))
         missing = drop_already_set(out.missing_info, settings)
 
+        brief = out.model_dump(include=BRIEF_FIELDS)
+        generic = compile_prompt(brief, DEFAULT_STYLE, GENERIC_MAX_WORDS, fallback=user_prompt)
         output: dict[str, Any] = {
-            "enhanced_prompt": out.enhanced_prompt,
+            "brief": brief,
+            "enhanced_prompt": generic.text,
             "must_have": must_have,
             "must_have_dropped": dropped,
             "missing_info": [m.model_dump() for m in missing],

@@ -67,12 +67,12 @@ models:
     billing_unit: megapixel
     price_measured_usd: 0.014
     supports_seed: true
-    seed_verified: true # same seed gave byte-identical images (spec §6.4)
+    seed_reproduces: false # MEASURED 2026-11-20: same seed twice gave DIFFERENT pixels (2 calls, $0.028). The spec §6.4 claim of identical images did not reproduce
     n_per_call: 1
     max_input_images: 4
     prompt_style: nouns
     prompt_max_words: 60
-    eval_default: true # every experiment runs on this model (cheapest verified seed)
+    eval_default: true # cheapest paid model; NOT a reproducible one: no model reproduces from a seed (measured), so evals compare scores over several images, not pixels
 
   # -- PRO -------------------------------------------------------------------------------------
 

@@ -66,7 +66,9 @@ class AttemptRecord(BaseModel):
     height: int | None = None
     shape_issues: list[str] = Field(default_factory=list)
     verdict: Verdict | None = None  # None: the Critic never ruled on it, so it is never delivered
-    quality_score: int | None = None
+    quality_score: int | None = None  # mean of the four dimensions in `scores`
+    scores: dict[str, int] = Field(default_factory=dict)  # the Critic's dimensions (§5.4)
+    rank: int | None = None  # 1 = best of the allowed images, from the ranking Critic
     critique: str | None = None
     summary: str | None = None
     failure: str | None = None  # why the attempt ended without a verdict, if it did

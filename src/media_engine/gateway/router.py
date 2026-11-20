@@ -23,7 +23,18 @@ from media_engine.core.config import Settings, get_settings
 from media_engine.core.logging import get_logger
 from media_engine.core.telemetry import traced
 from media_engine.gateway.breaker import BreakerBoard, CircuitBreaker, Permit, Verdict, verdict_for
-from media_engine.gateway.budget import DailyCostMeter, DailyNeuronMeter, estimate_image_neurons
+from media_engine.gateway.budget import (
+    DailyCostMeter,
+    DailyNeuronMeter,
+    estimate_image_neurons,
+    estimate_image_usd,
+)
+from media_engine.gateway.compiler import (
+    DEFAULT_MAX_WORDS,
+    DEFAULT_STYLE,
+    compile_prompt,
+    style_for_cloudflare,
+)
 from media_engine.gateway.errors import (
     AllProvidersFailed,
     BadRequestError,
@@ -39,6 +50,7 @@ from media_engine.gateway.fallback import (
     AvailabilityState,
     decide,
 )
+from media_engine.gateway.image_registry import image_registry
 from media_engine.gateway.providers import Provider, build_providers
 from media_engine.gateway.registry import Kind, card_or_default
 from media_engine.gateway.types import (
@@ -51,6 +63,7 @@ from media_engine.gateway.types import (
     ModelRef,
     Route,
 )
+from media_engine.guardrails.code_checks import check_prompt
 
 CHAINS_PATH = Path(__file__).with_name("chains.yaml")
 
@@ -159,6 +172,7 @@ class Gateway:
         deadline_s: float | None = None,
         start_at: int = 0,
         plan: Plan | None = None,
+        max_cost_usd: float | None = None,
     ) -> CallResult:
         """`start_at` skips that many leading chain entries: the `switch_model` retry lever
         starts the walk at the next model. 0 is the normal walk.
@@ -166,19 +180,77 @@ class Gateway:
         `plan` is enforced HERE, not by the agents: before any entry is called, its provider's
         `route_image` checks the model's tier, every price-multiplying setting that would be
         sent (e.g. gpt-image-2 quality high is ultra only), and `n`. A refused entry is
-        skipped and never called. No plan given = "free" (fail closed)."""
+        skipped and never called. No plan given = "free" (fail closed).
+
+        `max_cost_usd`: what this ONE call may cost. A paid entry whose estimate (budget.
+        estimate_image_usd) is above it, or has no price, is skipped before the call: an unknown
+        price is "cannot afford". None = no cap given (the plan guard still applies)."""
         effective_plan: Plan = plan or DEFAULT_PLAN
         return await self._run(
             task,
             "image",
-            lambda p, m: p.generate_image(m, request),
+            lambda p, m: p.generate_image(m, self._compiled_for(request, p.name, m)),
             estimate=lambda ref: estimate_image_neurons(
                 card_or_default(ref.provider, ref.model, "image"), request
             ),
             deadline_s=deadline_s,
             start_at=start_at,
-            route=lambda p, ref: p.route_image(ref.model, request, effective_plan),
+            route=lambda p, ref: self._affordable(
+                p.route_image(ref.model, request, effective_plan), ref, request, max_cost_usd
+            ),
         )
+
+    @staticmethod
+    def _affordable(
+        decided: Route, ref: ModelRef, request: ImageRequest, max_cost_usd: float | None
+    ) -> Route:
+        """The USD half of the pre-call guard (the plan half is `route_image`). Only OpenRouter
+        bills dollars. The estimate is checked against the cost cap BEFORE the call."""
+        if decided.model is None or max_cost_usd is None or ref.provider != "openrouter":
+            return decided
+        spec = image_registry().get(decided.model)
+        estimate = estimate_image_usd(spec, request) if spec is not None else None
+        if estimate is None:
+            return Route(None, f"{decided.model}: price unknown, cannot afford")
+        if estimate > max_cost_usd:
+            return Route(
+                None,
+                f"{decided.model}: estimated ${estimate:.4f} is over the ${max_cost_usd:.4f} left",
+            )
+        return decided
+
+    @staticmethod
+    def _compiled_for(request: ImageRequest, provider: str, model: str) -> ImageRequest:
+        """The request as THIS chain entry should get it: with a Brief, its prompt compiled for
+        the model's style and word budget, then re-checked by the step 0 code checks. A compiled
+        prompt that fails them is a bad request (never falls back): the Brief is what is wrong."""
+        if request.brief is None:
+            return request
+        if provider == "cloudflare":
+            style, words = style_for_cloudflare(model)
+        else:
+            spec = image_registry().get(model)
+            style, words = (
+                (spec.prompt_style, spec.prompt_max_words)
+                if spec is not None
+                else (DEFAULT_STYLE, DEFAULT_MAX_WORDS)
+            )
+        compiled = compile_prompt(request.brief, style, words, fallback=request.prompt)
+        verdict = check_prompt(compiled.text)
+        if not verdict.ok:
+            raise ProviderError(
+                provider, model, f"compiled prompt refused ({verdict.rule})", status=400
+            )
+        log.info(
+            "gateway.compiled",
+            provider=provider,
+            model=model,
+            style=style,
+            words=compiled.words,
+            max_words=words,
+            issues=compiled.issues,
+        )
+        return request.model_copy(update={"prompt": compiled.text})
 
     # -- internals --------------------------------------------------------------------------
 

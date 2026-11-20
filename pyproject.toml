@@ -20,7 +20,16 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff", "mypy", "pytest", "pytest-asyncio", "pytest-cov", "respx", "pre-commit"]
+dev = [
+    "ruff",
+    "mypy",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "respx",
+    "pre-commit",
+    "tiktoken>=0.14.0",
+]
 # scripts/dev_server.py only (a throwaway shim of the backend API). Not needed by the library.
 server = ["fastapi", "uvicorn"]
 

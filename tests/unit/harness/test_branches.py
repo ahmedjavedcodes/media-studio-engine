@@ -176,7 +176,7 @@ async def test_n_images_are_all_returned_ranked_best_first(store):
     assert len(env.output["image_ids"]) == 4 == len(set(env.output["image_ids"]))
     assert env.output["quality_scores"] == [9, 7, 5, 3]  # best first
     assert env.output["quality_score"] == 9
-    assert chains(llm) == {ENHANCER: 1, CRITIC: 4}  # ONE shared enhancement
+    assert chains(llm) == {ENHANCER: 1, CRITIC: 1}  # ONE enhancement, ONE ranking call
     assert sorted(r.seed for _, r, _ in images.requests) == [100, 101, 102, 103]  # distinct seeds
     plan = final_state(run_store).plan
     assert (plan[1].branches_total, plan[1].branches_done, plan[1].branches_aborted) == (4, 4, 0)
@@ -330,7 +330,7 @@ async def test_branch_progress_events_use_public_labels_only(store):
 
     events = [e for _, e in sink.events]
     progress = Counter((e["step"], e["phase"]) for e in events)
-    assert progress[(2, "progress")] == 3 and progress[(3, "progress")] == 3
+    assert progress[(2, "progress")] == 3 and progress[(3, "progress")] == 1  # one Critic call
     assert {e["public_label"] for e in events} <= {
         "Understanding your request",
         "Creating your image",
@@ -433,7 +433,8 @@ async def test_cancel_keeps_finished_branches_and_never_returns_them_unchecked(s
 
 
 async def test_cancel_during_the_critique_returns_only_checked_images(store):
-    llm = HangingChat([enhanced(), verdict(9), "HANG"])
+    # One call reviews both images, so a cancel in flight leaves BOTH unchecked.
+    llm = HangingChat([enhanced(), "HANG"])
     run_store = FlagStore(lambda: llm.hung == 1)
     agent = build(llm, ScriptedImages(pics(2)), store, run_store=run_store, cfg=fast_poll(rich()))
 
@@ -442,11 +443,9 @@ async def test_cancel_during_the_critique_returns_only_checked_images(store):
     state = final_state(run_store)
     crit = state.step(3)
     assert env.state.status is Status.CANCELLED
-    assert (crit.status, crit.branches_done, crit.branches_aborted) == ("cancelled", 1, 1)
-    checked = [a.image_id for a in state.attempts if a.verdict == "allow"]
-    assert len(checked) == 1 and env.output["image_ids"] == checked  # the checked one only
-    unchecked = [a.image_id for a in state.attempts if a.verdict is None]
-    assert orphan_reasons(store) == {unchecked[0]: "unchecked"}
+    assert (crit.status, crit.branches_done, crit.branches_aborted) == ("cancelled", 0, 2)
+    assert env.output["image_ids"] == []  # nothing was checked, so nothing is returned
+    assert sorted(orphan_reasons(store).values()) == ["unchecked", "unchecked"]
 
 
 async def test_in_flight_cancel_of_a_single_image_run(store):
@@ -540,21 +539,8 @@ async def test_a_cancel_set_in_the_store_survives_the_harness_saving_over_it(sto
 # -- a block drops ONE image; a cancel still returns only images the Critic allowed --------------
 
 
-async def test_block_plus_cancel_in_flight_returns_only_the_allowed_image(store):
-    # Settle rule (spec §5.5): the block drops its own image only. The cancel ends the run and,
-    # as for any cancel, returns the images the Critic had allowed; the blocked image and the
-    # unchecked (hanging) one are never returned.
-    block = verdict(9, safety_verdict="block", safety_reason="graphic violence")
-    llm = HangingChat([enhanced(), block, verdict(9), "HANG"])  # blocked, allowed, hanging
-    run_store = FlagStore(lambda: llm.hung == 1)
-    agent = build(llm, ScriptedImages(pics(3)), store, run_store=run_store, cfg=fast_poll(rich()))
-
-    env = await run(create(agent, "free", n=3))
-
-    assert env.state.status is Status.CANCELLED
-    assert len(env.output["image_ids"]) == 1  # the allowed one only
-    reasons = Counter(orphan_reasons(store).values())
-    assert reasons == {"safety_block": 1, "unchecked": 1}
+# (block + cancel in flight no longer exists: ONE Critic call rules on every image at once, so a
+# cancel in flight leaves all of them unchecked: see the cancel-during-critique test above.)
 
 
 async def test_a_branch_gate_cannot_overwrite_a_block_set_while_it_awaited_the_store(store):

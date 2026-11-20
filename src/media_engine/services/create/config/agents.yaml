@@ -38,10 +38,14 @@ prompt_enhancer:
 critic:
   prompt: image_create/critic.md
   requires: [vision, structured_output]
+  # `none`, not `low`: measured 2026-11-20 on Groq qwen, low spent 58 reasoning tokens on a
+  # one-word answer, none spent 0 (and ~1.3K prompt tokens either way). Providers that do not
+  # take `none` (Cloudflare, OpenRouter) leave the field out.
+  reasoning_effort: none
   params:
-    # The image is downscaled before it is sent: a 4K output would otherwise be ~10 MB of
-    # base64 per review (and twice that with a repair). Re-encoded as JPEG at this quality.
-    max_side: 768
+    # The Critic reads the STORED thumbnail of this long side (px). 512 until experiment E1
+    # picks a size. The fallback re-encodes the original as JPEG at this quality.
+    thumbnail_size: 512
     jpeg_quality: 90
     # One more attempt, inside the Critic, when a review ends with no verdict (create is linear:
     # the supervisor never re-runs a step). Not after a block or an unfixable failure.
@@ -56,7 +60,7 @@ image_creator: # no LLM: formats a request and calls the image gateway
   requires: [image]
   params:
     # Made ONCE at store time (spec §5.3): one resize serves the Critic, preview and gallery.
-    # Which size the Critic should read is experiment E1's question (it still sends 768 px).
+    # Which size the Critic should read is experiment E1's question (the Critic reads critic.params.thumbnail_size).
     thumbnail_sizes: [512, 256]
     thumbnail_quality: 85
   models: {free: image_create, pro: image_create, max: image_create, ultra: image_create}

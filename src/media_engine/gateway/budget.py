@@ -1,13 +1,12 @@
 """Spend accounting: neurons for Cloudflare's shared 10,000-neurons/day free quota (resets
 00:00 UTC), and normalised USD estimates for OpenRouter image calls.
 
-!!! `estimate_image_usd` IS NOT ENFORCING ANYTHING. !!!
-It is not wired into the gateway, so it protects nothing: no paid call is checked against it,
-and no spend cap uses it yet. Do not make any paid path depend on it until it is wired in AND
-tested against a real `usage.cost` value. `USD_ESTIMATE_ENFORCED` says so in code, and
-tests/unit/gateway/test_budget_not_enforcing.py fails the build if anything starts calling it
-before that flag (and that test) are deliberately changed. Today's real protection against
-paid spend is `ALLOW_PAID` (off by default) plus the gateway's plan guard."""
+`estimate_image_usd` IS ENFORCED (since M4): the gateway (router.image) checks it before every
+paid OpenRouter call, against the per-call cap the caller passes (`max_cost_usd`). An unknown
+price is "cannot afford". It was checked against a real `usage.cost`: gpt-image-2 `low`
+estimates $0.006 against $0.00596 billed (tests/fixtures/openrouter/gpt-image-2.images.json).
+It is an ESTIMATE: the other protections stay (ALLOW_PAID off by default, the plan guard).
+tests/unit/gateway/test_budget_enforced.py pins where it is called from."""
 
 from __future__ import annotations
 
@@ -57,8 +56,8 @@ def estimate_image_neurons(card: ModelCard, request: ImageRequest) -> float | No
 
 TaskType = Literal["create", "edit", "merge"]
 
-# False until the estimate is wired into the gateway and checked against a real usage.cost.
-USD_ESTIMATE_ENFORCED = False
+# Wired into the gateway's pre-call check (router.image) and checked against a real usage.cost.
+USD_ESTIMATE_ENFORCED = True
 
 # Multiplier for an edit when no edit price was measured. 1.5 is the worst measured markup
 # (FLUX.2 Pro: $0.030 create, $0.045 edit); Riverflow measured ~1.18, gpt-image-2 and Gemini 3
@@ -89,7 +88,7 @@ def _listed_input_price(spec: ImageModelSpec, unit: str) -> float:
 def estimate_image_usd(
     spec: ImageModelSpec, request: ImageRequest, task_type: TaskType = "create"
 ) -> float | None:
-    """NOT ENFORCING (see the module docstring): an unwired estimate, used by nothing.
+    """ENFORCED by the gateway's pre-call check (see the module docstring).
 
     Estimated USD for one OpenRouter image call (all `request.n` images), normalised across
     billing units. None = no price is known: the caller must treat that as "cannot afford".

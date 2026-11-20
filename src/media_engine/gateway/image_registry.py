@@ -68,6 +68,9 @@ class ModelEntry(BaseModel):
     default_quality: str | None = None
     supports_seed: bool
     seed_verified: bool = False  # same seed reproduced the same image in a real test
+    # False = a real test showed the seed is accepted but does NOT reproduce the image. None =
+    # not tested (honours_seed stays unknown).
+    seed_reproduces: bool | None = None
     n_per_call: int = Field(ge=1)
     max_input_images: int = Field(ge=0)
     default_size: str | None = None  # documentation: size MUST still be sent on every call
@@ -93,6 +96,7 @@ class ImageModelSpec(BaseModel):
     min_tier_for: dict[str, dict[str, Tier]]
     supports_seed: bool
     seed_verified: bool
+    seed_reproduces: bool | None
     n_per_call: int
     max_input_images: int
     supports_edit: bool
@@ -217,6 +221,7 @@ def merge(
         min_tier_for=_setting_tiers(policy or {}, entry),
         supports_seed=seed,
         seed_verified=entry.seed_verified and seed,
+        seed_reproduces=entry.seed_reproduces,
         n_per_call=n_per_call,
         max_input_images=max_refs,
         supports_edit=max_refs > 0,

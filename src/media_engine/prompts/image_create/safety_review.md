@@ -12,5 +12,4 @@ Allow: everything else, including artistic nudity of fictional adults, non-graph
 
 When genuinely unsure, block.
 
-Reply with ONLY one JSON object, no prose, no code fences, matching:
-{{schema}}
+Reply with one JSON object only.

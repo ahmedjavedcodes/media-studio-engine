@@ -63,7 +63,12 @@ budgets:
 step_estimates:
   route: {tokens: 2500, completion_tokens: 600, cost_usd: 0.001, neurons: 5}
   enhance: {tokens: 6000, completion_tokens: 1500, cost_usd: 0.002, neurons: 15}
-  generate: {tokens: 0, completion_tokens: 0, cost_usd: 0.04, neurons: 60}
+  # generate cost_usd is only the FALLBACK figure: the supervisor takes the dearest image the
+  # plan's registry models can bill at default settings (M4; a flat 0.04 under-estimated the
+  # ultra models). neurons 57.6 = flux-1-schnell, 1024x1024, 4 steps (verified Cloudflare rate).
+  generate: {tokens: 0, completion_tokens: 0, cost_usd: 0.04, neurons: 57.6}
+  # critique: per IMAGE, sized for a Cloudflare fallback plus a repair (Groq qwen measured ~1,330
+  # prompt tokens per 768 px image). One batched call covers all images, so this over-counts.
   critique: {tokens: 12000, completion_tokens: 1200, cost_usd: 0.005, neurons: 200}
   supervise: {tokens: 3000, completion_tokens: 800, cost_usd: 0.002, neurons: 10}
 

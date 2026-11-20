@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -44,6 +44,7 @@ class ImageBackend(Protocol):
         deadline_s: float | None = None,
         start_at: int = 0,
         plan: Plan | None = None,
+        max_cost_usd: float | None = None,
     ) -> Awaitable[CallResult]: ...
 
 
@@ -91,17 +92,26 @@ class ModelGateway:
         deadline_ms: int,
         steps: int | None = None,
         chain_offset: int = 0,
+        brief: dict[str, Any] | None = None,
+        max_cost_usd: float | None = None,
     ) -> ImageResult:
         """`tier` is a plan tier, not necessarily the user's plan: the `raise_tier` retry
         lever passes the next tier up. `chain_offset` skips that many leading chain entries:
         the `switch_model` lever starts at the next model. `deadline_ms` comes from the
         step's StoppingCondition and bounds the whole chain walk."""
         chain = self._resolve_chain(self._agent, tier)
-        request = ImageRequest(prompt=prompt, width=width, height=height, seed=seed, steps=steps)
+        request = ImageRequest(
+            prompt=prompt, width=width, height=height, seed=seed, steps=steps, brief=brief
+        )
         started = time.perf_counter()
         # The plan travels to the gateway, which enforces it (model tier, paid settings).
         result = await self._backend.image(
-            chain, request, deadline_s=deadline_ms / 1000, start_at=chain_offset, plan=tier
+            chain,
+            request,
+            deadline_s=deadline_ms / 1000,
+            start_at=chain_offset,
+            plan=tier,
+            max_cost_usd=max_cost_usd,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
         output = result.output

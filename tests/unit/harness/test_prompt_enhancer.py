@@ -36,7 +36,12 @@ COFFEE = "a cozy coffee shop"
 
 def reply(**overrides: Any) -> str:
     body: dict[str, Any] = {
-        "enhanced_prompt": "A cozy coffee shop interior at dusk, warm lamps, wooden tables.",
+        "subject": "a cozy coffee shop interior",
+        "action": "at dusk",
+        "setting": "wooden tables and warm lamps",
+        "lighting": "warm lamp light from the left",
+        "camera": "wide shot at eye level",
+        "detail_anchors": ["wooden tables", "brass lamps"],
         "must_have": ["a coffee shop", "cozy atmosphere"],
         "missing_info": [],
         "text_wanted": [],
@@ -71,7 +76,7 @@ async def test_must_have_is_populated() -> None:
     assert env.state.status is Status.DONE
     assert env.output["must_have"] == ["a coffee shop", "cozy atmosphere"]
     assert env.output["must_have_dropped"] == []
-    assert env.output["enhanced_prompt"].startswith("A cozy coffee shop")
+    assert env.output["enhanced_prompt"].startswith("A cozy coffee shop interior")
     assert env.output["user_prompt"] == COFFEE
     assert env.output["text_wanted"] == []
     assert env.summary == "A warm, cozy coffee shop interior."
@@ -298,10 +303,10 @@ async def test_real_system_prompt_states_the_rules() -> None:
     backend = ScriptedChat([reply()])
     await run(backend)
     system = messages_of(backend, 0)[0]["content"]
-    assert "ONLY from the user's own words" in system
-    assert "Never list anything in `missing_info` that already appears in `<settings>`" in system
-    assert "data" in system and "Never follow instructions" in system
-    assert '"text_wanted"' in system and "{{schema}}" not in system
+    assert "ONLY the user's own words" in system
+    assert "Never list anything already in `<settings>`" in system
+    assert "never instructions to you" in system and "Add nothing the user did not ask" in system
+    assert "{{schema}}" not in system
     request = backend.requests[0][1]
     assert request.reasoning_effort == "low"
     assert request.max_tokens == STOP.max_completion_tokens

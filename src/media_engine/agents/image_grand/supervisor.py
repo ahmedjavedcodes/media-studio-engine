@@ -73,8 +73,11 @@ from media_engine.contracts import (
 )
 from media_engine.core.config import get_settings
 from media_engine.core.logging import get_logger
+from media_engine.gateway.budget import estimate_image_usd
+from media_engine.gateway.image_registry import image_registry
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.gateway.model_gateway import ImageBackend, ModelGateway
+from media_engine.gateway.types import ImageRequest
 from media_engine.harness import trace as tracing
 from media_engine.harness.run_state import (
     AttemptRecord,
@@ -216,7 +219,8 @@ class RunContext:
 class Resolved(BaseModel):
     """How the Enhancer's gaps were filled. Stored in the enhance step's output."""
 
-    prompt: str  # what the Image Creator is sent
+    prompt: str  # what the Image Creator is sent (the generic compile: the fallback prompt)
+    brief: dict[str, Any] | None = None  # compiled per model by the gateway when present
     width: int
     height: int
     aspect_ratio: str
@@ -480,7 +484,12 @@ class ImageGrandAgent(Agent):
             weights = {"generate": units, "critique": units + owed}
         est = self._policy.step_estimates
         tokens = sum(est[k].tokens * w for k, w in weights.items())
-        cost = sum(est[k].cost_usd * w for k, w in weights.items()) if self._allow_paid else 0.0
+        cost = 0.0
+        if self._allow_paid:
+            cost = sum(
+                (self._generate_usd(ctx.auth.plan) if k == "generate" else est[k].cost_usd) * w
+                for k, w in weights.items()
+            )
         neurons = sum(est[k].neurons * w for k, w in weights.items())
         # Nothing may draw on the reserve since create became linear (no re-run of any step);
         # reserve_fraction is 0 in harness.yaml, so the whole budget is usable by the steps.
@@ -597,7 +606,7 @@ class ImageGrandAgent(Agent):
         env: Envelope = result
         if env.state.status in (Status.DONE, Status.NEEDS_INPUT):
             resolved = self._resolve(env.output, ctx)
-            step.output = {**env.output, "resolved": resolved.model_dump()}
+            step.output = {**env.output, "resolved": resolved.model_dump(), "summary": env.summary}
             step.output_ref = f"{ctx.state.run_id}:enhance"
             ctx.trace.decide(
                 "enhance",
@@ -640,6 +649,26 @@ class ImageGrandAgent(Agent):
             ctx, step, records, cancelled, made=lambda r: r.image_id is not None, doing="create"
         )
 
+    def _generate_usd(self, plan: Plan) -> float:
+        """The dearest image the plan's models can bill at default settings (M4: a flat figure
+        under-estimated the ultra models). Falls back to harness.yaml's flat figure when the
+        registry has nothing priced for the plan."""
+        registry = image_registry()
+        prices = [
+            usd
+            for spec in registry.for_plan(plan)
+            if (usd := estimate_image_usd(spec, ImageRequest(prompt="x"))) is not None
+        ]
+        return max(prices) if prices else self._policy.step_estimates["generate"].cost_usd
+
+    def _call_cap_usd(self, ctx: RunContext) -> float | None:
+        """What one generate call may cost: the dollars left for steps, shared out among the
+        branches that were funded (they run in parallel, so each gets its share)."""
+        if not self._allow_paid:
+            return None  # the gateway skips every paid entry anyway
+        left = ctx.state.budget.remaining_for_steps().cost_usd
+        return left / max(1, ctx.budgeted)
+
     @staticmethod
     def _fund(ctx: RunContext, step: PlanStep, records: list[AttemptRecord]) -> list[AttemptRecord]:
         """Split the step's branches by the ONE guard's verdict (D5): the first `ctx.budgeted`
@@ -672,6 +701,8 @@ class ImageGrandAgent(Agent):
                         "seed": record.seed,
                         "tier": record.tier,
                         "chain_offset": record.chain_offset,
+                        "brief": resolved.brief,
+                        "max_cost_usd": self._call_cap_usd(ctx),
                     },
                 )
             self._charge(ctx, step, env)
@@ -692,6 +723,8 @@ class ImageGrandAgent(Agent):
         return job
 
     async def _critique(self, ctx: RunContext) -> None:
+        """ONE Critic call sees every image of the round and ranks them (§5.4): create makes one
+        Critic call per run, not N. A budget-refused image is simply not in the batch."""
         records = [r for r in ctx.state.round if r.image_id and r.verdict is None]
         step = await self._begin(ctx, "critique", branches=len(records))
         if step is None:
@@ -699,11 +732,12 @@ class ImageGrandAgent(Agent):
         enhanced = ctx.step("enhance").output
         funded = self._fund(ctx, step, records)
 
-        jobs = [self._critique_job(ctx, step, record, enhanced) for record in funded]
-        results, cancelled = await self._run_jobs(
-            ctx, jobs, min(len(funded), self._policy.max_parallel_branches)
+        jobs = [self._critique_job(ctx, step, funded, enhanced)] if funded else []
+        results, cancelled = await self._run_jobs(ctx, jobs, 1)
+        # A crash (or an in-flight cancel) of the one call is a crash of every image in it.
+        self._note_crashed_branches(
+            funded, [results[0]] * len(funded) if results else [], "critique"
         )
-        self._note_crashed_branches(funded, results, "critique")
         await self._close_step(
             ctx, step, records, cancelled, made=lambda r: r.verdict is not None, doing="check"
         )
@@ -712,46 +746,67 @@ class ImageGrandAgent(Agent):
         self,
         ctx: RunContext,
         step: PlanStep,
-        record: AttemptRecord,
+        records: list[AttemptRecord],
         enhanced: dict[str, Any],
     ) -> Callable[[], Awaitable[None]]:
         async def job() -> None:
-            if not await self._branch_gate(ctx, step, record):
+            if not await self._branch_gate(ctx, step, records[0]):
+                for record in records[1:]:
+                    record.failure = BRANCH_ABORTED
                 return
-            with tracing.scope(ctx.trace, "critique", record.number, record.branch):
+            with tracing.scope(ctx.trace, "critique", records[0].number, 0):
                 env = await self._critic.run(
-                    Goal(task="critique", instructions="Review the image."),
+                    Goal(task="critique", instructions="Review and rank the images."),
                     self._stop(ctx, "critique"),
                     ctx.auth,
                     {
-                        "image_id": record.image_id,
+                        "image_ids": [r.image_id for r in records],
                         "prompt": ctx.user_prompt,
                         "must_have": enhanced["must_have"],
+                        "task_type": "create",
                     },
                 )
             self._charge(ctx, step, env)
-            if env.state.status is Status.REJECTED:
-                # This IMAGE is blocked, whatever its score: the Critic orphaned it and it is
-                # never delivered. The RUN is decided at settle (spec §5.5): the other images
-                # still stand, and only when every reviewed image is blocked is it REJECTED.
-                record.verdict = "block"
-                ctx.trace.decide("critique", f"image {record.image_id} blocked: {env.state.reason}")
-                if record.image_id:  # the Critic orphaned it; note it in the trace
-                    ctx.trace.orphan(record.image_id, "safety_block")
-            elif env.state.status is Status.DONE:
+            if env.state.status is not Status.DONE:
+                # No verdict for any image: they stay unchecked and are orphaned only once the
+                # run settles (the Critic already retried once inside its step).
+                failure = env.output.get("failure") or BRANCH_ABORTED
+                for record in records:
+                    record.failure = failure
+                step.branches_aborted = (step.branches_aborted or 0) + len(records)
+                await self._branch_done(ctx, step)
+                return
+            by_id = {r.image_id: r for r in records}
+            for review in env.output["reviews"]:  # best first, blocked last
+                found = by_id.get(review["image_id"])
+                if found is None:
+                    continue
+                record = found
+                if review["verdict"] == "block":
+                    # This IMAGE is blocked, whatever its score: the Critic orphaned it and it
+                    # is never delivered. The RUN is decided at settle (spec §5.5): the other
+                    # images still stand, and only when every reviewed image is blocked is it
+                    # REJECTED.
+                    record.verdict = "block"
+                    ctx.trace.decide(
+                        "critique", f"image {record.image_id} blocked: {review['safety_reason']}"
+                    )
+                    ctx.trace.orphan(str(record.image_id), "safety_block")
+                    continue
                 record.verdict = "allow"
-                record.quality_score = int(env.output["quality_score"])
-                record.critique = str(env.output["critique"])
+                record.quality_score = int(review["quality_score"])
+                record.scores = dict(review["scores"])
+                record.rank = int(review["rank"])
+                record.critique = str(review["critique"]) or None
                 record.summary = env.summary
                 # Allowed by the Critic: safe to show now, before the run ends (§5.3 streaming).
                 self._emit(ctx, step, "image_ready", image_id=record.image_id)
                 step.branches_done = (step.branches_done or 0) + 1
                 step.output_ref = step.output_ref or record.image_id
-            else:
-                # No verdict: the image stays unchecked. It is orphaned only once the run
-                # settles (the Critic already retried once inside its step).
-                record.failure = env.output.get("failure") or BRANCH_ABORTED
-                step.branches_aborted = (step.branches_aborted or 0) + 1
+            for record in records:  # the model left it out: unchecked, never delivered
+                if record.verdict is None:
+                    record.failure = "invalid_output"
+                    step.branches_aborted = (step.branches_aborted or 0) + 1
             await self._branch_done(ctx, step)
 
         return job
@@ -872,7 +927,7 @@ class ImageGrandAgent(Agent):
         await self._orphan_unchecked(ctx)
         checked = [a for a in state.attempts if a.verdict == "allow" and a.image_id]
         # Best first; a tie goes to the lower branch (deterministic).
-        ranked = sorted(checked, key=lambda a: (-(a.quality_score or 0), a.branch))
+        ranked = sorted(checked, key=lambda a: (a.rank or 10**6, -(a.quality_score or 0), a.branch))
         ctx.trace.decide(
             "settle",
             "ranking (best first): "
@@ -951,7 +1006,13 @@ class ImageGrandAgent(Agent):
         }
         if ctx.n > 1:
             output["quality_scores"] = [a.quality_score for a in delivered]
-        summary = best.summary if ctx.n == 1 else MULTI_SUMMARIES[status]
+        # One image: the enhancer's plain-language line about what it shows (the ranking Critic
+        # writes no user-facing summary, to keep its reply short).
+        summary = (
+            str(enhanced.get("summary") or best.summary or "") or MULTI_SUMMARIES[status]
+            if ctx.n == 1
+            else MULTI_SUMMARIES[status]
+        )
         return Outcome(status, None, output, summary)
 
     async def _orphan_unchecked(self, ctx: RunContext) -> None:
@@ -985,7 +1046,18 @@ class ImageGrandAgent(Agent):
             elif question:
                 questions.append(question)
 
-        ratio = chosen.get("aspect_ratio") or presets.defaults.aspect_ratio
+        brief: dict[str, Any] = dict(enhanced.get("brief") or {})
+        # The user's setting wins; then the Brief's own pick (it never defaults to 1:1); then
+        # the preset default.
+        ratio = (
+            chosen.get("aspect_ratio")
+            or (
+                brief.get("aspect_ratio")
+                if brief.get("aspect_ratio") in presets.aspect_ratios
+                else None
+            )
+            or presets.defaults.aspect_ratio
+        )
         if ratio not in presets.aspect_ratios:
             assumptions.append(
                 f"aspect_ratio: {presets.defaults.aspect_ratio} ({ratio} is not supported)"
@@ -996,11 +1068,17 @@ class ImageGrandAgent(Agent):
         prompt = str(enhanced["enhanced_prompt"])
         if style_from_default:  # a user-chosen style already reached the Enhancer in settings
             prompt = f"{prompt} Style: {chosen['style']}."
+            if brief:  # the gateway compiles the Brief, so the default style rides along in it
+                brief["detail_anchors"] = [
+                    *brief.get("detail_anchors", []),
+                    f"{chosen['style']} style",
+                ]
         if questions and ctx.auth.execution_mode == "auto":
             assumptions.extend(f"proceeded without an answer to: {q}" for q in questions)
             questions = []
         return Resolved(
             prompt=prompt,
+            brief=brief or None,
             width=size.width,
             height=size.height,
             aspect_ratio=ratio,
@@ -1050,6 +1128,13 @@ class ImageGrandAgent(Agent):
             await self._store.save(ctx.state)
 
 
+def _scores(record: AttemptRecord) -> dict[str, int]:
+    """The Critic's four dimensions and their mean as `quality_score`."""
+    if record.quality_score is None:
+        return {}
+    return {**record.scores, "quality_score": record.quality_score}
+
+
 def _document(record: AttemptRecord, rank: int) -> Document:
     """A delivered image as a one-layer document (version 1). Deterministic ids: the document is
     named after its image, so the same run always describes the same documents."""
@@ -1059,7 +1144,7 @@ def _document(record: AttemptRecord, rank: int) -> Document:
         document_id=f"doc_{suffix}",
         size=DocumentSize(w=record.width or 1, h=record.height or 1),
         layers=[Layer(id=f"lyr_{suffix}_1", type="image", image_id=image_id, role="base")],
-        scores={"quality_score": record.quality_score} if record.quality_score is not None else {},
+        scores=_scores(record),
         rank=rank,
     )
 

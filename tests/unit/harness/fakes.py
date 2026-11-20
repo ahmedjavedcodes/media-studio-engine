@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import io
+import json
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Self
 
 from PIL import Image
 
@@ -17,6 +18,58 @@ from media_engine.gateway.types import (
     LLMRequest,
     LLMResponse,
 )
+
+
+class Review(str):
+    """A scripted verdict on ONE image (what the per-image Critic used to reply). The Critic now
+    reviews every image in one call, so ScriptedChat folds the next N Reviews into one batch
+    reply, one per image sent: `[enhanced(), verdict(9), verdict(7)]` still reads "image 1 got
+    9, image 2 got 7"."""
+
+    fields: dict[str, Any]
+
+    def __new__(cls, fields: dict[str, Any]) -> Self:
+        obj = super().__new__(cls, json.dumps(fields))
+        obj.fields = fields
+        return obj
+
+
+def verdict(score: int = 9, **overrides: Any) -> Review:
+    return Review(
+        {
+            "quality_score": score,
+            "safety_verdict": "allow",
+            "safety_reason": None,
+            "critique": "Matches the request; the lamps are slightly blown out.",
+            **overrides,
+        }
+    )
+
+
+def batch_reply(reviews: list[Review]) -> str:
+    """One Critic reply for `reviews` (image 1, 2, ...). Ranks follow the scores."""
+    allowed = sorted(
+        (i for i, r in enumerate(reviews) if r.fields["safety_verdict"] != "block"),
+        key=lambda i: (-reviews[i].fields["quality_score"], i),
+    )
+    images = []
+    for i, review in enumerate(reviews):
+        f = review.fields
+        score = f["quality_score"]
+        images.append(
+            {
+                "index": i + 1,
+                "prompt_adherence": score,
+                "craft": score,
+                "visual_interest": score,
+                "technical": score,
+                "safety_verdict": f["safety_verdict"],
+                "safety_reason": f["safety_reason"],
+                "rank": allowed.index(i) + 1 if i in allowed else None,
+                "critique": f["critique"],
+            }
+        )
+    return json.dumps({"images": images})
 
 
 class ScriptedChat:
@@ -49,6 +102,12 @@ class ScriptedChat:
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
+        if isinstance(reply, Review):
+            count = _image_count(request)
+            reviews = [reply]
+            while len(reviews) < count and self.replies and isinstance(self.replies[0], Review):
+                reviews.append(self.replies.pop(0))
+            reply = batch_reply(reviews)
         return CallResult(
             output=LLMResponse(
                 text=reply,
@@ -65,6 +124,13 @@ class ScriptedChat:
             is_fallback=False,
             neurons=self.neurons,
         )
+
+
+def _image_count(request: LLMRequest) -> int:
+    content = request.messages[-1]["content"]
+    if not isinstance(content, list):
+        return 1
+    return sum(1 for part in content if part.get("type") == "image_url") or 1
 
 
 class AllDown(GatewayError):
@@ -123,6 +189,7 @@ class ScriptedImages:
         deadline_s: float | None = None,
         start_at: int = 0,
         plan: str | None = None,
+        max_cost_usd: float | None = None,
     ) -> CallResult:
         self.requests.append((task, request, deadline_s))
         self.start_at.append(start_at)

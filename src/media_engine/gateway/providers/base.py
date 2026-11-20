@@ -8,6 +8,7 @@ import httpx
 from pydantic import SecretStr
 
 from media_engine.contracts import Plan
+from media_engine.core.prompts import PROMPTS_DIR, load_prompt, render
 from media_engine.gateway.errors import ProviderError
 from media_engine.gateway.types import (
     ImageRequest,
@@ -19,6 +20,21 @@ from media_engine.gateway.types import (
 
 DEFAULT_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 IMAGE_TIMEOUT = httpx.Timeout(180.0, connect=10.0)
+
+
+def inject_schema(messages: list[dict[str, Any]], schema: dict[str, Any]) -> list[dict[str, Any]]:
+    """Copy of `messages` with the reply schema appended to the system message (or a new one).
+    For providers without native structured output; the prompt files no longer carry it."""
+    note = render(
+        load_prompt(PROMPTS_DIR / "shared" / "schema_note.md"),
+        schema=json.dumps(schema, separators=(",", ":")),
+    ).strip()
+    out = [dict(m) for m in messages]
+    for m in out:
+        if m.get("role") == "system" and isinstance(m.get("content"), str):
+            m["content"] = f"{m['content']}\n\n{note}"
+            return out
+    return [{"role": "system", "content": note}, *out]
 
 
 class Provider(ABC):

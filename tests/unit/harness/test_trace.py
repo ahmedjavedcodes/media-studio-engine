@@ -92,7 +92,7 @@ async def test_a_first_pass_records_every_call_in_order_with_what_served_it(stor
     assert enhancer.reasoning_text is None and enhancer.reasoning_tokens is None
     assert enhancer.reasoning_effort == CFG.agent("prompt_enhancer").reasoning_effort
     assert enhancer.was_repair is False and enhancer.failure is None
-    assert "a cozy coffee shop" in enhancer.request_text and "enhanced_prompt" in (
+    assert "a cozy coffee shop" in enhancer.request_text and "detail_anchors" in (
         enhancer.reply_text or ""
     )
     assert (critic.attempt, critic.branch) == (1, 0)

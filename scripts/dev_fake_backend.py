@@ -82,19 +82,32 @@ class FakeBackend:
             }
         elif "safety policy reviewer" in system:
             reply = {"safety": "allow", "safety_categories": ["dev fake"]}
-        elif "reviewer for an image generation studio" in system:
+        elif "images" in ((request.response_schema or {}).get("properties") or {}):  # the Critic
             blocked = "reject" in low
+            score = 4 if "issues" in low else 9
+            count = sum(1 for p in request.messages[1]["content"] if p.get("type") == "image_url")
             reply = {
-                "quality_score": 4 if "issues" in low else 9,
-                "safety_verdict": "block" if blocked else "allow",
-                "safety_reason": "dev fake block" if blocked else None,
-                "critique": "The lamps are slightly blown out.",
-                "summary": "A placeholder image.",
+                "images": [
+                    {
+                        "index": i,
+                        "prompt_adherence": score,
+                        "craft": score,
+                        "visual_interest": score,
+                        "technical": score,
+                        "safety_verdict": "block" if blocked else "allow",
+                        "safety_reason": "dev fake block" if blocked else None,
+                        "rank": None if blocked else i,
+                        "critique": "The lamps are slightly blown out." if score < 6 else "",
+                    }
+                    for i in range(1, count + 1)
+                ]
             }
         else:  # the enhancer
             asked = "question" in low and QUESTION not in user
             reply = {
-                "enhanced_prompt": f"{prompt}, detailed, well lit",
+                "subject": prompt,
+                "lighting": "soft window light from the left",
+                "detail_anchors": ["wooden table", "warm colours"],
                 "must_have": [" ".join(prompt.split()[:3])],
                 "missing_info": [{"kind": "question", "question": QUESTION}] if asked else [],
                 "text_wanted": [],

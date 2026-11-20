@@ -93,15 +93,16 @@ def test_models_yaml_lists_the_15_spec_models_with_every_registry_field():
         assert spec.billing_unit in {"image", "megapixel", "token"}
 
 
-def test_the_eval_default_is_flux_klein_and_its_seed_is_verified():
+def test_the_eval_default_is_flux_klein_but_its_seed_does_not_reproduce():
     spec = ImageRegistry.load(None).eval_default()
     assert spec is not None and spec.slug == KLEIN
-    assert spec.supports_seed and spec.seed_verified
+    # MEASURED 2026-11-20 (playground/klein_seed_check.py): same seed, different pixels
+    assert spec.supports_seed and not spec.seed_verified and spec.seed_reproduces is False
 
 
-def test_seed_is_verified_only_on_flux_klein():
+def test_no_model_has_a_verified_reproducible_seed():
     verified = [s.slug for s in ImageRegistry.load(None).all() if s.seed_verified]
-    assert verified == [KLEIN]  # spec §6.4: the only model tested for reproducibility
+    assert verified == []  # Klein was the only candidate, and it did not reproduce
 
 
 def test_tier_names_are_entry_pro_max_ultra_and_entry_replaces_free():
@@ -229,7 +230,7 @@ def test_a_yaml_model_missing_from_the_cache_is_reported(tmp_path):
 
 def test_openrouter_image_cards_come_from_the_registry():
     klein = card_or_default("openrouter", KLEIN, "image")
-    assert not klein.free and klein.accepts_seed and klein.honours_seed is True
+    assert not klein.free and klein.accepts_seed and klein.honours_seed is False  # measured
     gpt = card_or_default("openrouter", GPT_IMAGE, "image")
     assert not gpt.accepts_seed and gpt.honours_seed is False
     qwen = get_card("openrouter", QWEN)

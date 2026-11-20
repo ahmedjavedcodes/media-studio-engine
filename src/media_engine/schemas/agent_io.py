@@ -62,13 +62,27 @@ def _normalise(text: str) -> str:
     return " ".join(text.lower().split())
 
 
+MAX_ANCHORS = 4
+
+
 class EnhancerOutput(BaseModel):
-    enhanced_prompt: str = Field(min_length=1)
+    """The Brief (IMAGE-CREATE-OPTIMIZE §4.2) plus the grounded requirements. It describes the
+    image in fields, not in a paragraph: the Compiler turns the fields into each model's prompt."""
+
+    subject: str = Field(min_length=1)  # a concrete noun phrase
+    action: str = ""
+    setting: str = ""
+    lighting: str = ""  # a light DIRECTION and source ("low sun from the left")
+    camera: str = ""
+    detail_anchors: list[str] = Field(default_factory=list)  # concrete visible details
+    # The Enhancer's own pick; the user's settings override it. Never defaults to 1:1.
+    aspect_ratio: str | None = None
+    assumptions: list[str] = Field(default_factory=list)  # what it chose that the user did not
     # Testable requirements taken ONLY from the user's own words, never the enhancer's additions.
     must_have: list[str] = Field(min_length=1, max_length=MAX_MUST_HAVE)
     missing_info: list[MissingItem] = Field(default_factory=list)  # non-empty -> NEEDS_INPUT
     # Words the user wants shown in the image. The image model cannot render text, so these are
-    # kept out of enhanced_prompt and handed on for a separate text layer.
+    # kept out of the Brief and handed on for a separate text layer.
     text_wanted: list[str] = Field(default_factory=list)
     summary: str = ""  # envelope summary, returned in the same call (no extra LLM call)
 
@@ -90,6 +104,13 @@ class EnhancerOutput(BaseModel):
                 seen.add(key)
                 kept.append(item.strip())
         return kept[:MAX_MUST_HAVE]
+
+    @field_validator("detail_anchors", mode="before")
+    @classmethod
+    def _cap_anchors(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        return [a.strip() for a in value if not isinstance(a, str) or a.strip()][:MAX_ANCHORS]
 
     @field_validator("text_wanted", mode="before")
     @classmethod
@@ -145,19 +166,45 @@ def _normalise_verdict(value: Any) -> Any:
     return value.strip().lower() if isinstance(value, str) else value
 
 
-class CriticOutput(BaseModel):
-    quality_score: int = Field(ge=0, le=10)
-    # Safety is a verdict, not a score: separate field, never compared with quality_score.
+class ImageReview(BaseModel):
+    """The Critic's reading of ONE image of the batch (IMAGE-CREATE-OPTIMIZE §5.4)."""
+
+    index: int = Field(ge=1)  # 1-based position of the image in the request
+    prompt_adherence: int = Field(ge=0, le=10)
+    craft: int = Field(ge=0, le=10)
+    visual_interest: int = Field(ge=0, le=10)
+    technical: int = Field(ge=0, le=10)
+    # Safety is a verdict, not a score: a separate field, never averaged into the scores.
     safety_verdict: Verdict
     safety_reason: str | None = None
-    critique: str
-    summary: str = ""  # envelope summary, returned in the same call (no extra LLM call)
+    rank: int | None = Field(default=None, ge=1)  # 1 = best of the allowed images
+    critique: str = ""  # only when a dimension is below the threshold
 
     @field_validator("safety_verdict", mode="before")
     @classmethod
     def _verdict_case(cls, value: Any) -> Any:
         # "Block" / " BLOCK " must still be a block, not a validation error.
         return _normalise_verdict(value)
+
+    @property
+    def scores(self) -> dict[str, int]:
+        return {
+            "prompt_adherence": self.prompt_adherence,
+            "craft": self.craft,
+            "visual_interest": self.visual_interest,
+            "technical": self.technical,
+        }
+
+    @property
+    def quality_score(self) -> int:
+        """The four dimensions averaged. Safety is never part of it."""
+        return round(sum(self.scores.values()) / 4)
+
+
+class CriticOutput(BaseModel):
+    """One vision call, one entry per image."""
+
+    images: list[ImageReview] = Field(min_length=1)
 
 
 # -- the service output: a document, not an image (IMAGE-CREATE-OPTIMIZE §4.3) ------------------

@@ -14,6 +14,7 @@ from media_engine.gateway.providers.base import (
     DEFAULT_TIMEOUT,
     IMAGE_TIMEOUT,
     Provider,
+    inject_schema,
     parse_chat_completion,
 )
 from media_engine.gateway.registry import card_or_default
@@ -38,7 +39,10 @@ class CloudflareProvider(Provider):
 
     async def chat(self, model: str, request: LLMRequest) -> LLMResponse:
         url = f"{API_ROOT}/{self._account_id}/ai/v1/chat/completions"
-        payload: dict[str, Any] = {"model": model, "messages": request.messages}
+        messages = request.messages
+        if request.response_schema is not None:
+            messages = inject_schema(messages, request.response_schema)
+        payload: dict[str, Any] = {"model": model, "messages": messages}
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.max_tokens is not None:

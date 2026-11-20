@@ -41,6 +41,10 @@ class ModelCard:
     reasoning: bool = False
     vision: bool = False  # LLM accepts image input (OpenAI-style image_url parts)
     gpt_oss: bool = False  # GPT-OSS uses include_reasoning, not reasoning_format
+    # Accepts response_format {type: json_schema}. VERIFIED 2026-11-20 on Groq with the real
+    # Gate, Brief, safety-review and Critic schemas (free calls). Unverified models get the
+    # schema in the prompt instead.
+    json_schema: bool = False
     neuron_pricing: NeuronPricing | None = None  # image models; LLMs report actual neurons
     # Image models: does the same seed reproduce the same image? None = not verified. Check with
     # `playground/smoke_test.py --only cf-seed` before relying on it (the M7 reseed lever).
@@ -65,12 +69,12 @@ _CARDS: list[ModelCard] = [
     # vision: served the critic in the measured baseline run (IMAGE-CREATE-OPTIMIZE §2)
     _llm("cloudflare", "@cf/meta/llama-4-scout-17b-16e-instruct", vision=True),
     _llm("cloudflare", "@cf/google/gemma-3-12b-it", vision=True),  # vision UNVERIFIED
-    _llm("groq", "openai/gpt-oss-120b", reasoning=True, gpt_oss=True),
-    _llm("groq", "openai/gpt-oss-20b", reasoning=True, gpt_oss=True),
-    _llm("groq", "openai/gpt-oss-safeguard-20b", reasoning=True, gpt_oss=True),
+    _llm("groq", "openai/gpt-oss-120b", reasoning=True, gpt_oss=True, json_schema=True),
+    _llm("groq", "openai/gpt-oss-20b", reasoning=True, gpt_oss=True, json_schema=True),
+    _llm("groq", "openai/gpt-oss-safeguard-20b", reasoning=True, gpt_oss=True, json_schema=True),
     # vision VERIFIED 2026-11-20 with the critic's request shape (playground/smoke_test.py
     # --only groq-vision): a 768 px JPEG cost ~1,330 prompt tokens.
-    _llm("groq", "qwen/qwen3.8-27b", reasoning=True, vision=True),
+    _llm("groq", "qwen/qwen3.8-27b", reasoning=True, vision=True, json_schema=True),
     _img(
         "cloudflare",
         "@cf/black-forest-labs/flux-1-schnell",
@@ -121,7 +125,11 @@ def _openrouter_image_card(model: str) -> ModelCard | None:
         supports_mask=spec.supports_mask,
         accepts_seed=spec.supports_seed,
         # True only when verified by a real call; a model with no seed never reproduces.
-        honours_seed=True if spec.seed_verified else (None if spec.supports_seed else False),
+        honours_seed=(
+            True
+            if spec.seed_verified
+            else (False if spec.seed_reproduces is False or not spec.supports_seed else None)
+        ),
     )
 
 

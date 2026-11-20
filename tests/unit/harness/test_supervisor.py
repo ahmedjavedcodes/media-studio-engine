@@ -18,7 +18,13 @@ from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.harness.run_state import RunState
 from media_engine.ports import ListEventSink, LocalArtifactStore
 from media_engine.services.create.loader import load_create_config
-from tests.unit.harness.fakes import RaisingSink, ScriptedChat, ScriptedImages, image_bytes
+from tests.unit.harness.fakes import (
+    RaisingSink,
+    ScriptedChat,
+    ScriptedImages,
+    image_bytes,
+    verdict,
+)
 
 CFG = load_create_config()
 GOAL = Goal(task="create", instructions="Create the image the user asked for.")
@@ -36,23 +42,16 @@ def auth(plan: str = "free", mode: str = "auto") -> AuthContext:
 
 def enhanced(**overrides: Any) -> str:
     body: dict[str, Any] = {
-        "enhanced_prompt": "A cozy coffee shop interior at dusk, warm lamps, wooden tables.",
+        "subject": "a cozy coffee shop interior",
+        "action": "at dusk",
+        "setting": "wooden tables and warm lamps",
+        "lighting": "warm lamp light from the left",
+        "camera": "wide shot at eye level",
+        "detail_anchors": ["wooden tables", "brass lamps"],
         "must_have": ["a coffee shop", "cozy atmosphere"],
         "missing_info": [],
         "text_wanted": [],
         "summary": "A warm coffee shop.",
-    }
-    body.update(overrides)
-    return json.dumps(body)
-
-
-def verdict(score: int = 9, **overrides: Any) -> str:
-    body: dict[str, Any] = {
-        "quality_score": score,
-        "safety_verdict": "allow",
-        "safety_reason": None,
-        "critique": "Matches the request; the lamps are slightly blown out.",
-        "summary": "A warm coffee shop interior at dusk.",
     }
     body.update(overrides)
     return json.dumps(body)
@@ -165,12 +164,18 @@ async def test_happy_path_envelope(store):
                         "role": "base",
                     }
                 ],
-                "scores": {"quality_score": 9},
+                "scores": {
+                    "prompt_adherence": 9,
+                    "craft": 9,
+                    "visual_interest": 9,
+                    "technical": 9,
+                    "quality_score": 9,
+                },
                 "rank": 1,
             }
         ],
     }
-    assert env.summary == "A warm coffee shop interior at dusk."  # the Critic's summary
+    assert env.summary == "A warm coffee shop."  # the enhancer's summary of what it shows
     assert await store.orphaned() == []
 
 

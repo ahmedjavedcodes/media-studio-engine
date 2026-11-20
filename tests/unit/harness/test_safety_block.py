@@ -1,5 +1,6 @@
-"""Spec §7.5 / acceptance: `safety_verdict: block` ends the run as REJECTED no matter the score,
-plan tier or retries left, and no retry path can override it.
+"""Spec §7.5 / §5.5 / acceptance: `safety_verdict: block` drops that image whatever its score or
+the plan tier, no retry path can override it, and when EVERY image is blocked the run ends
+REJECTED. The Critic reviews all images in one call, so a block is per image.
 
 Written before the supervisor existed (M5), against the factory it had to provide. Since M6
 the run-level half imports the supervisor directly: it can fail, never silently skip."""
@@ -13,36 +14,26 @@ from typing import Any
 import pytest
 
 from media_engine.agents.base import AgentConfig
-from media_engine.agents.critic.critic import Critic, reply_block_reason
+from media_engine.agents.critic.critic import Critic, says_block
 from media_engine.agents.image_grand import supervisor
 from media_engine.contracts import AuthContext, Goal, Plan, Status
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.ports import ListEventSink, LocalArtifactStore
 from media_engine.schemas import CriticOutput
 from media_engine.services.create.loader import PLANS, load_create_config
-from tests.unit.harness.fakes import ScriptedChat, ScriptedImages, image_bytes
+from tests.unit.harness.fakes import ScriptedChat, ScriptedImages, image_bytes, verdict
 
 CFG = load_create_config()
 GOAL = Goal(task="critique", instructions="Review the image.")
 SCORES = [0, 5, 10]  # 10 = a "perfect" image: still blocked
 
 
-def block(score: int | None = 10, reason: str | None = "graphic violence") -> str:
-    body: dict[str, Any] = {
-        "safety_verdict": "block",
-        "safety_reason": reason,
-        "critique": "x",
-        "summary": "x",
-    }
-    if score is not None:
-        body["quality_score"] = score
-    return json.dumps(body)
+def block(score: int = 10, reason: str | None = "graphic violence") -> Any:
+    return verdict(score, safety_verdict="block", safety_reason=reason)
 
 
-def allow(score: int = 9) -> str:
-    return json.dumps(
-        {"quality_score": score, "safety_verdict": "allow", "critique": "fine", "summary": "ok"}
-    )
+def allow(score: int = 9) -> Any:
+    return verdict(score)
 
 
 @pytest.fixture
@@ -51,81 +42,103 @@ def store(tmp_path: Path) -> LocalArtifactStore:
 
 
 async def critique(  # type: ignore[no-untyped-def]
-    replies: list[str], store: LocalArtifactStore, plan: Plan = "free", max_retries: int = 2
+    replies: list[Any], store: LocalArtifactStore, plan: Plan = "free", images: int = 1
 ):
     auth = AuthContext(plan=plan, execution_mode="auto", model_demand="balanced")
-    stop = CFG.policy.stopping_condition("critique", plan, "verdict").model_copy(
-        update={"max_retries": max_retries}
-    )
+    stop = CFG.policy.stopping_condition("critique", plan, "verdict")
     config = AgentConfig.from_policy("critic", CFG.agent("critic"), CriticOutput)
     backend = ScriptedChat(replies)
     agent = Critic(
         config, LLMGateway(backend, chain_resolver(CFG.agents)), ListEventSink(), artifacts=store
     )
-    image_id = await store.put(image_bytes(), "image/png")
-    env = await agent.run(GOAL, stop, auth, {"image_id": image_id, "prompt": "a cat"})
-    return image_id, env, backend
+    ids = [await store.put(image_bytes(), "image/png") for _ in range(images)]
+    env = await agent.run(GOAL, stop, auth, {"image_ids": ids, "prompt": "a cat"})
+    return ids, env, backend
 
 
-# -- Critic level (runs now) --------------------------------------------------------------------
+# -- Critic level -------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("plan", PLANS)
 @pytest.mark.parametrize("score", SCORES)
-@pytest.mark.parametrize("max_retries", [0, 2])
-async def test_block_is_rejected_for_every_plan_score_and_retry_budget(
-    store, plan, score, max_retries
-):
-    image_id, env, backend = await critique([block(score)], store, plan, max_retries)
+async def test_a_block_is_final_for_every_plan_and_score(store, plan, score):
+    ids, env, backend = await critique([block(score)], store, plan)
 
-    assert env.state.status is Status.REJECTED
-    assert env.output == {
-        "blocked_image_id": image_id,
-        "safety_verdict": "block",
+    assert env.state.status is Status.DONE  # the step ran; the IMAGE is blocked
+    (review,) = env.output["reviews"]
+    assert review == {
+        "image_id": ids[0],
+        "verdict": "block",
         "safety_reason": "graphic violence",
-    }
-    assert "image_id" not in env.output  # never readable as a deliverable
-    assert "quality_score" not in env.output  # a verdict, not a score: nothing to compare
+    }  # no score, no rank: a verdict, never something to compare
     assert len(backend.requests) == 1
+    assert await store.orphaned() == [ids[0]]
 
 
-async def test_an_invalid_block_reply_cannot_be_repaired_into_allow(store):
-    # First reply says block but fails validation (no quality_score) -> the base repairs, and
-    # the repair says allow with a high score. Block must still win.
-    _, env, backend = await critique([block(score=None), allow(10)], store)
+async def test_a_block_drops_that_image_only(store):
+    ids, env, _ = await critique([allow(7), block(9), allow(5)], store, images=3)
 
-    assert env.state.status is Status.REJECTED
+    by_id = {r["image_id"]: r for r in env.output["reviews"]}
+    assert by_id[ids[1]]["verdict"] == "block"
+    assert (by_id[ids[0]]["rank"], by_id[ids[2]]["rank"]) == (1, 2)  # ranks skip the blocked
+    assert await store.orphaned() == [ids[1]]
+
+
+async def test_an_unreadable_block_cannot_be_repaired_into_allow(store):
+    # The first reply says block but fails validation; the repair says allow. The block wins:
+    # nothing in the batch is trusted (it cannot be attributed to an image).
+    bad = '{"images": [{"index": 1, "safety_verdict": "block"}]}'
+    _, env, backend = await critique([bad, allow(10)], store)
+
+    assert env.state.status is Status.FAILED
     assert len(backend.requests) == 2  # the repair happened, and was overruled
+    assert await store.orphaned() == []  # the run orphans unchecked images when it settles
 
 
-async def test_an_unparseable_block_on_the_repair_still_rejects(store):
-    # Repair reply says block in different case and is missing fields.
-    _, env, _ = await critique(['{"quality_score": 99}', '{"safety_verdict": "BLOCK"}'], store)
+async def test_an_unreadable_block_is_not_retried(store):
+    truncated = '{"images": [{"index": 1, "safety_verdict": "block", "safety_reason": "gra'
+    _, env, backend = await critique([truncated, truncated, allow(10), allow(10)], store)
 
-    assert env.state.status is Status.REJECTED
-    assert env.output["safety_reason"] == "safety policy"  # default when none given
-
-
-async def test_block_without_a_reason_is_still_rejected(store):
-    _, env, _ = await critique([block(score=7, reason=None)], store)
-    assert env.state.status is Status.REJECTED
-    assert env.output["safety_reason"] == "safety policy"
+    assert env.state.status is Status.FAILED
+    assert len(backend.requests) == 2  # the one repair, and no in-step retry after it
 
 
-async def test_allow_with_low_score_is_not_rejected(store):
+async def test_block_without_a_reason_gets_the_default(store):
+    _, env, _ = await critique([block(7, reason=None)], store)
+    assert env.output["reviews"][0]["safety_reason"] == "safety policy"
+
+
+async def test_allow_with_low_score_is_not_blocked(store):
     # Low quality is not unsafe: the two never mix.
     _, env, _ = await critique([allow(0)], store)
-    assert env.state.status is Status.DONE
-    assert env.output["quality_score"] == 0
+    (review,) = env.output["reviews"]
+    assert review["verdict"] == "allow" and review["quality_score"] == 0
 
 
-# -- run level (activates with the M6 supervisor) ---------------------------------------------
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('{"safety_verdict": "block", "safety_reason": "gore"}', True),
+        ('{"safety_verdict" : " BLOCK ", "safety_reason": "hate", "cri', True),
+        ('{"safety_verdict": "Block"', True),
+        ('{"safety_verdict": "allow"}', False),
+        ('{"quality_score": 2, "critique": "fine"', False),
+        ("", False),
+    ],
+)
+def test_says_block(text, expected):
+    assert says_block(text) is expected
+
+
+# -- run level ----------------------------------------------------------------------------------
 
 
 def enhancer_ok() -> str:
     return json.dumps(
         {
-            "enhanced_prompt": "A cat on a sofa.",
+            "subject": "a cat on a sofa",
+            "lighting": "window light from the right",
+            "detail_anchors": ["grey fur", "a red cushion"],
             "must_have": ["a cat"],
             "missing_info": [],
             "text_wanted": [],
@@ -159,41 +172,3 @@ async def test_run_ends_rejected_on_block_with_no_further_call(store, plan, scor
     assert not env.output.get("image_ids")
     assert len(images.requests) == 1  # no retry image after the block
     assert llm.replies == []  # enhancer + critic, and no lever-choice call
-
-
-# -- truncated replies (cut off at the token cap mid-JSON) --------------------------------------
-
-
-async def test_a_truncated_block_cannot_be_repaired_into_allow(store):
-    truncated = '{"quality_score": 3, "safety_verdict": "block", "safety_reason": "graphic vio'
-    _, env, backend = await critique([truncated, allow(10)], store)
-
-    assert env.state.status is Status.REJECTED
-    assert env.output["safety_reason"] == "safety policy"  # reason was cut off: default
-    assert len(backend.requests) == 2
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        # decodable JSON: its verdict decides
-        ('{"safety_verdict": "block", "safety_reason": "gore"}', "gore"),
-        ('{"safety_verdict": "allow"}', None),
-        # a decoded allow is never overruled by stray text elsewhere in the reply
-        ('note: "safety_verdict": "block"\n{"safety_verdict": "allow"}', None),
-        # truncated: text fallback, case and spacing tolerant, reason only if it closed
-        (
-            '{"quality_score": 9, "safety_verdict" : " BLOCK ", "safety_reason": "hate", "cri',
-            "hate",
-        ),
-        ('{"safety_verdict": "block", "safety_reason": "gra', "safety policy"),
-        ('{"safety_verdict": "Block"', "safety policy"),
-        # JSON without a verdict + a verdict in the text: fail closed
-        ('{"quality_score": 2} "safety_verdict": "block"', "safety policy"),
-        # nothing about a verdict at all
-        ('{"quality_score": 2, "critique": "fine"', None),
-        ("", None),
-    ],
-)
-def test_reply_block_reason(text, expected):
-    assert reply_block_reason(text) == expected

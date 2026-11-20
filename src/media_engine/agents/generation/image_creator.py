@@ -66,6 +66,10 @@ class CreatorInputs(BaseModel):
     seed: int = Field(ge=0)
     tier: Plan | None = None
     chain_offset: int = Field(default=0, ge=0)
+    # The Brief: the gateway compiles it into the prompt for each model it tries (§5.2).
+    brief: dict[str, Any] | None = None
+    # What this one call may cost in USD (the gateway checks its estimate before a paid call).
+    max_cost_usd: float | None = Field(default=None, ge=0)
 
 
 class CreatorParams(BaseModel):
@@ -128,6 +132,8 @@ class ImageCreator(Agent):
                 seed=args.seed,
                 deadline_ms=stop.deadline_ms,
                 chain_offset=args.chain_offset,
+                brief=args.brief,
+                max_cost_usd=args.max_cost_usd,
             )
         except asyncio.CancelledError:
             self._trace(args, tier, started_at, started, failure="aborted")

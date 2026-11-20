@@ -6,4 +6,4 @@
 {{must_have}}
 </must_have>
 
-Review the attached image.
+{{count}} image(s) follow, each labelled "Image N".

@@ -1,37 +1,40 @@
-"""Critic: one vision call returning a quality score and an independent safety verdict.
+"""Critic: ONE vision call that sees every image of the run and ranks them (§5.4).
 
 inputs:
-    image_id:  str        the image to review, resolved through the ArtifactStore (required)
+    image_ids: list[str]  the images to review, resolved through the ArtifactStore (required)
     prompt:    str        the user's RAW request (required). Scored against this and must_have,
                           never against the enhanced prompt: that is not even sent.
     must_have: list[str]  requirements from the user's words (optional; may be empty)
+    task_type: str        picks the rubric prompt: `create` today (edit / merge later, §10)
+
+The images sent are the stored THUMBNAILS (`params.thumbnail_size`, made once at store time);
+only a missing thumbnail falls back to downscaling the original.
 
 output (envelope):
-    DONE:     image_id, quality_score, critique, safety_verdict="allow"
-    REJECTED: blocked_image_id, safety_verdict="block", safety_reason. The image is NOT under
-              `image_id`, so it can never be picked up as a deliverable.
-    FAILED:   failure kind. The image was NOT safety-checked and must not be delivered.
+    DONE:   reviews: one entry per image the model ruled on, in rank order:
+            image_id, verdict (allow|block), safety_reason, scores (the four dimensions),
+            quality_score (their mean; safety is never part of it), rank (1 = best allowed,
+            normalised here: gaps and ties in the model's ranks are closed), critique (only
+            when a dimension is below threshold). An image the model left out has no entry:
+            it is unchecked and must not be delivered.
+    FAILED: failure kind. NO image was safety-checked.
 
-Safety is a verdict, not a score. `block` is terminal: REJECTED whatever the quality score,
-and it wins over the repair path. If ANY reply in this step said "block", even one that failed
-validation or was cut off mid-JSON, the step is REJECTED. Otherwise an invalid "block" could be
-repaired into "allow".
+Safety is a verdict, not a score. A block drops THAT image only (§5.5): it is marked orphaned
+(reason "safety_block") and never delivered; the others stand. If a reply that could not be
+read mentions "block" anywhere, the step fails without a retry: an unreadable block cannot be
+attributed to an image, and a retry could turn it into "allow".
 
-RETRY (replaces the supervisor's re-ask loop, so create stays linear): when a review ends with
-no verdict and no "block" anywhere, the Critic tries ONCE more (`params.retries`), on the same
-image, inside this step. Never after a block, and never for a failure another try cannot fix
-(NO_RETRY: no provider left, our bad request, bad input, a provider refusal). It never
-generates, so it never spends on an image.
+RETRY (create is linear, so no supervisor loop): a call with no usable output and no "block"
+text is tried ONCE more (`params.retries`), inside this step, on the same images. Never for a
+failure another try cannot fix (NO_RETRY). It never generates, so it never spends on an image.
 
-A blocked image is marked orphaned (reason "safety_block") so it is never delivered and the
-sweep removes it. TODO(backend): whether safety-blocked images are instead retained for abuse
-review is a product/legal decision; the backend sweep can branch on the reason.
+TODO(backend): whether safety-blocked images are retained for abuse review instead of swept
+is a product/legal decision; the sweep can branch on the orphan reason.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from typing import Any
 
@@ -40,30 +43,25 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from media_engine.agents.base import (
     Agent,
     AgentConfig,
-    Structured,
     describe_validation_error,
-    extract_json,
 )
 from media_engine.contracts import AuthContext, Envelope, Goal, Spend, Status, StoppingCondition
-from media_engine.core.images import NotAnImage, data_url, downscale
+from media_engine.core.images import NotAnImage, data_url, downscale, sniff_media_type
 from media_engine.core.logging import get_logger
 from media_engine.core.prompts import PROMPTS_DIR, load_prompt, render, tag_stripper
 from media_engine.gateway.llm_gateway import LLMGateway
 from media_engine.ports.artifact_store import ArtifactStore
 from media_engine.ports.event_sink import EventSink
-from media_engine.schemas import CriticOutput
+from media_engine.schemas import CriticOutput, ImageReview
 
 INPUT_TEMPLATE = PROMPTS_DIR / "image_create" / "critic.input.md"
 DEFAULT_SUMMARY = "Reviewed your image."
-BLOCKED_SUMMARY = "This image could not be delivered because it did not pass the safety review."
 DEFAULT_BLOCK_REASON = "safety policy"
 NONE_GIVEN = "none"
 ORPHAN_REASON = "safety_block"
 
-# Text-level fallback for replies with no decodable verdict (e.g. cut off at the token cap
-# mid-JSON). Fail-closed on purpose: a stray match blocks an image, a miss could deliver one.
+# Text-level check for replies that could not be read (e.g. cut off at the token cap mid-JSON).
 _BLOCK_TEXT = re.compile(r'"safety_verdict"\s*:\s*"\s*block\s*"', re.IGNORECASE)
-_REASON_TEXT = re.compile(r'"safety_reason"\s*:\s*"([^"\\]{1,80})"')
 
 log = get_logger("agents.critic")
 
@@ -79,53 +77,52 @@ class CriticParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    max_side: int = Field(gt=0)  # long side of the image sent for review, in px
+    thumbnail_size: int = Field(gt=0)  # which stored thumbnail to send (long side, px)
+    # Fallback only, when the thumbnail is missing: shrink the original to `thumbnail_size`.
     jpeg_quality: int = Field(ge=1, le=95)
-    retries: int = Field(ge=0, le=1)  # extra attempts after a review with no verdict
+    retries: int = Field(ge=0, le=1)  # extra attempts after a review with no usable output
 
 
 # Failures another attempt cannot fix: retrying would only repeat them (or route around a
-# provider's refusal). The image stays unchecked and is never delivered.
+# provider's refusal). The images stay unchecked and are never delivered.
 NO_RETRY = frozenset({"invalid_input", "bad_request", "no_provider", "content_refused"})
+
+# task_type -> rubric prompt (relative to prompts/). Edit and merge add theirs (§10).
+RUBRICS = {"create": "image_create/critic.md"}
 
 
 class CriticInputs(BaseModel):
     model_config = ConfigDict(extra="ignore")  # e.g. an enhanced_prompt passed by mistake
 
-    image_id: str = Field(min_length=1)
+    image_ids: list[str] = Field(min_length=1)
     prompt: str
     must_have: list[str] = Field(default_factory=list)
+    task_type: str = "create"
 
 
 def _clean_reason(reason: object) -> str:
     return reason.strip() if isinstance(reason, str) and reason.strip() else DEFAULT_BLOCK_REASON
 
 
-def reply_block_reason(text: str) -> str | None:
-    """The block reason if this one reply says block, else None. The JSON verdict is used when
-    the reply has one; the text check runs only when it does not (no decodable JSON, or JSON
-    without a verdict), so a decoded "allow" is never overruled by stray text."""
-    candidate = extract_json(text)
-    body: object = json.loads(candidate) if candidate is not None else None
-    if isinstance(body, dict) and isinstance(body.get("safety_verdict"), str):
-        if body["safety_verdict"].strip().lower() == "block":
-            return _clean_reason(body.get("safety_reason"))
-        return None
-    if _BLOCK_TEXT.search(text):
-        match = _REASON_TEXT.search(text)
-        return _clean_reason(match.group(1) if match else None)
-    return None
+def says_block(text: str) -> bool:
+    """Does an UNREADABLE reply say block? (A readable one is judged per image.) Fail-closed on
+    purpose: a stray match drops the review, a miss could deliver an unsafe image."""
+    return _BLOCK_TEXT.search(text) is not None
 
 
-def blocked_reason(result: Structured[CriticOutput]) -> str | None:
-    """The safety reason if ANY reply in the step said block (validated or not), else None."""
-    if result.output is not None and result.output.safety_verdict == "block":
-        return _clean_reason(result.output.safety_reason)
-    for call in result.calls:
-        reason = reply_block_reason(call.text)
-        if reason is not None:
-            return reason
-    return None
+def ranked(reviews: list[ImageReview]) -> list[ImageReview]:
+    """Allowed reviews first in rank order (the model's rank, then the mean score, then the
+    position), then the blocked ones. Duplicate or out-of-range indexes are the caller's job."""
+
+    def key(r: ImageReview) -> tuple[int, int, int, int]:
+        return (
+            r.safety_verdict == "block",
+            r.rank if r.rank is not None else 10**6,
+            -r.quality_score,
+            r.index,
+        )
+
+    return sorted(reviews, key=key)
 
 
 class Critic(Agent):
@@ -144,6 +141,21 @@ class Critic(Agent):
         # Validate the params block at construction, so bad config fails at startup.
         self.params = CriticParams.model_validate(config.model_policy.params)
 
+    async def _review_image(self, image_id: str) -> tuple[bytes, str]:
+        """The bytes sent for one image: its stored thumbnail, else the original shrunk."""
+        try:
+            thumb = await self._artifacts.get_thumbnail(image_id, self.params.thumbnail_size)
+            mime = sniff_media_type(thumb)
+            if mime is not None:
+                return thumb, mime
+        except Exception:  # noqa: BLE001 - no thumbnail (or a flaky store): use the original
+            log.info("critic.no_thumbnail", image_id=image_id)
+        data = await self._artifacts.get(image_id)
+        # Decode + resize is CPU work: keep it off the event loop.
+        return await asyncio.to_thread(
+            downscale, data, self.params.thumbnail_size, self.params.jpeg_quality
+        )
+
     async def run(
         self, goal: Goal, stop: StoppingCondition, auth: AuthContext, inputs: dict[str, Any]
     ) -> Envelope:
@@ -156,80 +168,89 @@ class Critic(Agent):
         user_prompt = sanitize(args.prompt)
         if not user_prompt:
             return self.failed("no prompt given", Spend(), "invalid_input")
+        rubric = RUBRICS.get(args.task_type)
+        if rubric is None:
+            return self.failed(f"no rubric for task {args.task_type!r}", Spend(), "invalid_input")
+        ids = list(dict.fromkeys(args.image_ids))  # one entry per image, order kept
 
         try:
-            data = await self._artifacts.get(args.image_id)
+            sent = [await self._review_image(image_id) for image_id in ids]
+        except NotAnImage as err:
+            return self.failed(str(err), Spend(), "bad_image")
         except Exception as err:  # the store is a backend port: any failure is "storage"
             log.exception("critic.load_failed")
             return self.failed(f"could not load image: {type(err).__name__}", Spend(), "storage")
-        try:
-            # Decode + resize is CPU work: keep it off the event loop.
-            review, mime = await asyncio.to_thread(
-                downscale, data, self.params.max_side, self.params.jpeg_quality
-            )
-        except NotAnImage as err:
-            return self.failed(str(err), Spend(), "bad_image")
 
         must_have = [m for m in (sanitize(item) for item in args.must_have) if m]
         text = render(
             load_prompt(INPUT_TEMPLATE),
             prompt=user_prompt,
             must_have="\n".join(f"- {m}" for m in must_have) or NONE_GIVEN,
+            count=str(len(ids)),
         )
-        # OpenAI-style multimodal content. UNVERIFIED on Cloudflare's chat endpoint for the
-        # vision chain models: confirm with playground/smoke_test.py --only cf-vision-scout.
-        content: list[dict[str, Any]] = [
-            {"type": "text", "text": text},
-            {"type": "image_url", "image_url": {"url": data_url(review, mime)}},
-        ]
+        # OpenAI-style multimodal content: the text, then a label and an image per image.
+        content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+        for number, (data, mime) in enumerate(sent, start=1):
+            content.append({"type": "text", "text": f"Image {number}"})
+            content.append({"type": "image_url", "image_url": {"url": data_url(data, mime)}})
+        system = render(load_prompt(PROMPTS_DIR / rubric))
 
-        result = await self.call_structured(auth, stop, content, CriticOutput)
+        result = await self.call_structured(auth, stop, content, CriticOutput, system=system)
         for _ in range(self.params.retries):
-            if result.output is not None or blocked_reason(result) is not None:
+            if result.output is not None or any(says_block(c.text) for c in result.calls):
                 break
             if result.failure in NO_RETRY:
                 break
             log.info("critic.retry", failure=result.failure)
-            again = await self.call_structured(auth, stop, content, CriticOutput)
+            again = await self.call_structured(auth, stop, content, CriticOutput, system=system)
             # One step, one account: both attempts' spend, calls and trace records.
             again.spend = result.spend.plus(again.spend)
             again.calls = [*result.calls, *again.calls]
             again.records = [*result.records, *again.records]
             result = again
 
-        # Safety first, before looking at whether the output validated or what it scored.
-        reason = blocked_reason(result)
-        if reason is not None:
-            log.warning("critic.blocked", reason=reason, calls=len(result.calls))
-            try:
-                await self._artifacts.mark_orphaned(args.image_id, ORPHAN_REASON)
-            except Exception:  # never let bookkeeping turn a block into anything else
-                log.exception("critic.mark_orphaned_failed")
-            return self.envelope(
-                Status.REJECTED,
-                {
-                    "blocked_image_id": args.image_id,
-                    "safety_verdict": "block",
-                    "safety_reason": reason,
-                },
-                BLOCKED_SUMMARY,
-                result.spend,
-                reason=f"safety: {reason}",
-            )
-
         if result.output is None:
             return self.failed(
                 result.error or "critic produced no output", result.spend, result.failure
             )
-        out = result.output
-        return self.envelope(
-            Status.DONE,
-            {
-                "image_id": args.image_id,
-                "quality_score": out.quality_score,
-                "critique": out.critique,
-                "safety_verdict": "allow",
-            },
-            out.summary.strip() or DEFAULT_SUMMARY,
-            result.spend,
-        )
+        # An unreadable reply that said "block" cannot be attributed to an image, and a repair
+        # (or retry) must never turn it into "allow": if any reply said block and the answer
+        # we kept blocks nothing, nothing in this batch is trusted.
+        if any(says_block(c.text) for c in result.calls) and not any(
+            r.safety_verdict == "block" for r in result.output.images
+        ):
+            log.warning("critic.unattributed_block", calls=len(result.calls))
+            return self.failed(
+                "a reply said block and the final answer did not", result.spend, "invalid_output"
+            )
+        # One review per image: drop unknown or repeated indexes, keep the first.
+        seen: dict[int, ImageReview] = {}
+        for review in result.output.images:
+            if 1 <= review.index <= len(ids):
+                seen.setdefault(review.index, review)
+        ordered = ranked(list(seen.values()))
+        reviews: list[dict[str, Any]] = []
+        position = 0
+        for review in ordered:
+            image_id = ids[review.index - 1]
+            entry: dict[str, Any] = {"image_id": image_id, "verdict": review.safety_verdict}
+            if review.safety_verdict == "block":
+                reason = _clean_reason(review.safety_reason)
+                log.warning("critic.blocked", reason=reason, image_id=image_id)
+                try:
+                    await self._artifacts.mark_orphaned(image_id, ORPHAN_REASON)
+                except Exception:  # never let bookkeeping turn a block into anything else
+                    log.exception("critic.mark_orphaned_failed")
+                entry["safety_reason"] = reason
+            else:
+                position += 1
+                entry.update(
+                    rank=position,
+                    scores=review.scores,
+                    quality_score=review.quality_score,
+                    critique=review.critique.strip(),
+                )
+            reviews.append(entry)
+        if not reviews:
+            return self.failed("critic reviewed none of the images", result.spend, "invalid_output")
+        return self.envelope(Status.DONE, {"reviews": reviews}, DEFAULT_SUMMARY, result.spend)

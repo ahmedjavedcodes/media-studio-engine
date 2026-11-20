@@ -15,6 +15,9 @@ class LLMRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     json_mode: bool = False
+    # JSON Schema of the reply. A provider that supports structured output sends it natively;
+    # the others get it appended to the system prompt (`inject_schema`).
+    response_schema: dict[str, Any] | None = None
     tools: list[dict[str, Any]] | None = None
     reasoning_effort: ReasoningEffort | None = None
     include_reasoning: bool = False
@@ -42,6 +45,9 @@ class ImageRequest(BaseModel):
     # OpenRouter quality setting (e.g. gpt-image-2: low/medium/high). None = the registry's
     # default_quality for that model; never left to the model's own default.
     quality: str | None = None
+    # The Brief (IMAGE-CREATE-OPTIMIZE §4.2). When set, the gateway COMPILES it into `prompt` for
+    # each chain entry it tries, so a fallback gets a prompt written for the model that answers.
+    brief: dict[str, Any] | None = None
 
 
 class ImageResponse(BaseModel):
