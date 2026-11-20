@@ -28,7 +28,7 @@ class GateDecision(BaseModel):
     route: Route
     task_type: TaskType = "create"
     # True when the request already names a subject, a setting and a style or camera note and
-    # is over ~25 words. Recorded now; it will skip the Brief once the Brief exists (§3).
+    # is over ~25 words. Recorded on RunState and read by nothing: the Brief always runs.
     prompt_is_detailed: bool = False
 
     _norm = field_validator("safety", "route", "task_type", mode="before")(_lower)

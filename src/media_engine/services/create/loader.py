@@ -60,11 +60,18 @@ class SafetyReviewPolicy(_Strict):
     wait_s: float = Field(ge=0)  # how long a review waits for a free slot before giving up
 
 
+class RoutingPolicy(_Strict):
+    # Ambiguous text the Decider classifies as a stubbed operation (edit / merge / restyle):
+    # False runs it as create (and logs the choice), True sends it to the stub.
+    ambiguous_to_stubs: bool
+
+
 class HarnessPolicy(_Strict):
     # Below this the delivery carries the critique as an issue. Information only: create never
     # regenerates on a low score (v2.2), the user picks from every image.
     quality_threshold: dict[Plan, int]
     safety_review: SafetyReviewPolicy
+    routing: RoutingPolicy
     negative_prompt: str
     max_parallel_branches: int = Field(gt=0)
     max_images_per_request: int = Field(gt=0)

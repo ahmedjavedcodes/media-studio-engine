@@ -30,7 +30,7 @@ def test_only_the_gateway_router_calls_the_usd_estimate():
     )
     # the router checks every paid call; the supervisor gets its step-guard figure injected
     assert users == ["gateway/router.py"]
-    supervisor = (SRC / "agents/image_grand/supervisor.py").read_text(encoding="utf-8")
+    supervisor = (SRC / "agents/image_generation/create/agent.py").read_text(encoding="utf-8")
     assert "image_registry" not in supervisor  # the price lookup is injected, not imported
 
 

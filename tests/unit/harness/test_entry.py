@@ -18,8 +18,7 @@ import pytest
 import respx
 
 from media_engine.agents.base import AgentConfig
-from media_engine.agents.gate.gate import Gate
-from media_engine.agents.grand.grand_agent import ESCALATE_REASON, GrandAgent
+from media_engine.agents.image_grand.gate import Gate
 from media_engine.contracts import Goal, Status
 from media_engine.core.config import Settings
 from media_engine.gateway.fallback import AvailabilityState
@@ -125,41 +124,44 @@ async def test_an_undecided_gate_fails_closed_and_keeps_the_spend():
     assert env.state.spend.llm_calls == 2
 
 
-# -- the Grand Agent stub -----------------------------------------------------------------------
-
-
-async def test_the_grand_agent_stub_escalates_with_one_fixed_reason_and_nothing_else():
-    agent = GrandAgent(
-        AgentConfig.from_policy("grand_agent", CFG.agent("grand_agent"), None),
-        None,
-        ListEventSink(),
-    )
-
-    env = await agent.run(
-        Goal(task="plan", instructions="x"),
-        CFG.policy.stopping_condition("supervise", "free", "a plan"),
-        auth(),
-        {"prompt": "a ten page comic"},
-    )
-
-    assert env.state.status is Status.ESCALATE
-    assert env.state.reason == ESCALATE_REASON == "multi-step planning not implemented"
-    assert env.output == {}
-    assert (env.state.spend.llm_calls, env.state.spend.neurons) == (0, 0.0)  # no model, no cost
-
-
 # -- create_images() ----------------------------------------------------------------------------
 
 
-async def test_a_complex_request_escalates_without_making_an_image(store):
-    llm = ScriptedChat([ROUTE_COMPLEX])
+@pytest.mark.parametrize(
+    "reply",
+    [ROUTE_COMPLEX, gate_reply(task_type="edit"), gate_reply(route="complex", task_type="merge")],
+)
+async def test_the_gates_route_and_task_type_are_recorded_but_route_nothing(store, reply):
+    llm = ScriptedChat([reply, enhanced(), verdict(9)])
+    run_store = InMemoryRunStore()
+
+    env = await create_images(
+        "a ten page comic",
+        gateway=Backend(llm, ScriptedImages([image_bytes()])),
+        artifacts=store,
+        run_store=run_store,
+    )
+
+    assert env.state.status is Status.DONE and env.state.spend.llm_calls == 3  # a plain create
+    stored = await run_store.load(env.output["run_id"])
+    assert stored is not None and stored.gate is not None
+    assert (stored.gate.route, stored.gate.task_type) == tuple(
+        json.loads(reply)[k] for k in ("route", "task_type")
+    )
+
+
+async def test_an_escalated_request_makes_no_image_and_only_the_gate_call(store):
+    llm = ScriptedChat([ROUTE_SIMPLE])
     images = ScriptedImages([])
 
-    env = await create_images("a ten page comic", gateway=Backend(llm, images), artifacts=store)
+    env = await create_images(
+        "change the sky", operation="edit", gateway=Backend(llm, images), artifacts=store
+    )
 
     assert env.state.status is Status.ESCALATE
-    assert env.state.reason == "multi-step planning not implemented"
-    assert set(env.output) == {"run_id", "billable"} and env.output["billable"] is False
+    assert env.state.reason == "edit not implemented"
+    assert set(env.output) == {"run_id", "image_ids", "billable"}
+    assert env.output["billable"] is False and env.output["image_ids"] == []
     assert len(llm.requests) == 1 and images.requests == []  # the gate, and nothing else
     assert env.state.spend.llm_calls == 1
 

@@ -553,7 +553,7 @@ async def test_a_cancel_set_in_the_store_survives_the_harness_saving_over_it(sto
 
 
 async def test_a_branch_gate_cannot_overwrite_a_block_set_while_it_awaited_the_store(store):
-    from media_engine.agents.image_grand.supervisor import Outcome
+    from media_engine.agents.image_generation.create.agent import Outcome
 
     agent = build(ScriptedChat([]), ScriptedImages([]), store, cfg=rich())
     ctx = agent.new_context(auth_for_tests(), {"prompt": "x", "n": 2})
@@ -570,7 +570,7 @@ async def test_a_branch_gate_cannot_overwrite_a_block_set_while_it_awaited_the_s
 
 
 async def test_settle_never_delivers_a_blocked_image_whatever_the_outcome(store):
-    from media_engine.agents.image_grand.supervisor import Outcome
+    from media_engine.agents.image_generation.create.agent import Outcome
 
     agent = build(ScriptedChat([]), ScriptedImages([]), store, cfg=rich())
     ctx = agent.new_context(auth_for_tests(), {"prompt": "x", "n": 2})

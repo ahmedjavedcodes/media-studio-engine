@@ -10,8 +10,11 @@ from typing import Any
 
 import pytest
 
-from media_engine.agents.image_grand.attempt_graph import run_attempt
-from media_engine.agents.image_grand.supervisor import ImageGrandAgent, create_image_grand_agent
+from media_engine.agents.image_generation.create.agent import (
+    ImageCreateAgent,
+    create_image_create_agent,
+)
+from media_engine.agents.image_generation.create.graph import run_attempt
 from media_engine.contracts import AuthContext, Goal, Status
 from media_engine.gateway.errors import ContentRefused, ProviderError
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
@@ -91,8 +94,8 @@ def build(
     run_store: Any = None,
     cfg: Any = CFG,
     paid: tuple[str, ...] = ("openrouter",),
-) -> ImageGrandAgent:
-    return create_image_grand_agent(
+) -> ImageCreateAgent:
+    return create_image_create_agent(
         cfg,
         llm=LLMGateway(llm, chain_resolver(cfg.agents)),
         images=images,
@@ -105,7 +108,7 @@ def build(
     )
 
 
-async def create(agent: ImageGrandAgent, plan: str = "free", mode: str = "auto", **inputs: Any):  # type: ignore[no-untyped-def]
+async def create(agent: ImageCreateAgent, plan: str = "free", mode: str = "auto", **inputs: Any):  # type: ignore[no-untyped-def]
     stop = CFG.policy.stopping_condition("supervise", plan, "finished images")  # type: ignore[arg-type]
     return await agent.run(GOAL, stop, auth(plan, mode), {"prompt": PROMPT, **inputs})
 

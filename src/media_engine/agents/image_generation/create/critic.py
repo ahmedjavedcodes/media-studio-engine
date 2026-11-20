@@ -56,7 +56,7 @@ from media_engine.ports.artifact_store import ArtifactStore
 from media_engine.ports.event_sink import EventSink
 from media_engine.schemas import CriticOutput, ImageReview
 
-INPUT_TEMPLATE = PROMPTS_DIR / "image_create" / "critic.input.md"
+INPUT_TEMPLATE = PROMPTS_DIR / "critic" / "critic.input.md"
 DEFAULT_SUMMARY = "Reviewed your image."
 DEFAULT_BLOCK_REASON = "safety policy"
 # Why a batch failed when a reply said "block" that no valid answer carried. Logged
@@ -96,7 +96,7 @@ class CriticParams(BaseModel):
 NO_RETRY = frozenset({"invalid_input", "bad_request", "no_provider", "content_refused"})
 
 # task_type -> rubric prompt (relative to prompts/). Edit and merge add theirs (§10).
-RUBRICS = {"create": "image_create/critic.md"}
+RUBRICS = {"create": "critic/critic.md"}
 
 
 class CriticInputs(BaseModel):

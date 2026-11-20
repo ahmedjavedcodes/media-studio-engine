@@ -14,8 +14,8 @@ from typing import Any
 import pytest
 
 from media_engine.agents.base import AgentConfig
-from media_engine.agents.critic.critic import Critic, says_block
-from media_engine.agents.image_grand import supervisor
+from media_engine.agents.image_generation.create import agent as supervisor
+from media_engine.agents.image_generation.create.critic import Critic, says_block
 from media_engine.contracts import AuthContext, Goal, Plan, Status
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.ports import ListEventSink, LocalArtifactStore
@@ -155,7 +155,7 @@ async def test_run_ends_rejected_on_block_with_no_further_call(store, plan, scor
     llm = ScriptedChat([enhancer_ok(), block(score)])  # an extra LLM call raises
     images = ScriptedImages([image_bytes()])  # an extra (retry) image call raises
     auth = AuthContext(plan=plan, execution_mode="auto", model_demand="balanced")
-    agent = supervisor.create_image_grand_agent(
+    agent = supervisor.create_image_create_agent(
         CFG,
         llm=LLMGateway(llm, chain_resolver(CFG.agents)),
         images=images,

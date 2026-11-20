@@ -3,7 +3,7 @@ from its id, and the N branches of a run never share a seed."""
 
 from __future__ import annotations
 
-from media_engine.agents.image_grand.supervisor import create_image_grand_agent, derive_seed
+from media_engine.agents.image_generation.create.agent import create_image_create_agent, derive_seed
 from media_engine.contracts import AuthContext
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.ports import ListEventSink
@@ -15,7 +15,7 @@ MAX = CFG.policy.max_seed
 
 
 def seeds(run_id: str, n: int) -> list[int]:
-    agent = create_image_grand_agent(  # no seed_source: the production derivation
+    agent = create_image_create_agent(  # no seed_source: the production derivation
         CFG,
         llm=LLMGateway(ScriptedChat([]), chain_resolver(CFG.agents)),
         images=ScriptedImages([]),

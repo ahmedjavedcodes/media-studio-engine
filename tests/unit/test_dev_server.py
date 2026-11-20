@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from media_engine.ports import LocalArtifactStore
 from tests.unit.harness.fakes import ScriptedChat, ScriptedImages, image_bytes
-from tests.unit.harness.test_entry import ROUTE_COMPLEX, ROUTE_SIMPLE, Backend
+from tests.unit.harness.test_entry import ROUTE_SIMPLE, Backend
 from tests.unit.harness.test_supervisor import enhanced, verdict
 
 SHIM = Path(__file__).parents[2] / "scripts" / "dev_server.py"
@@ -78,10 +78,11 @@ def test_a_run_streams_public_events_then_one_result_with_image_urls(shim):
         assert file.status_code == 200 and file.headers["content-type"].startswith("image/")
 
 
-def test_a_complex_request_returns_escalate(shim):
-    shim.GATEWAY = Backend(ScriptedChat([ROUTE_COMPLEX]), ScriptedImages([]))
+def test_a_stub_operation_returns_escalate(shim):
+    shim.GATEWAY = Backend(ScriptedChat([ROUTE_SIMPLE]), ScriptedImages([]))
     with TestClient(shim.app) as client:
-        run_id = client.post("/runs", json={"prompt": "a comic"}).json()["run_id"]
+        body = {"prompt": "a comic", "operation": "edit"}
+        run_id = client.post("/runs", json=body).json()["run_id"]
         (result,) = [d for name, d in sse(client, run_id) if name == "result"]
         assert result["status"] == "escalate" and result["images"] == []
 
@@ -118,7 +119,7 @@ def test_the_fake_backend_drives_every_outcome_over_the_contract(shim):
         ({"prompt": "something unsafe"}, "rejected"),  # the Gate blocks, before any image
         ({"prompt": "a borderline battle"}, "done"),  # Gate says review, the reviewer allows
         ({"prompt": "fail this"}, "failed"),
-        ({"prompt": "a complex comic"}, "escalate"),
+        ({"prompt": "a comic", "operation": "edit"}, "escalate"),  # a stub operation
         ({"prompt": "question me", "mode": "manual"}, "needs_input"),
         ({"prompt": "issues please"}, "done_with_issues"),
     ]

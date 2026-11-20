@@ -17,7 +17,10 @@ from typing import Any
 
 import pytest
 
-from media_engine.agents.image_grand.supervisor import ImageGrandAgent, create_image_grand_agent
+from media_engine.agents.image_generation.create.agent import (
+    ImageCreateAgent,
+    create_image_create_agent,
+)
 from media_engine.contracts import Status
 from media_engine.gateway.errors import (
     AllProvidersFailed,
@@ -74,9 +77,9 @@ def build(
     cfg: Any = CFG,
     allow_paid: bool = False,
     trace: Any = None,
-) -> ImageGrandAgent:
+) -> ImageCreateAgent:
     seeds = itertools.count(100)
-    return create_image_grand_agent(
+    return create_image_create_agent(
         cfg,
         llm=AgentRecordingLLMGateway(llm, chain_resolver(cfg.agents)),
         images=images,

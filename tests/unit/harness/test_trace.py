@@ -394,13 +394,12 @@ async def test_run_state_round_trips_at_every_boundary_with_the_trace(store):
 
 
 async def test_an_escalated_run_closes_its_trace_with_a_status_and_a_wall_time(store):
-    from tests.unit.harness.test_entry import ROUTE_COMPLEX
-
     trace = Trace()
-    llm = ScriptedChat([ROUTE_COMPLEX])
+    llm = ScriptedChat([ROUTE_SIMPLE])
 
     env = await create_images(
         "a 4-panel comic strip",
+        operation="edit",
         gateway=Backend(llm, ScriptedImages([])),
         artifacts=store,
         trace=trace,
@@ -411,7 +410,7 @@ async def test_an_escalated_run_closes_its_trace_with_a_status_and_a_wall_time(s
     assert snap["status"] == "escalate"  # not "running" forever
     assert snap["finished_at"] is not None and snap["wall_ms"] is not None and snap["wall_ms"] >= 0
     assert [c["role"] for c in snap["calls"]] == ["gate"]
-    assert any("ESCALATE" in d["text"] for d in snap["decisions"])
+    assert any("operation edit" in d["text"] for d in snap["decisions"])
 
 
 async def test_the_overall_time_starts_before_the_gate_call(store):

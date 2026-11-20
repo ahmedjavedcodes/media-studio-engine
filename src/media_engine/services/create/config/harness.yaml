@@ -10,6 +10,12 @@ quality_threshold: {free: 6, pro: 7, max: 7, ultra: 8}
 # slot, then fails closed with the retryable failure `review_rate_limited` (never an allow).
 safety_review: {max_per_period: 3, period_s: 60, wait_s: 5}
 
+# Operation routing (agents/image_generation/agent.py). While edit, merge and restyle are stubs,
+# ambiguous text the Decider classifies as one of them runs as create (review round 2: a
+# text-only edit request is still served as a new image). Flip to true once they are built. An
+# explicit operation (button, slash command) is never affected.
+routing: {ambiguous_to_stubs: false}
+
 # Passed by the Image Creator to providers that support a negative prompt. FLUX (the free
 # chain) ignores negative prompts, so the enhancer prompt also avoids describing text at all.
 negative_prompt: "text, letters, words, captions, signage with writing, logos, watermark, signature"

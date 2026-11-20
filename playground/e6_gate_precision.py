@@ -20,7 +20,7 @@ import json
 from eval_common import AUTH, MEASURE
 
 from media_engine.agents.base import AgentConfig
-from media_engine.agents.gate.gate import Gate
+from media_engine.agents.image_grand.gate import Gate
 from media_engine.contracts import Goal
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.gateway.router import Gateway

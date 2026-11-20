@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from media_engine.agents.gate.limiter import SlidingWindowLimiter, review_limiter
-from media_engine.agents.grand.grand_agent import GrandAgent
+from media_engine.agents.image_grand.limiter import SlidingWindowLimiter, review_limiter
+from media_engine.agents.stub import StubAgent
 from media_engine.contracts import Status
 from media_engine.guardrails.code_checks import Rules, check_prompt, compile_rules
 from media_engine.harness.run_state import GateRecord
@@ -198,19 +198,22 @@ async def test_an_allowed_request_makes_exactly_three_llm_calls(store):
     assert env.state.status is Status.DONE and env.state.spend.llm_calls == 3
 
 
-async def test_the_verdict_travels_with_a_complex_request(store, monkeypatch):
+async def test_the_verdict_travels_with_a_request_routed_to_a_stub(store, monkeypatch):
     seen: dict[str, Any] = {}
-    original = GrandAgent.run
+    original = StubAgent.run
 
     async def spy(self, goal, stop, auth, inputs):  # type: ignore[no-untyped-def]
         seen.update(inputs)
         return await original(self, goal, stop, auth, inputs)
 
-    monkeypatch.setattr(GrandAgent, "run", spy)
+    monkeypatch.setattr(StubAgent, "run", spy)
     llm = ScriptedChat([gate_reply("review", route="complex"), review_reply("allow")])
 
     env = await create_images(
-        "a 4-panel war comic", gateway=Backend(llm, ScriptedImages([])), artifacts=store
+        "a 4-panel war comic",
+        operation="restyle",
+        gateway=Backend(llm, ScriptedImages([])),
+        artifacts=store,
     )
 
     assert env.state.status is Status.ESCALATE
@@ -269,8 +272,10 @@ async def test_invalid_input_is_not_billable(store, prompt, n):
 
 
 async def test_an_escalated_request_is_not_billable(store):
-    llm = ScriptedChat([gate_reply(route="complex")])
-    env = await create_images("a comic", gateway=Backend(llm, ScriptedImages([])), artifacts=store)
+    llm = ScriptedChat([ROUTE_SIMPLE])
+    env = await create_images(
+        "a comic", operation="merge", gateway=Backend(llm, ScriptedImages([])), artifacts=store
+    )
     assert env.state.status is Status.ESCALATE and env.output["billable"] is False
 
 
@@ -348,8 +353,8 @@ async def test_a_rate_limited_review_fails_closed_without_calling_the_model(stor
 
 @pytest.mark.parametrize("task_type", ["edit", "merge"])
 async def test_an_edit_or_merge_verdict_is_intentionally_ignored_by_create(store, task_type):
-    # create has no uploads and edit/merge are not built: the request is made as a new image,
-    # and the Gate's task_type is kept on RunState for later routing (spec §10).
+    # The Gate decides safety only: its task_type is stored on RunState and routes nothing
+    # (operations are routed by code or the Decider), so the request is made as a new image.
     llm = ScriptedChat([gate_reply(task_type=task_type), enhanced(), verdict(9)])
     run_store = InMemoryRunStore()
 
@@ -363,7 +368,6 @@ async def test_an_edit_or_merge_verdict_is_intentionally_ignored_by_create(store
     assert env.state.status is Status.DONE and len(env.output["image_ids"]) == 1
     state = await run_store.load(env.output["run_id"])
     assert state is not None and state.gate is not None and state.gate.task_type == task_type
-    assert any(f"task_type {task_type} ignored" in d.text for d in state.decisions)
 
 
 # -- settings are user text: screened at step 0 and judged by the Gate ---------------------------

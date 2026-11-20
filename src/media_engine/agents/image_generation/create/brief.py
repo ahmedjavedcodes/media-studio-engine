@@ -1,7 +1,11 @@
-"""Prompt Enhancer (the Brief agent): turns the user's request into a Brief (subject, action,
+"""Brief (config key `prompt_enhancer`): turns the user's request into a Brief (subject, action,
 setting, lighting, camera, detail anchors, aspect ratio) plus testable `must_have` requirements
 taken only from the user's own words. It writes fields, not a paragraph: the Compiler
 (gateway/compiler.py) turns the Brief into each image model's prompt.
+
+The Brief ALWAYS runs, and is the only writer of the structured fields. A detailed prompt is
+still prose: the Brief structures it and fills only real gaps, never padding it or adding
+objects. The Gate's `prompt_is_detailed` is recorded on RunState and skips nothing.
 
 inputs:
     prompt:   str             the user's raw request (required)
@@ -13,7 +17,7 @@ output (envelope):
     traces show), must_have, must_have_dropped, missing_info (list of {kind, question}),
     text_wanted, user_prompt
 
-Returns DONE, or NEEDS_INPUT when `missing_info` is non-empty (the Image Grand Agent resolves
+Returns DONE, or NEEDS_INPUT when `missing_info` is non-empty (the image-create-agent resolves
 preset kinds from defaults before escalating). Never talks to the user.
 """
 
@@ -33,7 +37,7 @@ from media_engine.gateway.llm_gateway import LLMGateway
 from media_engine.ports.event_sink import EventSink
 from media_engine.schemas import EnhancerOutput, MissingItem
 
-INPUT_TEMPLATE = PROMPTS_DIR / "image_create" / "prompt_enhancer.input.md"
+INPUT_TEMPLATE = PROMPTS_DIR / "brief" / "brief.input.md"
 DEFAULT_SUMMARY = "Prepared a detailed description of your image."
 BRIEF_FIELDS = {
     "subject",
@@ -170,7 +174,7 @@ def describe_missing(missing: list[MissingItem]) -> str:
     return "; ".join(m.question if m.kind == "question" and m.question else m.kind for m in missing)
 
 
-class PromptEnhancer(Agent):
+class Brief(Agent):
     def __init__(self, config: AgentConfig, gateway: LLMGateway | None, events: EventSink) -> None:
         super().__init__(config, gateway, events)
         # Validate the params block at construction, so bad config fails at startup.

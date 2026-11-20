@@ -1,4 +1,5 @@
-"""Image Grand Agent: the supervisor. Plain Python around a linear LangGraph attempt graph.
+"""image-create-agent: the create pipeline runner (plain path). Plain Python around a linear
+LangGraph attempt graph.
 
     run(): build RunState -> ONE attempt (enhance -> generate -> critique) -> settle
 
@@ -57,10 +58,13 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
 from media_engine.agents.base import Agent, AgentConfig, describe_validation_error
-from media_engine.agents.critic.critic import Critic
-from media_engine.agents.generation.image_creator import ImageCreator
-from media_engine.agents.image_grand.attempt_graph import NODES, build_attempt_graph, run_attempt
-from media_engine.agents.prompt.enhancer import PromptEnhancer
+from media_engine.agents.image_generation.create.brief import Brief
+from media_engine.agents.image_generation.create.critic import Critic
+from media_engine.agents.image_generation.create.graph import (
+    NODES,
+    build_attempt_graph,
+    run_attempt,
+)
 from media_engine.contracts import (
     AuthContext,
     Envelope,
@@ -90,6 +94,7 @@ from media_engine.ports.event_sink import EventSink, Phase, make_event, safe_emi
 from media_engine.ports.run_store import RunStore
 from media_engine.schemas import CriticOutput, Document, DocumentSize, EnhancerOutput, Layer
 from media_engine.services.create.loader import CreateConfig, StepKind
+from media_engine.tools.image_gen_model import ImageGenModel
 
 log = get_logger("agents.image_grand")
 
@@ -225,7 +230,7 @@ class Resolved(BaseModel):
     questions: list[str] = Field(default_factory=list)  # unanswered user questions
 
 
-class ImageGrandAgent(Agent):
+class ImageCreateAgent(Agent):
     def __init__(
         self,
         config: AgentConfig,
@@ -233,8 +238,8 @@ class ImageGrandAgent(Agent):
         events: EventSink,
         *,
         create: CreateConfig,
-        enhancer: PromptEnhancer,
-        creator: ImageCreator,
+        enhancer: Brief,
+        creator: ImageGenModel,
         critic: Critic,
         artifacts: ArtifactStore,
         run_store: RunStore | None = None,
@@ -1171,7 +1176,7 @@ def _failure_reason(doing: str, env: Envelope) -> str:
     return f"could not {doing}" + (f" ({failure})" if failure else "")
 
 
-def create_image_grand_agent(
+def create_image_create_agent(
     cfg: CreateConfig,
     *,
     llm: LLMGateway,
@@ -1184,16 +1189,16 @@ def create_image_grand_agent(
     price_lookup: Callable[[Plan], float | None] | None = None,
     seed_source: Callable[[], int] | None = None,
     trace: Trace | None = None,
-) -> ImageGrandAgent:
+) -> ImageCreateAgent:
     """Wire the supervisor and its step agents from config. Ports are passed in: nothing here
     builds a concrete store or sink. `images` is the gateway's image backend (Gateway), which
     ModelGateway wraps for the Image Creator."""
-    enhancer = PromptEnhancer(
+    enhancer = Brief(
         AgentConfig.from_policy("prompt_enhancer", cfg.agent("prompt_enhancer"), EnhancerOutput),
         llm,
         events,
     )
-    creator = ImageCreator(
+    creator = ImageGenModel(
         AgentConfig.from_policy("image_creator", cfg.agent("image_creator"), None),
         events,
         images=ModelGateway(images, chain_resolver(cfg.agents)),
@@ -1205,7 +1210,7 @@ def create_image_grand_agent(
         events,
         artifacts=artifacts,
     )
-    return ImageGrandAgent(
+    return ImageCreateAgent(
         AgentConfig.from_policy("image_grand_agent", cfg.agent("image_grand_agent"), None),
         llm,
         events,
@@ -1223,4 +1228,4 @@ def create_image_grand_agent(
     )
 
 
-__all__ = ["ImageGrandAgent", "RunContext", "create_image_grand_agent", "derive_seed"]
+__all__ = ["ImageCreateAgent", "RunContext", "create_image_create_agent", "derive_seed"]

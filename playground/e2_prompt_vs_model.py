@@ -25,7 +25,7 @@ import httpx
 from eval_common import AUTH, MEASURE, CriticRig, log_paid, require_paid_ok
 
 from media_engine.agents.base import AgentConfig
-from media_engine.agents.prompt.enhancer import PromptEnhancer
+from media_engine.agents.image_generation.create.brief import Brief
 from media_engine.contracts import Goal
 from media_engine.core.config import get_settings
 from media_engine.gateway.budget import estimate_image_usd
@@ -68,7 +68,7 @@ async def main() -> None:
 
     cfg = load_create_config()
     gateway = Gateway()
-    enhancer = PromptEnhancer(
+    enhancer = Brief(
         AgentConfig.from_policy("prompt_enhancer", cfg.agent("prompt_enhancer"), EnhancerOutput),
         LLMGateway(gateway, chain_resolver(cfg.agents)),
         ListEventSink(),

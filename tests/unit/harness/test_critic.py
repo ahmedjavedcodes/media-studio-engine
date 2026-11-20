@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from media_engine.agents.base import AgentConfig
-from media_engine.agents.critic.critic import Critic
+from media_engine.agents.image_generation.create.critic import Critic
 from media_engine.contracts import AuthContext, Goal, Status
 from media_engine.core.images import inspect_image
 from media_engine.gateway.errors import AllProvidersFailed, ContentRefused, ProviderError
@@ -417,7 +417,7 @@ async def test_an_unreadable_block_fails_the_batch_and_is_logged(store):
     [(1, 3, [1]), (3, 3, [3]), (4, 3, [2, 2]), (5, 3, [3, 2]), (7, 3, [3, 2, 2]), (4, 1, [1] * 4)],
 )
 def test_split_evenly(count, most, sizes):
-    from media_engine.agents.critic.critic import split_evenly
+    from media_engine.agents.image_generation.create.critic import split_evenly
 
     groups = split_evenly(count, most)
     assert [len(g) for g in groups] == sizes

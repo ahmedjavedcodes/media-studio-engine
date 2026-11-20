@@ -12,7 +12,6 @@ from typing import Any
 import pytest
 
 from media_engine.agents.base import AgentConfig
-from media_engine.agents.generation.image_creator import ImageCreator
 from media_engine.contracts import AuthContext, Goal, Status
 from media_engine.gateway.errors import (
     AllProvidersFailed,
@@ -26,6 +25,7 @@ from media_engine.gateway.model_gateway import ModelGateway
 from media_engine.ports import ListEventSink, LocalArtifactStore
 from media_engine.schemas import GenerationResult
 from media_engine.services.create.loader import load_create_config
+from media_engine.tools.image_gen_model import ImageGenModel
 from tests.unit.harness.fakes import ScriptedImages, image_bytes
 
 AUTH = AuthContext(plan="free", execution_mode="auto", model_demand="balanced")
@@ -35,10 +35,10 @@ STOP = CFG.policy.stopping_condition("generate", "free", "one stored image")
 PROMPT = "A cozy coffee shop interior at dusk, warm lamps, wooden tables."
 
 
-def creator(backend: ScriptedImages, artifacts: Any) -> ImageCreator:
+def creator(backend: ScriptedImages, artifacts: Any) -> ImageGenModel:
     config = AgentConfig.from_policy("image_creator", CFG.agent("image_creator"), None)
     images = ModelGateway(backend, chain_resolver(CFG.agents))
-    return ImageCreator(config, ListEventSink(), images=images, artifacts=artifacts)
+    return ImageGenModel(config, ListEventSink(), images=images, artifacts=artifacts)
 
 
 @pytest.fixture
@@ -106,7 +106,7 @@ def test_has_no_llm_and_refuses_a_prompt_or_output_model(store):
     agent = creator(ScriptedImages([]), store)
     assert agent._gateway is None
     with pytest.raises(ValueError):
-        ImageCreator(
+        ImageGenModel(
             AgentConfig.from_policy("critic", CFG.agent("critic"), GenerationResult),
             ListEventSink(),
             images=ModelGateway(ScriptedImages([]), chain_resolver(CFG.agents)),

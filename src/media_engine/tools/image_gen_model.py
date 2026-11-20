@@ -1,5 +1,6 @@
-"""Image Creator. NO LLM: it formats a request, calls the model gateway, stores the image and
-returns its id. It is never given a model, and never learns whether a failover happened.
+"""image-gen-model: a TOOL, not a reasoning agent (config key `image_creator`). NO LLM: it
+formats a request, calls the model gateway, stores the image and returns its id. It is never
+given a model, and never learns whether a failover happened.
 
 inputs:
     prompt:       str   the enhanced prompt (required)
@@ -81,7 +82,7 @@ class CreatorParams(BaseModel):
     thumbnail_quality: int = Field(default=85, ge=1, le=95)
 
 
-class ImageCreator(Agent):
+class ImageGenModel(Agent):
     def __init__(
         self,
         config: AgentConfig,

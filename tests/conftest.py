@@ -6,7 +6,7 @@ os.environ["LANGSMITH_TRACING"] = "false"
 
 import pytest
 
-from media_engine.agents.gate.limiter import review_limiter
+from media_engine.agents.image_grand.limiter import review_limiter
 
 
 @pytest.fixture(autouse=True)

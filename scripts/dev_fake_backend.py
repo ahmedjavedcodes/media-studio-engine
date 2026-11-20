@@ -4,7 +4,8 @@ used against `dev_server.py` with NO .env and NO real model calls (`DEV_FAKE=1`)
 It answers the router, enhancer, critic and lever calls with canned JSON, and draws a placeholder
 image. Words in the prompt pick the outcome:
 
-    "complex"  -> the gate says complex    -> escalate
+    "complex"  -> the gate says complex    -> recorded only: still done (escalate needs an
+                                           explicit stub operation, e.g. "operation": "edit")
     "unsafe"   -> the gate blocks           -> rejected before any image
     "borderline" -> the gate says review, the reviewer allows -> continues
     "reject"   -> the critic blocks         -> rejected

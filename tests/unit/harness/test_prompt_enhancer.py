@@ -10,9 +10,9 @@ import pytest
 from pydantic import ValidationError
 
 from media_engine.agents.base import AgentConfig
-from media_engine.agents.prompt.enhancer import (
+from media_engine.agents.image_generation.create.brief import (
+    Brief,
     EnhancerParams,
-    PromptEnhancer,
     ground_must_have,
     grounded_fraction,
     is_grounded,
@@ -51,11 +51,11 @@ def reply(**overrides: Any) -> str:
     return json.dumps(body)
 
 
-def enhancer(backend: ScriptedChat) -> PromptEnhancer:
+def enhancer(backend: ScriptedChat) -> Brief:
     config = AgentConfig.from_policy(
         "prompt_enhancer", CFG.agent("prompt_enhancer"), EnhancerOutput
     )
-    return PromptEnhancer(config, LLMGateway(backend, chain_resolver(CFG.agents)), ListEventSink())
+    return Brief(config, LLMGateway(backend, chain_resolver(CFG.agents)), ListEventSink())
 
 
 async def run(backend: ScriptedChat, prompt: str = COFFEE, **inputs: Any):  # type: ignore[no-untyped-def]
@@ -293,7 +293,7 @@ def test_bad_params_fail_at_construction() -> None:
     policy = CFG.agent("prompt_enhancer").model_copy(update={"params": {"stem_len": 6}})
     config = AgentConfig.from_policy("prompt_enhancer", policy, EnhancerOutput)
     with pytest.raises(ValidationError):
-        PromptEnhancer(config, None, ListEventSink())
+        Brief(config, None, ListEventSink())
 
 
 # -- the real prompt file ----------------------------------------------------------------------

@@ -84,6 +84,8 @@ class CreateBody(BaseModel):
     mode: Literal["auto", "manual"] = "auto"
     n: int = Field(default=1, ge=1, le=4)
     settings: dict[str, str] = Field(default_factory=dict)
+    # An explicit operation (a button or a slash command); None: inferred, today always create.
+    operation: Literal["create", "edit", "merge", "restyle"] | None = None
 
 
 def to_result(run_id: str, env: Envelope) -> dict[str, Any]:
@@ -134,6 +136,7 @@ async def execute(run_id: str, body: CreateBody, run: Run) -> None:
             artifacts=ARTIFACTS,
             events=Sink(run),
             trace=run.trace,
+            operation=body.operation,
         )
         run.result = to_result(run_id, env)
     except Exception:  # noqa: BLE001 - a dev shim: report any crash as a failed run

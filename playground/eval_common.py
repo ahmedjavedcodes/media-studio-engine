@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from media_engine.agents.base import AgentConfig
-from media_engine.agents.critic.critic import Critic
+from media_engine.agents.image_generation.create.critic import Critic
 from media_engine.contracts import AuthContext, Goal
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.gateway.router import Gateway

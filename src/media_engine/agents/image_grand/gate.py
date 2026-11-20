@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 from media_engine.agents.base import Agent, AgentConfig
-from media_engine.agents.gate.limiter import SlidingWindowLimiter
+from media_engine.agents.image_grand.limiter import SlidingWindowLimiter
 from media_engine.contracts import AuthContext, Envelope, Goal, Spend, Status, StoppingCondition
 from media_engine.core.logging import get_logger
 from media_engine.core.prompts import PROMPTS_DIR, load_prompt, render, tag_stripper
@@ -28,8 +28,8 @@ from media_engine.gateway.llm_gateway import LLMGateway
 from media_engine.ports.event_sink import EventSink
 from media_engine.schemas import GateDecision, SafetyReview
 
-GATE_INPUT = PROMPTS_DIR / "image_create" / "gate.input.md"
-REVIEW_INPUT = PROMPTS_DIR / "image_create" / "safety_review.input.md"
+GATE_INPUT = PROMPTS_DIR / "gate" / "gate.input.md"
+REVIEW_INPUT = PROMPTS_DIR / "gate" / "safety_review.input.md"
 GATE_SUMMARY = "Checked the request."
 REVIEW_SUMMARY = "Reviewed the request."
 _TAG = tag_stripper("user_request", "concerns", "settings")
