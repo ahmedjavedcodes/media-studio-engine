@@ -1,6 +1,8 @@
 # Per-agent model policy for the image-creation harness.
 # `models` maps each plan tier to a gateway chain name (gateway/chains.yaml). The chain, not the
-# agent, decides the provider and the fallback order. Prompt paths are relative to media_engine/prompts/.
+# agent, decides the provider and the fallback order. Each agent's chain starts on a different
+# Groq model (router: fast_llm, prompt_enhancer: reasoning, critic: vision) so they never share
+# Groq's per-model rate limits. Prompt paths are relative to media_engine/prompts/.
 
 router: # complexity router: small, fast, one structured call
   prompt: image_create/router.md
@@ -18,7 +20,9 @@ prompt_enhancer:
     grounding_min_fraction: 0.5
     stem_len: 6 # compare words by this many leading letters, after stripping -s/-ed/-ing
     min_word_len: 3 # shorter Latin-script words are ignored (CJK characters always count)
-  models: {free: fast_llm, pro: fast_llm, max: reasoning, ultra: reasoning}
+  # reasoning on every plan: its Groq model (gpt-oss-120b) differs from the router's
+  # (fast_llm, gpt-oss-20b), and Groq limits are per model, so the two never share a quota.
+  models: {free: reasoning, pro: reasoning, max: reasoning, ultra: reasoning}
 
 critic:
   prompt: image_create/critic.md

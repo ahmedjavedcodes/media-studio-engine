@@ -106,14 +106,33 @@ def orphan_reasons(store: LocalArtifactStore) -> dict[str, str]:
     return {row["image_id"]: row["reason"] for row in rows}
 
 
+# Each agent's system prompt opens with its role ("You are the prompt enhancer for ..."). Calls
+# are counted per AGENT by that opening, not per chain: the enhancer and the lever picker share
+# the `reasoning` chain, so counting by chain would merge them.
+_ROLE_OPENINGS = {
+    "You are the prompt enhancer": "prompt_enhancer",
+    "You are the reviewer": "critic",
+    "You are the retry planner": "image_grand_agent",
+    "You are the request classifier": "router",
+}
+
+
+def _agent_of(request: Any) -> str:
+    system = request.messages[0]["content"]
+    for opening, agent in _ROLE_OPENINGS.items():
+        if system.startswith(opening):
+            return agent
+    raise AssertionError(f"unrecognised system prompt: {system[:60]!r}")
+
+
 def chains(llm: ScriptedChat) -> Counter[str]:
-    return Counter(task for task, _ in llm.requests)
+    """LLM calls per agent."""
+    return Counter(_agent_of(request) for _, request in llm.requests)
 
 
-# the chain each LLM caller uses on the free plan
-ENHANCER = CFG.agent("prompt_enhancer").chain_for("free")
-CRITIC = CFG.agent("critic").chain_for("free")
-LEVER_CHAIN = CFG.agent("image_grand_agent").chain_for("free")
+ENHANCER = "prompt_enhancer"
+CRITIC = "critic"
+LEVER_CHAIN = "image_grand_agent"
 
 
 # -- the cap, per plan --------------------------------------------------------------------------
@@ -521,8 +540,7 @@ async def test_a_block_on_the_first_attempt_is_rejected_with_no_retry(store, sco
     assert env.output["image_ids"] == []
     assert len(images.requests) == 1
     assert env.state.spend.retries_used == 0
-    ultra_enhancer = CFG.agent("prompt_enhancer").chain_for("ultra")
-    assert chains(llm) == {ultra_enhancer: 1, CRITIC: 1}  # and no supervisor call
+    assert chains(llm) == {ENHANCER: 1, CRITIC: 1}  # and no supervisor call
 
 
 async def test_a_block_on_a_retry_rejects_the_run_and_returns_no_image_at_all(store):

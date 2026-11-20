@@ -41,6 +41,7 @@ CF_FLUX2 = "@cf/black-forest-labs/flux-2-klein-4b"
 CF_VISION_SCOUT = "@cf/meta/llama-4-scout-17b-16e-instruct"
 CF_VISION_GEMMA = "@cf/google/gemma-3-12b-it"
 GROQ_LLM = "openai/gpt-oss-20b"
+GROQ_VISION = "qwen/qwen3.8-27b"
 OR_IMG = "google/gemini-2.5-flash-image"
 
 
@@ -181,6 +182,38 @@ async def main() -> None:
             )
             return f"reply={r.text.strip()[:40]!r} usage={r.usage}"
 
+        async def groq_vision() -> str:
+            # Same request shape as the Critic: a 1024 px image downscaled to a 768 px JPEG
+            # (critic params), a data URL in an OpenAI-style image_url part, JSON mode, and no
+            # reasoning_effort (the critic sets none). A red disc on blue: unambiguous answer.
+            from PIL import Image, ImageDraw
+
+            from media_engine.core.images import data_url, downscale
+
+            canvas = Image.new("RGB", (1024, 1024), (30, 60, 200))
+            ImageDraw.Draw(canvas).ellipse((256, 256, 768, 768), fill=(220, 20, 20))
+            buf = io.BytesIO()
+            canvas.save(buf, format="PNG")
+            review, mime = downscale(buf.getvalue(), 768, 90)
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Describe this image. Reply with JSON only: "
+                            '{"shape": "<one word>", "shape_colour": "<one word>", '
+                            '"background_colour": "<one word>"}',
+                        },
+                        {"type": "image_url", "image_url": {"url": data_url(review, mime)}},
+                    ],
+                }
+            ]
+            r = await groq.chat(
+                GROQ_VISION, LLMRequest(messages=messages, max_tokens=256, json_mode=True)
+            )
+            return f"sent={mime} {len(review)}B reply={r.text.strip()[:100]!r} usage={r.usage}"
+
         async def or_image() -> str:
             # Tiny on purpose: n=1, 1:1, simple prompt (gemini-2.5-flash-image has no resolution
             # parameter and a fixed output size). Costs real money.
@@ -213,6 +246,7 @@ async def main() -> None:
             ),
             Check("cf-seed", "cloudflare image seed", cf, CF_IMG, cf_seed),
             Check("groq-llm", "groq LLM", groq, GROQ_LLM, groq_chat),
+            Check("groq-vision", "groq vision (critic)", groq, GROQ_VISION, groq_vision),
             Check("openrouter-image", "openrouter image (PAID)", orr, OR_IMG, or_image, paid=True),
         ]
         if args.list:

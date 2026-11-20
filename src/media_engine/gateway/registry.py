@@ -39,6 +39,7 @@ class ModelCard:
     max_side: int | None = None
     max_steps: int | None = None
     reasoning: bool = False
+    vision: bool = False  # LLM accepts image input (OpenAI-style image_url parts)
     gpt_oss: bool = False  # GPT-OSS uses include_reasoning, not reasoning_format
     neuron_pricing: NeuronPricing | None = None  # image models; LLMs report actual neurons
     # Image models: does the same seed reproduce the same image? None = not verified. Check with
@@ -61,10 +62,15 @@ def _img(provider: str, model: str, **kw: object) -> ModelCard:
 _CARDS: list[ModelCard] = [
     _llm("cloudflare", "@cf/openai/gpt-oss-120b", reasoning=True, gpt_oss=True),
     _llm("cloudflare", "@cf/openai/gpt-oss-20b", reasoning=True, gpt_oss=True),
+    # vision: served the critic in the measured baseline run (IMAGE-CREATE-OPTIMIZE §2)
+    _llm("cloudflare", "@cf/meta/llama-4-scout-17b-16e-instruct", vision=True),
+    _llm("cloudflare", "@cf/google/gemma-3-12b-it", vision=True),  # vision UNVERIFIED
     _llm("groq", "openai/gpt-oss-120b", reasoning=True, gpt_oss=True),
     _llm("groq", "openai/gpt-oss-20b", reasoning=True, gpt_oss=True),
     _llm("groq", "openai/gpt-oss-safeguard-20b", reasoning=True, gpt_oss=True),
-    _llm("groq", "qwen/qwen3.8-27b", reasoning=True),
+    # vision VERIFIED 2026-11-20 with the critic's request shape (playground/smoke_test.py
+    # --only groq-vision): a 768 px JPEG cost ~1,330 prompt tokens.
+    _llm("groq", "qwen/qwen3.8-27b", reasoning=True, vision=True),
     _img(
         "cloudflare",
         "@cf/black-forest-labs/flux-1-schnell",

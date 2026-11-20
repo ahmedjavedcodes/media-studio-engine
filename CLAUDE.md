@@ -10,7 +10,10 @@ All API keys are in `.env`. Never print, log or commit them. `.env` must stay in
 
 ## Model provider strategy
 
-Rule: Cloudflare Workers AI is the first choice for EVERY task (agent LLMs and images) during the build phase. When its daily limit runs out, fall back to Groq (free, LLMs only), then to paid providers. Agent code must never call a provider directly. Every model call goes through `gateway/`, which picks the provider from a fallback chain.
+Rule: **Groq first for agents, Cloudflare first for free-tier images.** Cloudflare's 10,000 neurons/day is ONE pool shared by LLM and image calls, so every agent call on Cloudflare spends image budget (measured: agents took 58% of the pool on a 4-image run). Agent LLMs therefore run on Groq's free tier, with Cloudflare kept in each agent chain as the fallback; free-tier images run on Cloudflare `flux-1-schnell`. Paid providers come last and only when `ALLOW_PAID` is on. Agent code must never call a provider directly. Every model call goes through `gateway/`, which picks the provider from a fallback chain.
+
+- **One Groq model per agent.** Groq rate limits are per model, so each agent's chain starts on a different Groq model: Gate/router = `gpt-oss-20b` (`fast_llm`), Brief/enhancer = `gpt-oss-120b` (`reasoning`), Critic = `qwen3.8-27b` (`vision`). Never add one agent's Groq model to another agent's chain.
+- **`gpt-oss-safeguard-20b` is never on the hot path.** Groq allows it 3 requests/minute. It lives alone in the `safety_review` chain and is called only when the Gate returns `review`.
 
 ### Providers and .env keys
 
@@ -32,18 +35,24 @@ Rule: Cloudflare Workers AI is the first choice for EVERY task (agent LLMs and i
 ### Fallback chains (`gateway/chains.yaml`, config not code)
 
 ```yaml
-reasoning:        # planner, brief, router, critic
-  - cloudflare/@cf/openai/gpt-oss-120b
+reasoning:        # brief / prompt enhancer, planner
   - groq/openai/gpt-oss-120b
+  - cloudflare/@cf/openai/gpt-oss-120b
   - openrouter/<paid>
-fast_llm:         # prompt agent, small tasks
-  - cloudflare/@cf/openai/gpt-oss-20b
+fast_llm:         # gate / router, small tasks
   - groq/openai/gpt-oss-20b
-  - groq/qwen/qwen3.8-27b
+  - cloudflare/@cf/openai/gpt-oss-20b
   - openrouter/<paid>
+vision:           # critic (image in, JSON out)
+  - groq/qwen/qwen3.8-27b
+  - cloudflare/@cf/meta/llama-4-scout-17b-16e-instruct
+  - cloudflare/@cf/google/gemma-3-12b-it
+  - openrouter/<paid vision>
+safety_review:    # ONLY when the Gate returns `review`; no fallback
+  - groq/openai/gpt-oss-safeguard-20b
 designer:
-  - cloudflare/@cf/openai/gpt-oss-120b
   - groq/openai/gpt-oss-120b
+  - cloudflare/@cf/openai/gpt-oss-120b
   - anthropic/claude
 image_create:
   - cloudflare/@cf/black-forest-labs/flux-1-schnell

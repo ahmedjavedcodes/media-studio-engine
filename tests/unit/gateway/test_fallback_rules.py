@@ -14,7 +14,7 @@ from media_engine.gateway.fallback import AvailabilityState
 from media_engine.gateway.router import Gateway
 from media_engine.gateway.types import ImageRequest, LLMRequest
 
-from .conftest import CF_CHAT, CF_RUN, GROQ_CHAT, NOW, cf_error, chat_ok
+from .conftest import CF_CHAT, CF_FIRST_CHAINS, CF_RUN, GROQ_CHAT, NOW, cf_error, chat_ok
 
 REQ = LLMRequest(messages=[{"role": "user", "content": "hello"}])
 CF_SCHNELL = f"{CF_RUN}/@cf/black-forest-labs/flux-1-schnell"
@@ -64,7 +64,7 @@ async def test_cf_exhaustion_ends_at_utc_midnight(settings, sleeps):
     async def fake_sleep(s: float) -> None:
         sleeps.append(s)
 
-    gw = Gateway(settings, state=state, sleep=fake_sleep)
+    gw = Gateway(settings, chains=CF_FIRST_CHAINS, state=state, sleep=fake_sleep)
     try:
         assert (await gw.chat("reasoning", REQ)).provider == "groq"
         clock["now"] = datetime(2026, 11, 14, 0, 0, 1, tzinfo=UTC)

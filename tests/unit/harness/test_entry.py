@@ -1,7 +1,7 @@
 """M10: router, Grand Agent stub and `create_images()` end to end.
 
 The end-to-end test runs the REAL Gateway over mocked HTTP (respx): router, enhancer and critic
-are three chat calls to the same Cloudflare endpoint, the image is one run call. Acceptance
+are three chat calls to Groq (one model each), the image is one Cloudflare run call. Acceptance
 (spec §13): a first-pass success makes exactly three LLM calls, the supervisor none, and the
 image is a file in the artifact store."""
 
@@ -30,7 +30,7 @@ from media_engine.ports import InMemoryRunStore, ListEventSink, LocalArtifactSto
 from media_engine.schemas import RouteDecision
 from media_engine.services.create import entry
 from media_engine.services.create.entry import aclose_gateway, create_images, get_gateway
-from tests.unit.gateway.conftest import ACCOUNT, CF_CHAT, CF_RUN, NOW, chat_ok
+from tests.unit.gateway.conftest import ACCOUNT, CF_CHAT, CF_RUN, GROQ_CHAT, NOW, chat_ok
 from tests.unit.harness.fakes import ScriptedChat, ScriptedImages, image_bytes
 from tests.unit.harness.test_supervisor import CFG, auth, enhanced, verdict
 
@@ -208,7 +208,8 @@ async def test_closing_the_gateway_when_none_was_built_is_a_no_op():
 
 @respx.mock
 async def test_first_pass_success_makes_exactly_three_llm_calls_and_writes_a_file(store):
-    chat = respx.post(CF_CHAT).mock(
+    cf_chat = respx.post(CF_CHAT)
+    chat = respx.post(GROQ_CHAT).mock(
         side_effect=[
             chat_ok(ROUTE_SIMPLE),  # router
             chat_ok(enhanced()),  # enhancer
@@ -224,7 +225,12 @@ async def test_first_pass_success_makes_exactly_three_llm_calls_and_writes_a_fil
         return None
 
     gateway = Gateway(
-        Settings(_env_file=None, cloudflare_account_id=ACCOUNT, cloudflare_api_token="cf-test"),
+        Settings(
+            _env_file=None,
+            cloudflare_account_id=ACCOUNT,
+            cloudflare_api_token="cf-test",
+            groq_api_key="groq-test",
+        ),
         state=AvailabilityState(now=lambda: NOW),
         sleep=no_sleep,
     )
@@ -240,11 +246,13 @@ async def test_first_pass_success_makes_exactly_three_llm_calls_and_writes_a_fil
     assert chat.call_count == 3  # router, enhancer, critic: exactly three LLM calls
     assert image.call_count == 1
     models = [json.loads(call.request.content)["model"] for call in chat.calls]
+    # Groq first for agents, one Groq model per agent (Groq limits are per model)
     assert models == [
-        "@cf/openai/gpt-oss-20b",  # router (fast_llm)
-        "@cf/openai/gpt-oss-20b",  # enhancer (fast_llm on free)
-        "@cf/meta/llama-4-scout-17b-16e-instruct",  # critic (vision)
+        "openai/gpt-oss-20b",  # router (fast_llm)
+        "openai/gpt-oss-120b",  # enhancer (reasoning)
+        "qwen/qwen3.8-27b",  # critic (vision)
     ]
+    assert cf_chat.call_count == 0  # Cloudflare's neuron pool is left for images
     assert env.state.spend.llm_calls == 3
 
     state = await run_store.load(env.output["run_id"])

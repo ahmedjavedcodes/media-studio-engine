@@ -1,29 +1,43 @@
 # Fallback chains: "<provider>/<model>", tried in order. Config, not code.
-# Cloudflare first for everything during the build phase, then Groq (LLMs only), then paid.
+# Groq first for agents, Cloudflare first for free-tier images (IMAGE-CREATE-OPTIMIZE v2.1).
+# Cloudflare's 10,000 neurons/day is ONE pool shared by LLM and image calls, so every agent
+# call on Cloudflare spends image budget. Agents run on Groq's free tier; Cloudflare stays in
+# each agent chain as the fallback.
+# Groq rate limits are PER MODEL, so each agent chain starts on a different Groq model:
+#   fast_llm (router / gate) = gpt-oss-20b, reasoning (enhancer / brief) = gpt-oss-120b,
+#   vision (critic) = qwen3.8-27b. Do not add one agent's Groq model to another agent's chain:
+#   it would share that agent's quota.
 # OpenRouter models are dev defaults (config only, easy to change). Entries like <paid> are
 # placeholders: the router skips them. Verify IDs with playground/sync_openrouter_models.py.
 
-reasoning: # planner, brief, router, critic
-  - cloudflare/@cf/openai/gpt-oss-120b
+reasoning: # enhancer / brief (and the image_grand_agent lever picker, until it is removed)
   - groq/openai/gpt-oss-120b
+  - cloudflare/@cf/openai/gpt-oss-120b
   - openrouter/openai/gpt-oss-120b
 
-# critic (image in, structured JSON out). Model IDs UNVERIFIED: confirm with a free smoke call
-# before M5. Paid slot is a placeholder, so the router skips it.
+# critic (image in, structured JSON out). groq/qwen/qwen3.8-27b verified 2026-11-20 with the
+# critic's request shape (768 px JPEG data URL, JSON mode): playground/smoke_test.py
+# --only groq-vision. Cloudflare model IDs still UNVERIFIED. Paid slot is a placeholder.
 vision:
+  - groq/qwen/qwen3.8-27b
   - cloudflare/@cf/meta/llama-4-scout-17b-16e-instruct
   - cloudflare/@cf/google/gemma-3-12b-it
   - openrouter/<paid vision>
 
-fast_llm: # prompt agent, small tasks
-  - cloudflare/@cf/openai/gpt-oss-20b
+fast_llm: # router / gate, small tasks
   - groq/openai/gpt-oss-20b
-  - groq/qwen/qwen3.8-27b
+  - cloudflare/@cf/openai/gpt-oss-20b
   - openrouter/openai/gpt-oss-120b
 
+# Safety-policy review. ONLY when the Gate returns `review`, never on the hot path: Groq allows
+# gpt-oss-safeguard-20b 3 requests/minute. No fallback on purpose: a review that cannot run
+# must not be silently answered by a general model.
+safety_review:
+  - groq/openai/gpt-oss-safeguard-20b
+
 designer:
-  - cloudflare/@cf/openai/gpt-oss-120b
   - groq/openai/gpt-oss-120b
+  - cloudflare/@cf/openai/gpt-oss-120b
   - anthropic/claude
 
 image_create:

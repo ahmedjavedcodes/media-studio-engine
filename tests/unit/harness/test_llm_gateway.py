@@ -13,6 +13,7 @@ from media_engine.gateway.errors import AllProvidersFailed
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver, token_counts
 from media_engine.gateway.router import Gateway
 from media_engine.services.create.loader import load_create_config
+from tests.unit.gateway.conftest import CF_FIRST_CHAINS
 from tests.unit.harness.fakes import ScriptedChat
 
 ACCOUNT = "acct123"
@@ -29,7 +30,7 @@ async def test_chain_follows_agents_yaml_per_plan() -> None:
     backend = ScriptedChat(["{}", "{}", "{}"])
     llm = LLMGateway(backend, chain_resolver(cfg.agents))
 
-    await llm.complete("prompt_enhancer", auth("free"), [{"role": "user", "content": "x"}])
+    await llm.complete("router", auth("free"), [{"role": "user", "content": "x"}])
     await llm.complete("prompt_enhancer", auth("max"), [{"role": "user", "content": "x"}])
     await llm.complete("critic", auth("pro"), [{"role": "user", "content": "x"}])
 
@@ -83,7 +84,7 @@ async def test_through_real_gateway_reports_tokens_and_neurons() -> None:
             },
         )
     )
-    gw = Gateway(_settings())
+    gw = Gateway(_settings(), chains=CF_FIRST_CHAINS)  # Cloudflare first: it reports neurons
     try:
         llm = LLMGateway(gw, chain_resolver(load_create_config().agents))
         out = await llm.complete("router", auth("free"), [{"role": "user", "content": "x"}])
