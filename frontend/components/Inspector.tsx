@@ -6,7 +6,8 @@ import { ms, num, since, usd } from "@/lib/format";
 
 /**
  * Developer inspector. Everything about a run: steps, every model call and which model served
- * it, tokens, reasoning, retries, budget and decisions. It reads GET /runs/:id/trace, a channel
+ * it, tokens, reasoning, Critic re-asks, budget and decisions. Create is linear (v2.2): there
+ * are no retries or levers to show. It reads GET /runs/:id/trace, a channel
  * apart from the public events, and is the ONE place internal names and model ids are shown.
  */
 export default function Inspector({ trace, running }: { trace: Trace | null; running: boolean }) {
@@ -69,7 +70,6 @@ function SummaryBar({ trace, running }: { trace: Trace; running: boolean }) {
     ["Tokens", `${num(t.prompt_tokens)} in / ${num(t.completion_tokens)} out / ${num(t.reasoning_tokens)} reasoning / ${num(t.total_tokens)} total`],
     ["Neurons", num(t.neurons, 1)],
     ["USD", usd(t.cost_usd)],
-    ["Retries", `${trace.retries_used} of ${m.retry_cap ?? "?"}`],
     ["Critic re-asks", `${trace.critic_reasks_used} of ${m.critic_reask_cap ?? "?"}`],
   ];
   return (
@@ -112,11 +112,11 @@ function Meter({ label, spent, total, reserve, fmt }: { label: string; spent: nu
         <div
           className="absolute top-[-3px] h-[18px] w-0.5 bg-neutral-900"
           style={{ left: `${(1 - reserve) * 100}%` }}
-          title={`${Math.round(reserve * 100)}% reserve starts here (kept for retries)`}
+          title={`${Math.round(reserve * 100)}% reserve starts here (kept for Critic re-asks)`}
         />
       </div>
       <div className="mt-0.5 text-xs text-neutral-500">
-        marker: where the {Math.round(reserve * 100)}% reserve for retries begins ({fmt(usable)})
+        marker: where the {Math.round(reserve * 100)}% reserve for Critic re-asks begins ({fmt(usable)})
       </div>
     </div>
   );
@@ -290,7 +290,7 @@ function Timeline({ trace }: { trace: Trace }) {
     });
   }
   for (const d of trace.decisions) {
-    const retry = d.step === "supervise" || d.text.includes("reused") || d.text.includes("re-ask");
+    const retry = d.step === "supervise" || d.text.includes("re-ask");
     entries.push({ ts: d.ts, sort: 2, kind: "decision", tone: retry ? "retry" : undefined, text: <span><Badge tone={retry ? "amber" : "gray"}>{d.step}</Badge> {d.text}</span> });
   }
   entries.sort((a, b) => a.ts.localeCompare(b.ts) || a.sort - b.sort);
@@ -306,7 +306,7 @@ function Timeline({ trace }: { trace: Trace }) {
           </li>
         ))}
       </ol>
-      <p className="mt-2 text-xs text-neutral-500">Amber rows are retries and decisions: the lever chosen and why, a fallback, and steps reused (done, no cost).</p>
+      <p className="mt-2 text-xs text-neutral-500">Amber rows are supervisor decisions and Critic re-asks (the same images checked again, no new image).</p>
     </section>
   );
 }
@@ -500,22 +500,18 @@ function ImageDetails({ calls }: { calls: CallRecord[] }) {
 function Attempts({ trace }: { trace: Trace }) {
   return (
     <section className={panel}>
-      <h3 className={h}>Attempts</h3>
+      <h3 className={h}>Images (one per branch)</h3>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[900px] text-xs">
           <thead>
-            <tr>{["Round", "Branch", "Lever", "Seed", "Tier", "Chain offset", "Feedback sent to the Enhancer", "Score", "Verdict", "Critique", "Failure"].map((c) => <th key={c} className={th}>{c}</th>)}</tr>
+            <tr>{["Branch", "Seed", "Tier", "Score", "Verdict", "Critique", "Failure"].map((c) => <th key={c} className={th}>{c}</th>)}</tr>
           </thead>
           <tbody>
             {trace.attempts.map((a, i) => (
               <tr key={i} className="border-t border-neutral-200">
-                <td className={td}>{a.number}</td>
                 <td className={td}>{a.branch}</td>
-                <td className={td}>{a.lever ?? "first"}</td>
                 <td className={td}>{a.seed}</td>
                 <td className={td}>{a.tier}</td>
-                <td className={td}>{a.chain_offset}</td>
-                <td className={`${td} max-w-xs`}>{a.feedback ?? "–"}</td>
                 <td className={td}>{a.quality_score ?? "–"}</td>
                 <td className={td}>{a.verdict ? <Badge tone={a.verdict === "allow" ? "green" : "red"}>{a.verdict}</Badge> : "–"}</td>
                 <td className={`${td} max-w-xs`}>{a.critique ?? "–"}</td>

@@ -29,7 +29,7 @@ async def test_chain_follows_agents_yaml_per_plan() -> None:
     backend = ScriptedChat(["{}", "{}", "{}"])
     llm = LLMGateway(backend, chain_resolver(cfg.agents))
 
-    await llm.complete("router", auth("free"), [{"role": "user", "content": "x"}])
+    await llm.complete("gate", auth("free"), [{"role": "user", "content": "x"}])
     await llm.complete("prompt_enhancer", auth("max"), [{"role": "user", "content": "x"}])
     await llm.complete("critic", auth("pro"), [{"role": "user", "content": "x"}])
 
@@ -40,7 +40,7 @@ async def test_gateway_keeps_no_per_run_state() -> None:
     # Shared across concurrent runs: accounting must travel in the result, not on the gateway.
     llm = LLMGateway(ScriptedChat(["{}"]), chain_resolver(load_create_config().agents))
     before = dict(vars(llm))
-    out = await llm.complete("router", auth("free"), [{"role": "user", "content": "x"}])
+    out = await llm.complete("gate", auth("free"), [{"role": "user", "content": "x"}])
     assert vars(llm) == before
     assert (out.prompt_tokens, out.completion_tokens, out.tokens) == (60, 40, 100)
 
@@ -83,7 +83,7 @@ async def test_through_real_gateway_reports_tokens_and_neurons() -> None:
             },
         )
     )
-    # Production chains: the router's Groq model is rate-limited, so Cloudflare (which reports
+    # Production chains: the gate's Groq model is rate-limited, so Cloudflare (which reports
     # neurons) serves it as the fallback.
     respx.post(GROQ_CHAT).mock(
         return_value=httpx.Response(429, headers={"retry-after": "120"}, json={"error": {}})
@@ -91,7 +91,7 @@ async def test_through_real_gateway_reports_tokens_and_neurons() -> None:
     gw = Gateway(_settings())
     try:
         llm = LLMGateway(gw, chain_resolver(load_create_config().agents))
-        out = await llm.complete("router", auth("free"), [{"role": "user", "content": "x"}])
+        out = await llm.complete("gate", auth("free"), [{"role": "user", "content": "x"}])
     finally:
         await gw.aclose()
     assert out.provider == "cloudflare" and out.is_fallback
@@ -113,7 +113,7 @@ async def test_paid_provider_is_skipped_by_default_even_with_a_key() -> None:
     try:
         llm = LLMGateway(gw, chain_resolver(load_create_config().agents))
         with pytest.raises(AllProvidersFailed) as info:
-            await llm.complete("router", auth("free"), [{"role": "user", "content": "x"}])
+            await llm.complete("gate", auth("free"), [{"role": "user", "content": "x"}])
     finally:
         await gw.aclose()
     assert not paid.called

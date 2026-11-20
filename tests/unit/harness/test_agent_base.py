@@ -6,22 +6,28 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
+from pydantic import BaseModel
 
 from media_engine.agents.base import Agent, AgentConfig, extract_json
 from media_engine.agents.config import AgentPolicy
 from media_engine.contracts import AuthContext, Envelope, Goal, Status, StoppingCondition
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.ports import ListEventSink
-from media_engine.schemas import RouteDecision
 from tests.unit.harness.fakes import AllDown, ScriptedChat, messages_of
 
 AUTH = AuthContext(plan="free", execution_mode="auto", model_demand="balanced")
 GOAL = Goal(task="route", instructions="classify")
 VALID = json.dumps({"route": "simple"})
 INVALID = json.dumps({"route": "medium"})
+
+
+class RouteDecision(BaseModel):
+    """A small structured output for exercising the base agent (any schema would do)."""
+
+    route: Literal["simple", "complex"]
 
 
 class RouterLike(Agent):

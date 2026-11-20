@@ -1,1 +1,0 @@
-The image model's safety filter declined the previous prompt, so no image was made. Rewrite the prompt so that it asks for the same scene in neutral, clearly harmless terms: remove anything graphic, suggestive or violent, name no real people, and say nothing that could be read as a request for unsafe content. Keep everything the user asked for that can be shown safely.

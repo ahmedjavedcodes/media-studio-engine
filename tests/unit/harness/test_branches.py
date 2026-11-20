@@ -15,18 +15,20 @@ from media_engine.gateway.errors import AllProvidersFailed, DeadlineExceeded
 from media_engine.harness.run_state import RunState
 from media_engine.ports import ListEventSink, LocalArtifactStore
 from tests.unit.harness.fakes import RaisingSink, ScriptedChat, ScriptedImages, image_bytes
-from tests.unit.harness.test_retries import (
+from tests.unit.harness.test_linear import (
     CFG,
     CRITIC,
     ENHANCER,
     RecordingStore,
     build,
-    chains,
     create,
     enhanced,
     final_state,
     orphan_reasons,
     verdict,
+)
+from tests.unit.harness.test_linear import (
+    calls_by_agent as chains,
 )
 
 COLORS = ["red", "blue", "green", "yellow", "purple", "orange"]
@@ -235,20 +237,21 @@ async def test_a_branch_that_raises_is_a_failed_branch_not_a_failed_run(store):
     assert len(env.output["image_ids"]) == 2
 
 
-async def test_a_replan_happens_only_when_every_branch_fails(store):
+async def test_every_branch_failing_fails_the_run_with_no_replan(store):
+    # v2.2: create is linear. When every branch fails, nothing is regenerated.
     failing = DeadlineExceeded("image_create", 60.0, [])
-    images = ScriptedImages([failing] * 3 + pics(3))
-    llm = ScriptedChat([enhanced(), *[verdict(9)] * 3])
+    images = ScriptedImages([failing] * 3 + pics(3))  # a replan would take the pics
+    llm = ScriptedChat([enhanced()])
     run_store = RecordingStore()
 
     env = await create(build(llm, images, store, run_store=run_store, cfg=rich()), "free", n=3)
 
     state = final_state(run_store)
-    assert env.state.status is Status.DONE
-    assert len(env.output["image_ids"]) == 3
-    assert (state.retries_used, state.replans_used) == (1, 1)
-    assert [a.lever for a in state.attempts] == [None] * 3 + ["reseed"] * 3
-    assert chains(llm)[ENHANCER] == 1  # the shared enhancement was reused
+    assert env.state.status is Status.FAILED
+    assert env.output["image_ids"] == []
+    assert len(images.requests) == 3  # one per branch, never a second round
+    assert (state.retries_used, state.replans_used) == (0, 0)
+    assert chains(llm) == {ENHANCER: 1}
 
 
 async def test_every_branch_failing_for_a_reason_with_no_retry_fails_the_run(store):

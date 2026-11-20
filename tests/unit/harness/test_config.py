@@ -29,14 +29,15 @@ def test_vision_agents_use_a_vision_chain(cfg) -> None:  # type: ignore[no-untyp
     assert {cfg.agent("critic").chain_for(p) for p in PLANS} == {"vision"}
 
 
-LLM_AGENTS = ("router", "prompt_enhancer", "critic")
+LLM_AGENTS = ("gate", "prompt_enhancer", "critic", "safety_reviewer")
 
 
 def test_agents_run_on_groq_first_with_a_different_model_each(cfg) -> None:  # type: ignore[no-untyped-def]
     # Groq rate limits are per model: one Groq model per agent multiplies the free quota.
     chains = load_chains()
     expected = {
-        "router": "openai/gpt-oss-20b",
+        "gate": "openai/gpt-oss-20b",
+        "safety_reviewer": "openai/gpt-oss-safeguard-20b",
         "prompt_enhancer": "openai/gpt-oss-120b",
         "critic": "qwen/qwen3.8-27b",
     }
@@ -75,15 +76,15 @@ def test_free_images_stay_on_cloudflare_flux_schnell_first() -> None:
 
 def test_safeguard_model_is_off_the_hot_path(cfg) -> None:  # type: ignore[no-untyped-def]
     # Groq allows gpt-oss-safeguard-20b 3 requests/minute: only the Gate's `review` path may use
-    # it, so it lives in its own chain and no agent's chain contains it.
+    # it, so it lives alone in its own chain, used by the safety reviewer and no other agent.
     chains = load_chains()
     safeguard = "openai/gpt-oss-safeguard-20b"
     assert [(r.provider, r.model) for r in chains["safety_review"]] == [("groq", safeguard)]
     for task, refs in chains.items():
         if task != "safety_review":
             assert safeguard not in {r.model for r in refs}, task
-    used = {cfg.agent(n).chain_for(p) for n in cfg.agents for p in PLANS}
-    assert "safety_review" not in used
+    users = {n for n in cfg.agents for p in PLANS if cfg.agent(n).chain_for(p) == "safety_review"}
+    assert users == {"safety_reviewer"}
 
 
 def test_every_vision_chain_model_accepts_images() -> None:
@@ -100,14 +101,17 @@ def test_image_creator_has_no_prompt(cfg) -> None:  # type: ignore[no-untyped-de
         cfg.agent("image_creator").prompt_path()
 
 
-def test_retry_caps_match_spec(cfg) -> None:  # type: ignore[no-untyped-def]
-    assert cfg.policy.max_retries == {"free": 1, "pro": 2, "max": 2, "ultra": 2}
+def test_create_has_no_retry_policy(cfg) -> None:  # type: ignore[no-untyped-def]
+    # v2.2: create is linear. No retry caps, no levers; agents are told not to retry.
+    fields = type(cfg.policy).model_fields
+    assert "max_retries" not in fields and "levers" not in fields
+    for plan in PLANS:
+        assert cfg.policy.stopping_condition("generate", plan, "x").max_retries == 0
+    assert cfg.policy.max_critic_reasks == 2  # the one re-run left: same images, no new spend
 
 
-def test_lever_table_matches_spec(cfg) -> None:  # type: ignore[no-untyped-def]
-    assert cfg.policy.levers_for("free") == ["reseed", "re_enhance"]
-    assert cfg.policy.levers_for("pro") == ["reseed", "re_enhance", "switch_model"]
-    assert cfg.policy.levers_for("max") == ["reseed", "re_enhance", "switch_model", "raise_tier"]
+def test_the_supervisor_makes_no_llm_call(cfg) -> None:  # type: ignore[no-untyped-def]
+    assert cfg.agent("image_grand_agent").prompt is None
 
 
 def test_parallel_cap_and_presets(cfg) -> None:  # type: ignore[no-untyped-def]
@@ -123,7 +127,7 @@ def test_free_plan_has_zero_cost_cap(cfg) -> None:  # type: ignore[no-untyped-de
 def test_missing_plan_is_rejected(tmp_path: Path) -> None:
     src = Path(load_create_config.__defaults__[0])  # type: ignore[index]
     (tmp_path / "agents.yaml").write_text((src / "agents.yaml").read_text())
-    harness = (src / "harness.yaml").read_text().replace(", ultra: 2}", "}", 1)
+    harness = (src / "harness.yaml").read_text().replace(", ultra: 8}", "}", 1)
     (tmp_path / "harness.yaml").write_text(harness)
-    with pytest.raises(ValidationError, match="max_retries"):
+    with pytest.raises(ValidationError, match="quality_threshold"):
         load_create_config(config_dir=tmp_path)

@@ -4,7 +4,9 @@ used against `dev_server.py` with NO .env and NO real model calls (`DEV_FAKE=1`)
 It answers the router, enhancer, critic and lever calls with canned JSON, and draws a placeholder
 image. Words in the prompt pick the outcome:
 
-    "complex"  -> the router says complex  -> escalate
+    "complex"  -> the gate says complex    -> escalate
+    "unsafe"   -> the gate blocks           -> rejected before any image
+    "borderline" -> the gate says review, the reviewer allows -> continues
     "reject"   -> the critic blocks         -> rejected
     "fail"     -> no image provider         -> failed
     "question" -> the enhancer asks "Which city should the street be in?" (use manual mode)
@@ -69,10 +71,17 @@ class FakeBackend:
         prompt = (found.group(1) if found else user).strip()
         low = prompt.lower()
 
-        if "request classifier" in system:
-            reply: dict[str, Any] = {"route": "complex" if "complex" in low else "simple"}
-        elif "retry planner" in system:
-            reply = {"lever": "reseed", "reason": "dev fake"}
+        if "intake and safety classifier" in system:
+            safety = "block" if "unsafe" in low else "review" if "borderline" in low else "allow"
+            reply: dict[str, Any] = {
+                "safety": safety,
+                "safety_categories": ["dev fake"] if safety != "allow" else [],
+                "route": "complex" if "complex" in low else "simple",
+                "task_type": "create",
+                "prompt_is_detailed": False,
+            }
+        elif "safety policy reviewer" in system:
+            reply = {"safety": "allow", "safety_categories": ["dev fake"]}
         elif "reviewer for an image generation studio" in system:
             blocked = "reject" in low
             reply = {

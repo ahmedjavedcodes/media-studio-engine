@@ -3,12 +3,12 @@ from media_engine.schemas.agent_io import (
     CriticOutput,
     EnhancerOutput,
     FailureKind,
+    GateDecision,
     GenerationResult,
     Lever,
-    LeverChoice,
     MissingItem,
     MissingKind,
-    RouteDecision,
+    SafetyReview,
     Verdict,
 )
 
@@ -17,11 +17,11 @@ __all__ = [
     "CriticOutput",
     "EnhancerOutput",
     "FailureKind",
+    "GateDecision",
     "GenerationResult",
     "Lever",
-    "LeverChoice",
     "MissingItem",
     "MissingKind",
-    "RouteDecision",
+    "SafetyReview",
     "Verdict",
 ]

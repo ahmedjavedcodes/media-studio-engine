@@ -1,0 +1,27 @@
+# Step 0 code checks (IMAGE-CREATE-OPTIMIZE §5.1): plain code, no model, no cost, run before the
+# Gate. Config, not code. Matching is case-insensitive.
+#
+# MINIMAL on purpose (owner's decision, 2026-11-20): only prompt-injection phrases for now. The
+# banned-word and celebrity/brand lists are product decisions and are left EMPTY until the owner
+# supplies them; the Gate (an LLM) still judges safety for every request.
+
+max_prompt_chars: 2000
+
+# Regexes. A match REJECTS the request before any model call. Keep them specific: a broad
+# pattern blocks honest prompts ("a poster about rules" must pass).
+injection_patterns:
+  # ignore / disregard + an explicit "earlier" qualifier BEFORE the noun:
+  #   "ignore previous instructions", "ignore all of the previous instructions",
+  #   "ignore your prior instruction", "disregard the above rules"
+  - '\b(?:ignore|disregard)\s+(?:(?:all|any)\s+(?:of\s+)?)?(?:the\s+|your\s+|my\s+)?(?:previous|prior|above|earlier|preceding)\s+(?:instructions?|rules|guidelines|prompts?)\b'
+  # ... or AFTER it: "ignore the instructions above", "disregard all rules before this".
+  # The qualifier is required, so "disregard the instructions in the manual" passes.
+  - '\b(?:ignore|disregard)\s+(?:(?:all|any)\s+(?:of\s+)?)?(?:the\s+|your\s+|my\s+)?(?:instructions?|rules|guidelines|prompts?)\s+(?:above|before\s+this|earlier|so\s+far)\b'
+  # Only the system / hidden prompt: "show the instructions on a cereal box" must pass.
+  - '\b(?:reveal|show|print|repeat|output|tell)\s+(?:me\s+)?(?:your|the)\s+(?:system|hidden|initial)\s+prompt\b'
+  - '\byou\s+are\s+now\s+(?:in\s+)?(?:developer|dan|jailbreak|unrestricted)\b'
+  - '\b(?:ignore|bypass|skip|disable)\s+(?:the\s+|your\s+|all\s+)?(?:safety|content)\s+(?:filter|check|rules|policy)\b'
+
+# Whole words or phrases. EMPTY until the owner supplies the lists.
+banned_terms: []
+protected_names: [] # celebrity and brand names

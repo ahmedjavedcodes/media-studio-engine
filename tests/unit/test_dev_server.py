@@ -113,6 +113,8 @@ def test_the_fake_backend_drives_every_outcome_over_the_contract(shim):
         ({"prompt": "a cozy cafe"}, "done"),
         ({"prompt": "a cozy cafe", "plan": "max", "n": 3}, "done"),
         ({"prompt": "reject this"}, "rejected"),
+        ({"prompt": "something unsafe"}, "rejected"),  # the Gate blocks, before any image
+        ({"prompt": "a borderline battle"}, "done"),  # Gate says review, the reviewer allows
         ({"prompt": "fail this"}, "failed"),
         ({"prompt": "a complex comic"}, "escalate"),
         ({"prompt": "question me", "mode": "manual"}, "needs_input"),
@@ -123,8 +125,9 @@ def test_the_fake_backend_drives_every_outcome_over_the_contract(shim):
             run_id = client.post("/runs", json=body).json()["run_id"]
             (result,) = [d for name, d in sse(client, run_id) if name == "result"]
             assert result["status"] == want, (body, result["status"], result["reason"])
-        # done_with_issues: the retry ran out, so BOTH attempts come back, best first
-        assert len(result["images"]) == 2 and result["issues"]
+        # done_with_issues: create is linear (v2.2), so the one low-scoring image is delivered
+        # with its critique as an issue, and nothing is regenerated
+        assert len(result["images"]) == 1 and result["issues"]
 
         # answering the question re-runs to done
         asked = client.post("/runs", json={"prompt": "question me", "mode": "manual"}).json()
@@ -164,7 +167,7 @@ def test_the_trace_endpoint_serves_the_inspector_data_without_changing_the_publi
         assert client.get("/runs/nope/trace").status_code == 404
 
     assert [c["role"] for c in trace["calls"]] == [
-        "router",
+        "gate",
         "prompt_enhancer",
         "image_creator",
         "critic",
@@ -185,8 +188,8 @@ def test_the_trace_endpoint_serves_the_inspector_data_without_changing_the_publi
 
     # the public channels carry none of it
     public = json.dumps([d for _, d in events])
-    secrets = ("prompt_enhancer", "image_creator", "critic", "router", "provider", "(fake)")
-    for secret in (*secrets, "groq", "cloudflare", "gpt-oss", "qwen", "@cf/"):
+    secrets = ("prompt_enhancer", "image_creator", "critic", "gate", "provider", "(fake)")
+    for secret in (*secrets, "safety_reviewer", "groq", "cloudflare", "gpt-oss", "qwen", "@cf/"):
         assert secret not in public, secret
     # the trace (developer channel) does name the models the fake stood in for
     served = {(c["provider"], c["model"]) for c in trace["calls"]}

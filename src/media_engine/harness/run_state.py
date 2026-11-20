@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from media_engine.contracts import AuthContext, Plan, Spend, Status
 from media_engine.harness.trace import CallRecord, Decision, Orphan
-from media_engine.schemas import Lever, Verdict
+from media_engine.schemas import GateDecision, Lever, Verdict
 
 # The only strings that may reach a user. Internal agent names never appear in events/output.
 PublicLabel = Literal["Understanding your request", "Creating your image", "Finishing up"]
@@ -51,11 +51,14 @@ class AttemptRecord(BaseModel):
 
     number: int  # 1-based: the round (one pass of the graph); all N branches of a round share it
     branch: int = 0  # 0-based image within the round (M8); a single-image run only has 0
-    lever: Lever | None = None  # the lever that started this attempt; None for the first
+    # DEPRECATED (v2.2, create is linear): always None. Kept only for the stored-state contract
+    # with the backend; do not read or write it in new code. Removal is an open owner decision.
+    lever: Lever | None = None
     seed: int
-    tier: Plan  # the chain tier sent to the Image Creator (raise_tier moves it up)
-    chain_offset: int = 0  # leading chain entries skipped (switch_model moves it on)
-    feedback: str | None = None  # what the Enhancer is told about the last attempt (re_enhance)
+    tier: Plan  # the chain tier sent to the Image Creator (the run's plan since v2.2)
+    chain_offset: int = 0  # leading chain entries skipped (always 0 since v2.2)
+    # DEPRECATED (v2.2): always None (it carried re_enhance feedback). Contract only, see `lever`.
+    feedback: str | None = None
 
     image_id: str | None = None  # set once an image was stored
     provider: str | None = None
@@ -125,6 +128,14 @@ class Budget(BaseModel):
         self.neurons_spent += spend.neurons
 
 
+class GateRecord(GateDecision):
+    """The run's input safety verdict, written ONCE before any spend and never re-derived
+    (IMAGE-CREATE-OPTIMIZE §4.1). `safety` is the FINAL verdict: when the Gate said `review`,
+    it is the reviewer's answer, and `reviewed` is True."""
+
+    reviewed: bool = False
+
+
 class RunState(BaseModel):
     run_id: str
     user_id: str
@@ -132,14 +143,19 @@ class RunState(BaseModel):
     auth: AuthContext
     budget: Budget
     plan: list[PlanStep] = Field(default_factory=list)
+    # DEPRECATED (v2.2, create is linear): always 0. Contract only; removal is an owner decision.
     replans_used: int = 0
     attempts: list[AttemptRecord] = Field(default_factory=list)  # one per attempt, oldest first
-    retries_used: int = 0  # levers applied so far; capped per plan (harness.yaml max_retries)
+    # DEPRECATED (v2.2): always 0 (it counted lever retries). Contract only, see replans_used.
+    retries_used: int = 0
     critic_reasks_used: int = 0  # Critic re-asks on the same image (harness.yaml max_critic_reasks)
-    # The supervisor's own LLM calls (the lever choice). Kept apart from the plan so that "the
+    # The supervisor's own LLM calls: always zero since v2.2 (it made the lever choice). Kept
+    # apart from the plan so that "the
     # supervisor made zero LLM calls" can be read straight off RunState; run_spend adds it in.
     supervisor_spend: Spend = Field(default_factory=Spend)
     cancel_requested: bool = False
+    # The Gate's verdict (None only for runs started without the entry point, e.g. in tests).
+    gate: GateRecord | None = None
     cancelled_at_step: int | None = None
     events: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

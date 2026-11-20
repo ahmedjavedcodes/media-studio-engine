@@ -9,8 +9,38 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 MAX_MUST_HAVE = 6  # spec: must_have holds 1..6 items
 
 
-class RouteDecision(BaseModel):
-    route: Literal["simple", "complex"]
+Safety = Literal["allow", "block", "review"]
+Route = Literal["simple", "complex"]
+TaskType = Literal["create", "edit", "merge"]
+MAX_SAFETY_CATEGORIES = 5
+
+
+def _lower(value: Any) -> Any:
+    return value.strip().lower() if isinstance(value, str) else value
+
+
+class GateDecision(BaseModel):
+    """The Gate's verdict (IMAGE-CREATE-OPTIMIZE §4.1). Decided ONCE per run, before any spend,
+    and never re-derived. `block` ends the run; `review` asks the safety reviewer."""
+
+    safety: Safety
+    safety_categories: list[str] = Field(default_factory=list, max_length=MAX_SAFETY_CATEGORIES)
+    route: Route
+    task_type: TaskType = "create"
+    # True when the request already names a subject, a setting and a style or camera note and
+    # is over ~25 words. Recorded now; it will skip the Brief once the Brief exists (§3).
+    prompt_is_detailed: bool = False
+
+    _norm = field_validator("safety", "route", "task_type", mode="before")(_lower)
+
+
+class SafetyReview(BaseModel):
+    """The safety reviewer's answer for a `review` request: allow or block, nothing in between."""
+
+    safety: Literal["allow", "block"]
+    safety_categories: list[str] = Field(default_factory=list, max_length=MAX_SAFETY_CATEGORIES)
+
+    _norm = field_validator("safety", mode="before")(_lower)
 
 
 # Preset-resolvable gaps use their key as `kind`; anything else is a question for the user.
@@ -77,6 +107,7 @@ FailureKind = Literal[
     "content_refused",  # a provider's safety filter declined (may be a false positive)
     "no_provider",  # every chain entry failed or was unavailable
     "deadline",  # the step's deadline ran out
+    "rate_limited",  # refused locally before the call: no slot under a provider's rate limit
     "bad_request",  # HTTP 400: our request is wrong
     "gateway_error",  # any other gateway failure
     "bad_image",  # the provider returned bytes that are not a known image format
@@ -86,22 +117,9 @@ FailureKind = Literal[
 
 Verdict = Literal["allow", "block"]
 
-# What the supervisor may change on a retry (spec §8.2). Which plans may use which lever is
-# config (harness.yaml `levers`).
+# Retry levers. Create no longer retries (IMAGE-CREATE-OPTIMIZE v2.2); the type stays only
+# because RunState's AttemptRecord.lever (always None now) is part of the stored-state contract.
 Lever = Literal["reseed", "re_enhance", "switch_model", "raise_tier"]
-
-
-class LeverChoice(BaseModel):
-    """The supervisor's one lever-choice LLM call (spec §8.2). Only the lever is acted on; the
-    reason is kept for the logs."""
-
-    lever: Lever
-    reason: str = ""
-
-    @field_validator("lever", mode="before")
-    @classmethod
-    def _lever_case(cls, value: Any) -> Any:
-        return value.strip().lower() if isinstance(value, str) else value
 
 
 class GenerationResult(BaseModel):

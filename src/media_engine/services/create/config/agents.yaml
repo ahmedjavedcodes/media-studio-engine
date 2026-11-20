@@ -1,14 +1,21 @@
 # Per-agent model policy for the image-creation harness.
 # `models` maps each plan tier to a gateway chain name (gateway/chains.yaml). The chain, not the
 # agent, decides the provider and the fallback order. Each agent's chain starts on a different
-# Groq model (router: fast_llm, prompt_enhancer: reasoning, critic: vision) so they never share
-# Groq's per-model rate limits. Prompt paths are relative to media_engine/prompts/.
+# Groq model (gate: fast_llm, prompt_enhancer: reasoning, critic: vision, safety_reviewer:
+# safety_review) so they never share Groq's per-model rate limits. Prompt paths are relative to
+# media_engine/prompts/.
 
-router: # complexity router: small, fast, one structured call
-  prompt: image_create/router.md
+gate: # intake + input safety (§4.1): one small structured call before ANY spend; fails closed
+  prompt: image_create/gate.md
   requires: [structured_output]
   reasoning_effort: low
   models: {free: fast_llm, pro: fast_llm, max: fast_llm, ultra: fast_llm}
+
+safety_reviewer: # ONLY when the Gate says `review`. gpt-oss-safeguard-20b: 3 req/min, no fallback
+  prompt: image_create/safety_review.md
+  requires: [structured_output]
+  reasoning_effort: low
+  models: {free: safety_review, pro: safety_review, max: safety_review, ultra: safety_review}
 
 prompt_enhancer:
   prompt: image_create/prompt_enhancer.md
@@ -34,9 +41,8 @@ critic:
     jpeg_quality: 90
   models: {free: vision, pro: vision, max: vision, ultra: vision}
 
-image_grand_agent: # LLM only for choosing a retry lever and deciding escalation
-  prompt: image_create/image_grand_agent.md
-  requires: [structured_output]
+image_grand_agent: # the supervisor: makes NO LLM call (create is linear, v2.2), so the chain is never used
+  requires: []
   models: {free: reasoning, pro: reasoning, max: reasoning, ultra: reasoning}
 
 image_creator: # no LLM: formats a request and calls the image gateway

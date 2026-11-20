@@ -13,7 +13,6 @@ from media_engine.agents.config import PLANS, AgentPolicy
 from media_engine.agents.config import require_all_plans as _all_plans
 from media_engine.contracts import Plan, StoppingCondition
 from media_engine.harness.run_state import Budget
-from media_engine.schemas import Lever
 
 CONFIG_DIR = Path(__file__).with_name("config")
 PRESETS_PATH = Path(__file__).parents[2] / "presets" / "library" / "image_create.yaml"
@@ -24,7 +23,6 @@ __all__ = [
     "PLANS",
     "AgentPolicy",
     "CreateConfig",
-    "Lever",
     "get_create_config",
     "load_create_config",
 ]
@@ -54,11 +52,20 @@ class StepEstimate(_Strict):
         return self
 
 
+class SafetyReviewPolicy(_Strict):
+    """The safeguard model's rate limit, applied per process before any review call."""
+
+    max_per_period: int = Field(gt=0)
+    period_s: float = Field(gt=0)
+    wait_s: float = Field(ge=0)  # how long a review waits for a free slot before giving up
+
+
 class HarnessPolicy(_Strict):
+    # Below this the delivery carries the critique as an issue. Information only: create never
+    # regenerates on a low score (v2.2), the user picks from every image.
     quality_threshold: dict[Plan, int]
-    max_retries: dict[Plan, int]
-    max_critic_reasks: int = Field(ge=0)  # re-asks of the Critic on the SAME image, per run
-    levers: dict[Lever, list[Plan]]
+    max_critic_reasks: int = Field(ge=0)  # re-asks of the Critic on the SAME images, per run
+    safety_review: SafetyReviewPolicy
     negative_prompt: str
     max_parallel_branches: int = Field(gt=0)
     max_images_per_request: int = Field(gt=0)
@@ -72,7 +79,6 @@ class HarnessPolicy(_Strict):
     @model_validator(mode="after")
     def _complete(self) -> HarnessPolicy:
         _all_plans(self.quality_threshold, "quality_threshold")
-        _all_plans(self.max_retries, "max_retries")
         _all_plans(self.budgets, "budgets")
         for name, table in (
             ("step_estimates", self.step_estimates),
@@ -81,13 +87,7 @@ class HarnessPolicy(_Strict):
             missing = [s for s in get_args(StepKind) if s not in table]
             if missing:
                 raise ValueError(f"{name} is missing step(s): {missing}")
-        missing_levers = [lv for lv in get_args(Lever) if lv not in self.levers]
-        if missing_levers:
-            raise ValueError(f"levers is missing: {missing_levers}")
         return self
-
-    def levers_for(self, plan: Plan) -> list[Lever]:
-        return [lever for lever, plans in self.levers.items() if plan in plans]
 
     def budget_for(self, plan: Plan) -> Budget:
         return Budget(**self.budgets[plan].model_dump())
@@ -98,7 +98,7 @@ class HarnessPolicy(_Strict):
             success=success,
             max_tokens=estimate.tokens,
             max_completion_tokens=estimate.completion_tokens,
-            max_retries=self.max_retries[plan],
+            max_retries=0,  # create is linear (v2.2): no step is retried
             deadline_ms=self.deadlines_ms[kind],
         )
 

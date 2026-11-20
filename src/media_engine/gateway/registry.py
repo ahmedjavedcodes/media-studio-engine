@@ -86,6 +86,9 @@ _CARDS: list[ModelCard] = [
         api_format="multipart",
         supports_edit=True,
         supports_merge=True,
+        # VERIFIED 2026-11-20 (playground/smoke_test.py --only cf-klein-seed): the seed is
+        # accepted but NOT honoured: same prompt + seed 42 twice gave different pixels.
+        honours_seed=False,
         neuron_pricing=NeuronPricing(per_out_tile=26.05, per_in_tile=5.37),
     ),
     _img(

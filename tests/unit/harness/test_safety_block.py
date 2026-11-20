@@ -136,8 +136,8 @@ def enhancer_ok() -> str:
 
 @pytest.mark.parametrize("plan", PLANS)
 @pytest.mark.parametrize("score", SCORES)
-async def test_run_ends_rejected_on_block_with_retries_left(store, plan, score):
-    assert CFG.policy.max_retries[plan] >= 1  # retries are available, and must not be used
+async def test_run_ends_rejected_on_block_with_no_further_call(store, plan, score):
+    # create never regenerates (v2.2); a block must also never lead to any further call
 
     llm = ScriptedChat([enhancer_ok(), block(score)])  # an extra LLM call raises
     images = ScriptedImages([image_bytes()])  # an extra (retry) image call raises

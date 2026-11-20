@@ -176,6 +176,23 @@ async def main() -> None:
             same = digests[0] == digests[1]
             return f"seed=42 x2 pixels_identical={same} sha={digests[0][:12]},{digests[1][:12]}"
 
+        async def cf_klein_seed() -> str:
+            # D1: does the same seed reproduce the same image on a seed-capable FREE model?
+            # Two calls, same prompt + seed, 512x512 (one tile, ~26 neurons each). Pixels are
+            # compared, not file bytes, so encoder metadata cannot hide or fake a match.
+            from PIL import Image
+
+            req = ImageRequest(
+                prompt="a red apple on a white table", width=512, height=512, seed=42
+            )
+            digests = []
+            for _ in range(2):
+                r = await cf.generate_image(CF_FLUX2, req)
+                with Image.open(io.BytesIO(r.images[0])) as img:
+                    digests.append(hashlib.sha256(img.convert("RGB").tobytes()).hexdigest())
+            same = digests[0] == digests[1]
+            return f"seed=42 x2 pixels_identical={same} sha={digests[0][:12]},{digests[1][:12]}"
+
         async def groq_chat() -> str:
             r = await groq.chat(
                 GROQ_LLM, LLMRequest(messages=PROMPT, max_tokens=64, reasoning_effort="low")
@@ -245,6 +262,7 @@ async def main() -> None:
                 vision_check(CF_VISION_GEMMA),
             ),
             Check("cf-seed", "cloudflare image seed", cf, CF_IMG, cf_seed),
+            Check("cf-klein-seed", "cloudflare FLUX.2 seed", cf, CF_FLUX2, cf_klein_seed),
             Check("groq-llm", "groq LLM", groq, GROQ_LLM, groq_chat),
             Check("groq-vision", "groq vision (critic)", groq, GROQ_VISION, groq_vision),
             Check("openrouter-image", "openrouter image (PAID)", orr, OR_IMG, or_image, paid=True),

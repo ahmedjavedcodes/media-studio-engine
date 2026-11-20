@@ -149,6 +149,11 @@ class Trace:
         self._orphans: list[Orphan] = []
         self._seq = 0
         self._dseq = 0
+        # The trace's own clock, so a run that never gets a RunState (escalate) still has an
+        # overall time and a final status, and the router (which runs first) is inside it.
+        self.started_at = datetime.now(UTC)
+        self.ended_at: datetime | None = None
+        self.final_status: str | None = None
 
     # -- writing ----------------------------------------------------------------------------
 
@@ -180,6 +185,11 @@ class Trace:
         self.orphans.append(Orphan(image_id=image_id, reason=reason, ts=now()))
         self.decide("settle", f"image {image_id} orphaned: {reason}")
 
+    def finish(self, status: str) -> None:
+        """The run is over (called by `create_images`, also for a run with no RunState)."""
+        self.final_status = status
+        self.ended_at = datetime.now(UTC)
+
     def bind(self, state: RunState) -> None:
         """Attach the RunState: what was buffered (the router) moves in, and from now on records
         go straight into the state, so it round-trips through JSON with them."""
@@ -207,6 +217,7 @@ class Trace:
             "cost_usd": sum(c.cost_usd for c in self.calls),
         }
         state = self.state
+        ended = (state.finished_at if state is not None else None) or self.ended_at
         out: dict[str, Any] = {
             "calls": calls,
             "decisions": [d.model_dump(mode="json") for d in self.decisions],
@@ -219,13 +230,13 @@ class Trace:
             "supervisor_spend": None,
             "retries_used": 0,
             "critic_reasks_used": 0,
-            "status": "running",
-            "created_at": None,
-            "finished_at": None,
-            "wall_ms": None,
+            "status": self.final_status or "running",
+            # Overall time runs from the trace's start (before the router call), to the end.
+            "created_at": self.started_at.isoformat(),
+            "finished_at": ended.isoformat() if ended else None,
+            "wall_ms": int(((ended or datetime.now(UTC)) - self.started_at).total_seconds() * 1000),
         }
         if state is not None:
-            end = state.finished_at or datetime.now(UTC)
             out.update(
                 steps=[s.model_dump(mode="json") for s in state.plan],
                 attempts=[a.model_dump(mode="json") for a in state.attempts],
@@ -233,10 +244,7 @@ class Trace:
                 supervisor_spend=state.supervisor_spend.model_dump(mode="json"),
                 retries_used=state.retries_used,
                 critic_reasks_used=state.critic_reasks_used,
-                status=str(getattr(state.status, "value", state.status)),
-                created_at=state.created_at.isoformat(),
-                finished_at=state.finished_at.isoformat() if state.finished_at else None,
-                wall_ms=int((end - state.created_at).total_seconds() * 1000),
+                status=self.final_status or str(getattr(state.status, "value", state.status)),
             )
         return out
 

@@ -25,14 +25,9 @@ GOAL = Goal(task="create", instructions="Create the image the user asked for.")
 PROMPT = "a cozy coffee shop"
 AGENT_NAMES = ("prompt_enhancer", "image_creator", "critic", "image_grand_agent")
 SEED = 1234
-# M6 behaviour: one attempt. The retry tests live in test_retries.py.
-NO_RETRIES = CFG.model_copy(
-    update={
-        "policy": CFG.policy.model_copy(
-            update={"max_retries": dict.fromkeys(CFG.policy.max_retries, 0)}
-        )
-    }
-)
+# Create is linear (IMAGE-CREATE-OPTIMIZE v2.2): one attempt, always. Kept as a name so the
+# tests below read the same; it is simply the production config now.
+NO_RETRIES = CFG
 
 
 def auth(plan: str = "free", mode: str = "auto") -> AuthContext:
@@ -156,6 +151,7 @@ async def test_happy_path_envelope(store):
         "text_wanted": ["OPEN"],  # handed on for the separate text layer
         "width": 1024,
         "height": 1024,
+        "billable": True,  # an image was generated
     }
     assert env.summary == "A warm coffee shop interior at dusk."  # the Critic's summary
     assert await store.orphaned() == []

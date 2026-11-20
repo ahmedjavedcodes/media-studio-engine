@@ -22,14 +22,13 @@ from media_engine.services.create.entry import create_images
 from tests.unit.harness.fakes import ScriptedChat, ScriptedImages, image_bytes
 from tests.unit.harness.test_branches import FlagStore, HangingImages, fast_poll, run
 from tests.unit.harness.test_entry import ROUTE_SIMPLE, Backend
-from tests.unit.harness.test_retries import (
+from tests.unit.harness.test_linear import (
     CFG,
     RecordingStore,
     build,
     create,
     enhanced,
     final_state,
-    lever,
     red,
     verdict,
 )
@@ -221,51 +220,25 @@ async def test_reasoning_tokens_are_reported_when_the_provider_sends_them(store)
     assert final_state(run_store).calls[0].reasoning_tokens == 64
 
 
-# -- the supervisor's own call stays separate and countable -----------------------------------
-
-
-async def test_the_lever_call_is_its_own_step_and_matches_supervisor_spend(store):
-    run_store = RecordingStore()
-    llm = ScriptedChat([enhanced(), verdict(3), lever("reseed"), verdict(9)])
-
-    await create(build(llm, ScriptedImages([red(), red()]), store, run_store=run_store), "free")
-
-    state = final_state(run_store)
-    supervise = [c for c in state.calls if c.step == "supervise"]
-    assert [c.role for c in supervise] == ["image_grand_agent"]
-    assert len(supervise) == state.supervisor_spend.llm_calls == 1
-    step_llm = [c for c in state.calls if c.kind == "llm" and c.step != "supervise"]
-    assert len(step_llm) == sum(s.spend.llm_calls for s in state.plan)
-    assert [c.attempt for c in state.calls if c.step == "generate"] == [1, 2]
-
-
 # -- decisions, timing, orphans ---------------------------------------------------------------
 
 
-async def test_decisions_cover_guards_enhancement_lever_cap_ranking_and_orphans(store):
+async def test_decisions_cover_guards_enhancement_reasks_and_ranking(store):
     run_store = RecordingStore()
-    llm = ScriptedChat([enhanced(), verdict(3), lever("reseed"), verdict(9)])
+    llm = ScriptedChat([enhanced(), "junk", "junk", verdict(9)])
 
-    await create(build(llm, ScriptedImages([red(), red()]), store, run_store=run_store), "free")
+    await create(build(llm, ScriptedImages([red()]), store, run_store=run_store), "free")
 
-    text = "\n".join(f"{d.step}: {d.text}" for d in final_state(run_store).decisions)
+    state = final_state(run_store)
+    text = "\n".join(f"{d.step}: {d.text}" for d in state.decisions)
     assert "guard before generate [step]: cancel not requested; budget ok: needs" in text
     assert "guard before generate [branch 0]:" in text
     assert "resolved prompt:" in text and "must_have:" in text
-    assert "lever chosen: reseed" in text and "why: because" in text
-    assert "retries 1 of 1" in text and "critic re-asks 0 of" in text
-    assert "step reused from an earlier attempt" in text  # the enhancement was not redone
+    assert "critic re-ask: the same images are checked again" in text
+    assert "critic re-asks 1 of" in text
+    assert "passed through at no cost" in text  # enhance and generate were not redone
     assert "ranking (best first):" in text and "score 9" in text
-    assert "orphaned: superseded" in text
-
-
-async def test_a_lever_fallback_is_a_decision(store):
-    run_store = RecordingStore()
-    llm = ScriptedChat([enhanced(), verdict(3), "junk", "junk", verdict(9)])
-
-    await create(build(llm, ScriptedImages([red(), red()]), store, run_store=run_store), "free")
-
-    assert any("lever FALLBACK: reseed" in d.text for d in final_state(run_store).decisions)
+    assert state.supervisor_spend.llm_calls == 0  # the supervisor makes no call of its own
 
 
 async def test_steps_and_the_run_are_timed(store):
@@ -314,7 +287,7 @@ async def test_the_snapshot_has_everything_the_inspector_shows(store):
         "wall_ms",
     } <= set(snap)
     assert snap["totals"]["llm_calls"] == 2 and snap["totals"]["image_calls"] == 1
-    assert snap["meta"]["retry_cap"] == CFG.policy.max_retries["free"]
+    assert snap["meta"]["critic_reask_cap"] == CFG.policy.max_critic_reasks
     assert snap["budget"]["reserve_fraction"] == CFG.policy.budgets["free"].reserve_fraction
     json.dumps(snap)  # JSON-safe
 
@@ -361,7 +334,7 @@ async def test_the_envelope_and_events_never_carry_model_ids_or_agent_names(stor
 # -- the router is call 1, through create_images ----------------------------------------------
 
 
-async def test_the_router_is_seq_1_and_the_route_is_a_decision(store):
+async def test_the_gate_is_seq_1_and_its_verdict_is_a_decision(store):
     run_store = InMemoryRunStore()
     trace = Trace()
     llm = ScriptedChat([ROUTE_SIMPLE, enhanced(), verdict(9)])
@@ -377,20 +350,74 @@ async def test_the_router_is_seq_1_and_the_route_is_a_decision(store):
     state = await run_store.load(env.output["run_id"])
     assert isinstance(state, RunState)
     assert [(c.seq, c.step, c.role) for c in state.calls] == [
-        (1, "route", "router"),
+        (1, "route", "gate"),
         (2, "enhance", "prompt_enhancer"),
         (3, "generate", "image_creator"),
         (4, "critique", "critic"),
     ]
-    assert state.decisions[0].step == "route" and "route = simple" in state.decisions[0].text
+    first = state.decisions[0]
+    assert (
+        first.step == "route" and "safety = allow" in first.text and "route = simple" in first.text
+    )
+    assert state.gate is not None and state.gate.safety == "allow"  # recorded once on RunState
     assert RunState.model_validate_json(state.model_dump_json()).calls == state.calls  # round trip
-    assert trace.snapshot()["totals"]["llm_calls"] == 3  # router, enhancer, critic
+    assert trace.snapshot()["totals"]["llm_calls"] == 3  # gate, enhancer, critic
     assert env.state.spend.llm_calls == 3  # unchanged: the trace adds no call
 
 
-async def test_a_defaulted_router_is_visible_in_the_decisions(store):
+async def test_an_undecided_gate_is_a_visible_decision_and_closes_the_trace(store):
     trace = Trace()
-    llm = ScriptedChat(["junk", "junk", enhanced(), verdict(9)])
+    llm = ScriptedChat(["junk", "junk"])
+
+    await create_images(
+        "a cozy coffee shop",
+        gateway=Backend(llm, ScriptedImages([])),
+        artifacts=store,
+        trace=trace,
+    )
+
+    snap = trace.snapshot()
+    assert any("gate UNDECIDED" in d["text"] for d in snap["decisions"])
+    assert snap["status"] == "failed" and snap["finished_at"] is not None
+
+
+async def test_run_state_round_trips_at_every_boundary_with_the_trace(store):
+    run_store = RecordingStore()
+    llm = ScriptedChat([enhanced(), "junk", "junk", verdict(9)])
+
+    await create(build(llm, ScriptedImages([red()]), store, run_store=run_store), "free")
+
+    for raw in run_store.snapshots:
+        assert RunState.model_validate_json(raw).model_dump_json() == raw
+
+
+# -- a run that never gets a RunState (escalate) still closes its trace ------------------------
+
+
+async def test_an_escalated_run_closes_its_trace_with_a_status_and_a_wall_time(store):
+    from tests.unit.harness.test_entry import ROUTE_COMPLEX
+
+    trace = Trace()
+    llm = ScriptedChat([ROUTE_COMPLEX])
+
+    env = await create_images(
+        "a 4-panel comic strip",
+        gateway=Backend(llm, ScriptedImages([])),
+        artifacts=store,
+        trace=trace,
+    )
+
+    snap = trace.snapshot()
+    assert env.state.status.value == "escalate"
+    assert snap["status"] == "escalate"  # not "running" forever
+    assert snap["finished_at"] is not None and snap["wall_ms"] is not None and snap["wall_ms"] >= 0
+    assert [c["role"] for c in snap["calls"]] == ["gate"]
+    assert any("ESCALATE" in d["text"] for d in snap["decisions"])
+
+
+async def test_the_overall_time_starts_before_the_gate_call(store):
+    trace = Trace()
+    llm = ScriptedChat([ROUTE_SIMPLE, enhanced(), verdict(9)])
 
     await create_images(
         "a cozy coffee shop",
@@ -399,14 +426,7 @@ async def test_a_defaulted_router_is_visible_in_the_decisions(store):
         trace=trace,
     )
 
-    assert any("DEFAULTED" in d["text"] for d in trace.snapshot()["decisions"])
-
-
-async def test_run_state_round_trips_at_every_boundary_with_the_trace(store):
-    run_store = RecordingStore()
-    llm = ScriptedChat([enhanced(), verdict(3), lever("reseed"), verdict(9)])
-
-    await create(build(llm, ScriptedImages([red(), red()]), store, run_store=run_store), "free")
-
-    for raw in run_store.snapshots:
-        assert RunState.model_validate_json(raw).model_dump_json() == raw
+    snap = trace.snapshot()
+    first_call = min(c["ts"] for c in snap["calls"])
+    assert snap["created_at"] <= first_call  # so no timeline offset is negative
+    assert snap["status"] == "done" and snap["wall_ms"] >= 0
