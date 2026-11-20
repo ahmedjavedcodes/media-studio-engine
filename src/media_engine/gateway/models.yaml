@@ -46,6 +46,7 @@ models:
     n_per_call: 10
     max_input_images: 16
     prompt_style: sentences
+    lead_order: background # background -> subject -> details: the start weighs most
     prompt_max_words: 40 # billed per token: length nearly doubles the bill
 
   - slug: meta/muse-image
@@ -70,7 +71,7 @@ models:
     seed_reproduces: false # MEASURED 2026-11-20: same seed twice gave DIFFERENT pixels (2 calls, $0.028). The spec §6.4 claim of identical images did not reproduce
     n_per_call: 1
     max_input_images: 4
-    prompt_style: nouns
+    prompt_style: sentences # FLUX.2 (Mistral-3 text encoder) wants natural language
     prompt_max_words: 60
     eval_default: true # cheapest paid model; NOT a reproducible one: no model reproduces from a seed (measured), so evals compare scores over several images, not pixels
 
@@ -84,8 +85,8 @@ models:
     supports_seed: true
     n_per_call: 1 # catalogue: n 1..1 (spec left it blank)
     max_input_images: 14
-    prompt_style: nouns
-    prompt_max_words: 60
+    prompt_style: sentences
+    prompt_max_words: 70 # inside Seedream's 30-80 range
 
   - slug: black-forest-labs/flux.2-pro
     name: FLUX.2 Pro
@@ -96,7 +97,7 @@ models:
     supports_seed: true
     n_per_call: 1
     max_input_images: 8
-    prompt_style: nouns
+    prompt_style: sentences # FLUX.2 (Mistral-3 text encoder) wants natural language
     prompt_max_words: 60
 
   - slug: qwen/qwen-image-3
@@ -107,7 +108,7 @@ models:
     supports_seed: true
     n_per_call: 6
     max_input_images: 3 # catalogue: 3 (spec said 4)
-    prompt_style: nouns
+    prompt_style: sentences # least certain: confirm with an eval (sentences vs nouns)
     prompt_max_words: 60
 
   - slug: google/gemini-3.1-flash-lite-image
@@ -143,8 +144,8 @@ models:
     n_per_call: 4
     max_input_images: 14
     default_size: 2048x2048 # catalogue resolutions are 2K and 4K only: 2K is the floor
-    prompt_style: nouns
-    prompt_max_words: 60
+    prompt_style: sentences
+    prompt_max_words: 70 # inside Seedream's 30-80 range
 
   - slug: black-forest-labs/flux.2-flex
     name: FLUX.2 Flex
@@ -154,7 +155,7 @@ models:
     supports_seed: true
     n_per_call: 1
     max_input_images: 8
-    prompt_style: nouns
+    prompt_style: sentences # FLUX.2 (Mistral-3 text encoder) wants natural language
     prompt_max_words: 60
 
   - slug: sourceful/riverflow-v2.5-pro
@@ -189,7 +190,7 @@ models:
     supports_seed: true
     n_per_call: 1
     max_input_images: 8
-    prompt_style: nouns
+    prompt_style: sentences # FLUX.2 (Mistral-3 text encoder) wants natural language
     prompt_max_words: 60
 
   - slug: google/gemini-nano-banana-2.1

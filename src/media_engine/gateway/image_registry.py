@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from media_engine.contracts import Plan
 from media_engine.core.logging import get_logger
+from media_engine.gateway.compiler import Lead
 from media_engine.gateway.openrouter_models import ImageModelInfo, ModelCache
 
 log = get_logger("image_registry")
@@ -82,6 +83,7 @@ class ModelEntry(BaseModel):
     default_size: str | None = None  # documentation: size MUST still be sent on every call
     prompt_style: PromptStyle
     prompt_max_words: int = Field(gt=0)
+    lead_order: Lead = "subject"  # which part opens the prompt (compiler)
     eval_default: bool = False
     available: bool = True
     notes: str | None = None
@@ -122,6 +124,7 @@ class ImageModelSpec(BaseModel):
     default_quality: str | None
     prompt_style: PromptStyle
     prompt_max_words: int
+    lead_order: Lead
     eval_default: bool
     available: bool
     in_catalogue: bool  # False: no cache, or the cache does not list this slug
@@ -247,6 +250,7 @@ def merge(
         default_quality=default_quality,
         prompt_style=entry.prompt_style,
         prompt_max_words=entry.prompt_max_words,
+        lead_order=entry.lead_order,
         eval_default=entry.eval_default,
         available=entry.available,
         in_catalogue=info is not None,

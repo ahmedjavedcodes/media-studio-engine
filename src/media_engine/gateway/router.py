@@ -30,8 +30,10 @@ from media_engine.gateway.budget import (
     estimate_image_usd,
 )
 from media_engine.gateway.compiler import (
+    DEFAULT_LEAD,
     DEFAULT_MAX_WORDS,
     DEFAULT_STYLE,
+    Lead,
     compile_prompt,
     style_for_cloudflare,
 )
@@ -226,6 +228,7 @@ class Gateway:
         prompt that fails them is a bad request (never falls back): the Brief is what is wrong."""
         if request.brief is None:
             return request
+        lead: Lead = DEFAULT_LEAD
         if provider == "cloudflare":
             style, words = style_for_cloudflare(model)
         else:
@@ -235,7 +238,9 @@ class Gateway:
                 if spec is not None
                 else (DEFAULT_STYLE, DEFAULT_MAX_WORDS)
             )
-        compiled = compile_prompt(request.brief, style, words, fallback=request.prompt)
+            if spec is not None:
+                lead = spec.lead_order
+        compiled = compile_prompt(request.brief, style, words, fallback=request.prompt, lead=lead)
         verdict = check_prompt(compiled.text)
         if not verdict.ok:
             raise ProviderError(
