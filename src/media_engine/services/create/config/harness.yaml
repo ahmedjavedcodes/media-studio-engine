@@ -5,10 +5,6 @@
 # linear (IMAGE-CREATE-OPTIMIZE v2.2) and never regenerates on a low score; the user picks.
 quality_threshold: {free: 6, pro: 7, max: 7, ultra: 8}
 
-# A Critic that fails (bad reply, timeout) is asked again about the same images, up to this many
-# times per run. It never generates, so it never spends on an image.
-max_critic_reasks: 2
-
 # The safety reviewer (gpt-oss-safeguard-20b) is rate limited by Groq to 3 requests/minute and
 # has no fallback. A process-level limiter keeps under it: a review waits up to wait_s for a free
 # slot, then fails closed with the retryable failure `review_rate_limited` (never an allow).
@@ -35,23 +31,16 @@ cancel_poll_ms: 200
 
 # Per run, on three meters. neurons_total caps image generation on the free path (Cloudflare:
 # 10,000 neurons/day shared).
-# reserve_fraction is held back from the STEPS (enhance, generate, critique); only a Critic
-# re-ask may spend it. A re-ask is checked against the whole remaining budget, so the reserve is
-# headroom, not a guarantee. It is 0.10 (was 0.30) because at 0.30 the generate guard refused
-# images the plan is meant to give (review round 2, verified by test):
-#   free n=2 needs 2 x (60 + 200) = 520 neurons and 2 x 12,000 = 24,000 tokens up front;
-#     at 0.30 only 418 / 20,900 were usable (1 image of 2), at 0.10: 540 / 27,000.
-#   pro n=4 needs 1,040 neurons / 48,000 tokens; at 0.30 only 41,900 tokens (3 of 4).
-# Sizing the reserve as max_critic_reasks x the critique estimate was rejected: on free that is
-# 400 neurons / 24,000 tokens, which would leave room for less than ONE image.
-# FRAGILE on free: 27,000 - the enhancer's real spend must stay >= 24,000 tokens. The driver is
-# the critique estimate (12,000 tokens, sized for a Cloudflare fallback with a repair; a Groq
-# qwen review measured ~1,350 prompt tokens). Re-size it under D3, then revisit this.
+# reserve_fraction is 0: create is linear (v2.2), nothing re-runs a step, so nothing may draw on
+# a held-back reserve (the Critic's one retry is inside its own step and its estimate). The field
+# stays in the Budget contract. History: 0.30 refused images the plans are meant to give (free
+# n=2 got 1, pro n=4 got 3); 0.10 fixed that while the Critic re-ask existed (review round 2).
+# The critique estimate below (12,000 tokens) still drives the free plan's headroom: D3.
 budgets:
-  free: {tokens_total: 30000, cost_cap_usd: 0.0, neurons_total: 600, reserve_fraction: 0.10}
-  pro: {tokens_total: 60000, cost_cap_usd: 0.20, neurons_total: 1500, reserve_fraction: 0.10}
-  max: {tokens_total: 120000, cost_cap_usd: 0.50, neurons_total: 3000, reserve_fraction: 0.10}
-  ultra: {tokens_total: 240000, cost_cap_usd: 1.00, neurons_total: 6000, reserve_fraction: 0.10}
+  free: {tokens_total: 30000, cost_cap_usd: 0.0, neurons_total: 600, reserve_fraction: 0.0}
+  pro: {tokens_total: 60000, cost_cap_usd: 0.20, neurons_total: 1500, reserve_fraction: 0.0}
+  max: {tokens_total: 120000, cost_cap_usd: 0.50, neurons_total: 3000, reserve_fraction: 0.0}
+  ultra: {tokens_total: 240000, cost_cap_usd: 1.00, neurons_total: 6000, reserve_fraction: 0.0}
 
 # Per step kind (per image for generate/critique).
 #   tokens:            the step's TOTAL token budget (prompt + completion, repair included).

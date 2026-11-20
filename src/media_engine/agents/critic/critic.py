@@ -17,6 +17,12 @@ and it wins over the repair path. If ANY reply in this step said "block", even o
 validation or was cut off mid-JSON, the step is REJECTED. Otherwise an invalid "block" could be
 repaired into "allow".
 
+RETRY (replaces the supervisor's re-ask loop, so create stays linear): when a review ends with
+no verdict and no "block" anywhere, the Critic tries ONCE more (`params.retries`), on the same
+image, inside this step. Never after a block, and never for a failure another try cannot fix
+(NO_RETRY: no provider left, our bad request, bad input, a provider refusal). It never
+generates, so it never spends on an image.
+
 A blocked image is marked orphaned (reason "safety_block") so it is never delivered and the
 sweep removes it. TODO(backend): whether safety-blocked images are instead retained for abuse
 review is a product/legal decision; the backend sweep can branch on the reason.
@@ -75,6 +81,12 @@ class CriticParams(BaseModel):
 
     max_side: int = Field(gt=0)  # long side of the image sent for review, in px
     jpeg_quality: int = Field(ge=1, le=95)
+    retries: int = Field(ge=0, le=1)  # extra attempts after a review with no verdict
+
+
+# Failures another attempt cannot fix: retrying would only repeat them (or route around a
+# provider's refusal). The image stays unchecked and is never delivered.
+NO_RETRY = frozenset({"invalid_input", "bad_request", "no_provider", "content_refused"})
 
 
 class CriticInputs(BaseModel):
@@ -172,6 +184,18 @@ class Critic(Agent):
         ]
 
         result = await self.call_structured(auth, stop, content, CriticOutput)
+        for _ in range(self.params.retries):
+            if result.output is not None or blocked_reason(result) is not None:
+                break
+            if result.failure in NO_RETRY:
+                break
+            log.info("critic.retry", failure=result.failure)
+            again = await self.call_structured(auth, stop, content, CriticOutput)
+            # One step, one account: both attempts' spend, calls and trace records.
+            again.spend = result.spend.plus(again.spend)
+            again.calls = [*result.calls, *again.calls]
+            again.records = [*result.records, *again.records]
+            result = again
 
         # Safety first, before looking at whether the output validated or what it scored.
         reason = blocked_reason(result)

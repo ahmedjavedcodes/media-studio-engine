@@ -8,11 +8,10 @@ first; the user picks. The Critic's quality score is information (ranking, evals
 trigger: a low score adds an issue, it does not spend money on another image. The supervisor
 makes NO LLM call of its own: every call is a step agent's and is counted in that step's Spend.
 
-The one re-run left is the Critic RE-ASK: when the Critic itself fails (a glitch, not a verdict),
-the SAME images are checked again, inside the critique step, up to `max_critic_reasks`. It never
-generates, so it never spends on an image. Failures the Critic cannot recover from
-(no_provider / bad_request / invalid_input / content_refused) are not re-asked; those images
-stay unchecked and are never delivered.
+The graph runs exactly once; no step is re-run. A Critic that fails without a verdict retries
+ONCE inside its own step (critic.py `params.retries`), on the same images, never generating.
+Failures another try cannot fix (no_provider / bad_request / invalid_input / content_refused)
+are not retried; those images stay unchecked and are never delivered.
 
 N images (spec §8.4): one shared enhancement, then N branches (creator, then critic) with seeds
 base+0..N-1 (base derived from the run id, so a run is replayable), run concurrently
@@ -89,7 +88,7 @@ from media_engine.harness.trace import Trace
 from media_engine.ports.artifact_store import ArtifactStore
 from media_engine.ports.event_sink import EventSink, Phase, make_event, safe_emit
 from media_engine.ports.run_store import RunStore
-from media_engine.schemas import CriticOutput, EnhancerOutput
+from media_engine.schemas import CriticOutput, Document, DocumentSize, EnhancerOutput, Layer
 from media_engine.services.create.loader import CreateConfig, StepKind
 
 log = get_logger("agents.image_grand")
@@ -144,10 +143,6 @@ ORPHAN_RUN_REJECTED = "run_rejected"  # allowed, but another image of the run wa
 BRANCH_ABORTED = "aborted"  # cancelled (or the run was already decided) before or during the call
 BRANCH_BUDGET = "budget"  # the budget would have been exceeded, so the call was not made
 
-# Critic failures that are NOT re-asked. A refusal from the reviewer is not a glitch: the image
-# stays unchecked and is never delivered.
-CRITIC_NO_REASK = frozenset({"invalid_input", "bad_request", "no_provider", "content_refused"})
-
 # Issue added to a delivery when the run stopped early after some images were checked.
 STOPPED_ISSUES = {"budget": "The budget ran out before every image could be finished."}
 STOPPED_DEFAULT = "Not every image could be finished."
@@ -180,7 +175,7 @@ class Outcome:
     reason: str | None = None
     output: dict[str, Any] = field(default_factory=dict)
     summary: str | None = None
-    # For a FAILED step: which step and why, so the re-ask decision needs no text parsing.
+    # For a FAILED step: which step and why (for logs and the caller), without parsing text.
     failed_step: StepKind | None = None
     failure: str | None = None  # a FailureKind, or "budget" for a budget refusal
 
@@ -197,34 +192,25 @@ class RunContext:
     n: int = 1  # images wanted (an immutable input)
     trace: Trace = field(default_factory=Trace)  # developer trace (not run state)
     t0: dict[int, float] = field(default_factory=dict)  # step number -> perf_counter at start
+    budgeted: int = 0  # branches the current step's ONE guard found affordable (D5)
     _outcome: Outcome | None = field(default=None, init=False, repr=False)
 
     @property
     def outcome(self) -> Outcome | None:
         """Set when the attempt cannot go on (cancel, budget, block, a failed step, ...). While
-        it is None the attempt ran to a verdict. A Critic re-ask clears it."""
+        it is None the attempt ran to a verdict."""
         return self._outcome
 
     @outcome.setter
     def outcome(self, value: Outcome | None) -> None:
         # REJECTED is sticky: nothing (a cancel, a budget refusal, a crash) may replace it, so a
         # block can never be turned into another outcome, whatever order things finish in.
-        # (A Critic re-ask clears the outcome, but never starts from a REJECTED one.)
         if self._outcome is not None and self._outcome.status is Status.REJECTED:
             return
         self._outcome = value
 
     def step(self, kind: StepKind) -> PlanStep:
         return self.state.step(NODES.index(kind) + 1)
-
-
-@dataclass
-class Live:
-    """Branches of one step that are running or waiting for a critique right now. Only the
-    budget gate reads it, to count spend that has not been charged yet. Not run state."""
-
-    inflight: int = 0
-    pending_critique: int = 0
 
 
 class Resolved(BaseModel):
@@ -355,7 +341,6 @@ class ImageGrandAgent(Agent):
         trace.meta = {
             "plan": auth.plan,
             "n": args.n,
-            "critic_reask_cap": self._policy.max_critic_reasks,
             "quality_threshold": self._policy.quality_threshold[auth.plan],
             "reserve_fraction": state.budget.reserve_fraction,
             "max_parallel_branches": self._policy.max_parallel_branches,
@@ -386,100 +371,67 @@ class ImageGrandAgent(Agent):
             total = total.plus(item.spend)
         return total
 
-    # -- one attempt, then Critic re-asks only ----------------------------------------------------
+    # -- one attempt ------------------------------------------------------------------------------
 
     async def _drive(self, ctx: RunContext) -> None:
-        """Run the attempt ONCE. If the Critic itself failed (a glitch, not a verdict), check the
-        same images again, up to `max_critic_reasks`: it never generates, so it never spends on
-        an image. Ends with the run's verdict on `ctx.outcome` (None: it reached a verdict)."""
-        while True:
-            await run_attempt(self.graph, ctx.state.run_id, ctx)
-            state, ended = ctx.state, ctx.outcome
-            ctx.trace.decide(
-                "supervise",
-                "attempt ended: "
-                + (
-                    "reached a verdict"
-                    if ended is None
-                    else f"{ended.status.value} ({ended.reason})"
-                )
-                + f"; critic re-asks {state.critic_reasks_used} of {self._policy.max_critic_reasks}",
-            )
-            if not self._reask_wanted(ctx):
-                return
-            self._begin_reask(ctx)
-
-    def _reask_wanted(self, ctx: RunContext) -> bool:
-        """Only a FAILED critique re-asks. A block, a cancel, a budget refusal, a failed
-        enhance or generate, NEEDS_INPUT or a low score never re-run anything."""
-        outcome = ctx.outcome
-        return (
-            outcome is not None
-            and outcome.status is Status.FAILED
-            and outcome.failed_step == "critique"
-            and outcome.failure not in CRITIC_NO_REASK
-            and ctx.state.critic_reasks_used < self._policy.max_critic_reasks
+        """Run the attempt graph ONCE (create is linear, v2.2): no step is ever re-run. A Critic
+        that fails without a verdict retries once INSIDE its own step (critic.py). Ends with the
+        run's verdict on `ctx.outcome` (None: it reached a verdict)."""
+        await run_attempt(self.graph, ctx.state.run_id, ctx)
+        ended = ctx.outcome
+        ctx.trace.decide(
+            "supervise",
+            "attempt ended: "
+            + ("reached a verdict" if ended is None else f"{ended.status.value} ({ended.reason})"),
         )
-
-    def _begin_reask(self, ctx: RunContext) -> None:
-        """Check the same images again: only the critique step goes back to `pending`."""
-        state = ctx.state
-        ctx.outcome = None
-        ctx.trace.decide("critique", "critic re-ask: the same images are checked again")
-        state.critic_reasks_used += 1
-        for record in state.round:
-            if record.image_id and record.verdict is None:
-                record.failure = None
-        self._reset(ctx, "critique")
-
-    @staticmethod
-    def _reset(ctx: RunContext, kind: StepKind) -> None:
-        step = ctx.step(kind)
-        step.status = "pending"  # spend stays: it is what the run has actually used
-        step.output = {}
-        step.output_ref = None
-        step.branches_total = step.branches_done = step.branches_aborted = None
-        step.partial_outputs = []
 
     # -- the step guard: the only place cancel and budget are checked ----------------------------
 
-    async def _begin(self, ctx: RunContext, kind: StepKind) -> PlanStep | None:
-        """Boundary save, then the checks, then `running`. Returns the step to run, or None
-        when there is nothing to run: the outcome is already decided, or the step is `done`
-        (a Critic re-ask passes through enhance and generate: no event, no cost). The node then
-        returns: one way out, END. No await after the checks: the caller's next await is the
-        step agent."""
+    async def _begin(self, ctx: RunContext, kind: StepKind, branches: int = 1) -> PlanStep | None:
+        """Boundary save, then the ONE guard for this step, then `running`. Returns the step to
+        run, or None when there is nothing to run: the outcome is already decided. `branches` is
+        how many paid calls the step will make; `ctx.budgeted` is how many of them the budget
+        covers. The node then returns: one way out, END. No await after the checks: the caller's
+        next await is the step agent."""
         if ctx.outcome is not None:
             return None
         step = ctx.step(kind)
-        if step.status == "done":
-            ctx.trace.decide(kind, "step already done (critic re-ask), passed through at no cost")
-            return None
         await self._save(ctx)  # step boundary: RunState is JSON-complete here
-        if not await self._gate(ctx, kind, step):
+        budgeted = await self._gate(ctx, kind, step, branches)
+        if budgeted is None:
             return None
+        ctx.budgeted = budgeted
         step.status = "running"
         self._stamp_start(ctx, step)
         self._emit(ctx, step, "started")
         return step
 
-    async def _gate(self, ctx: RunContext, kind: StepKind, step: PlanStep) -> bool:
-        """Cancel, then budget. False: the outcome is now decided."""
+    async def _gate(
+        self, ctx: RunContext, kind: StepKind, step: PlanStep, branches: int
+    ) -> int | None:
+        """D5: ONE guard per step, taking the branch count. Cancel, then budget: how many of the
+        `branches` paid calls the run can afford, decided once and logged once. None: the outcome
+        is now decided (cancelled, or not even one call is affordable)."""
         await self._refresh_cancel(ctx)
         if ctx.state.cancel_requested:
             await self._cancel(ctx, step)
-            return False
-        if not self._affordable(ctx, kind):
+            return None
+        wanted = max(1, branches)
+        budgeted = next(
+            (k for k in range(wanted, 0, -1) if self._affordable(ctx, kind, units=k, log=False)),
+            0,
+        )
+        self._affordable(ctx, kind, units=max(1, budgeted), who=f"{budgeted} of {wanted}")
+        if budgeted == 0:
             self._refuse_budget(ctx, step, kind)
-            return False
-        return True
+            return None
+        return budgeted if branches else 0
 
-    async def _branch_gate(
-        self, ctx: RunContext, kind: StepKind, step: PlanStep, record: AttemptRecord, live: Live
-    ) -> bool:
-        """The same two checks, immediately before ONE branch's paid call. A cancel decides the
-        whole run (the outcome); a budget refusal only drops this branch. No await after it:
-        the caller's next await is the branch's agent call."""
+    async def _branch_gate(self, ctx: RunContext, step: PlanStep, record: AttemptRecord) -> bool:
+        """Immediately before ONE branch's paid call: has the run been decided or cancelled?
+        Cancel stays checked per branch (D5); the budget was decided once, by the step's guard.
+        A cancel decides the whole run (the outcome). No await after it: the caller's next
+        await is the branch's agent call."""
         if ctx.outcome is not None:  # decided while this branch waited its turn
             record.failure = BRANCH_ABORTED
             return False
@@ -488,15 +440,6 @@ class ImageGrandAgent(Agent):
             ctx.state.cancelled_at_step = step.step
             ctx.outcome = Outcome(Status.CANCELLED, f"cancelled during step {step.step}")
             record.failure = BRANCH_ABORTED
-            return False
-        # Spend that is running (this branch and `inflight` others, generate + critique each) or
-        # still owed (a critique per image already generated) is not charged yet: count it.
-        owed = live.pending_critique if kind == "generate" else 0
-        if not self._affordable(
-            ctx, kind, units=1 + live.inflight, owed=owed, who=f"branch {record.branch}"
-        ):
-            log.warning("supervisor.branch_budget_refused", step=kind, branch=record.branch)
-            record.failure = BRANCH_BUDGET
             return False
         return True
 
@@ -522,6 +465,7 @@ class ImageGrandAgent(Agent):
         units: int = 1,
         owed: int = 0,
         who: str = "step",
+        log: bool = True,
     ) -> bool:
         """Can the run afford `units` of this step's paid call, plus what it already owes?
 
@@ -538,14 +482,18 @@ class ImageGrandAgent(Agent):
         tokens = sum(est[k].tokens * w for k, w in weights.items())
         cost = sum(est[k].cost_usd * w for k, w in weights.items()) if self._allow_paid else 0.0
         neurons = sum(est[k].neurons * w for k, w in weights.items())
-        # Critic re-asks may use the reserve (it is held back for them)
-        reserve = ctx.state.critic_reasks_used > 0
+        # Nothing may draw on the reserve since create became linear (no re-run of any step);
+        # reserve_fraction is 0 in harness.yaml, so the whole budget is usable by the steps.
+        reserve = False
         budget = ctx.state.budget
         ok = budget.can_afford(tokens, cost, neurons, use_reserve=reserve)
+        if not log:
+            return ok
         left = budget.remaining_total() if reserve else budget.remaining_for_steps()
         ctx.trace.decide(
             kind,
-            f"guard before {kind} [{who}]: cancel not requested; budget {'ok' if ok else 'REFUSED'}: "
+            f"guard before {kind} [{who} branches]: cancel not requested; "
+            f"budget {'ok' if ok else 'REFUSED'}: "
             f"needs ~{neurons:.0f} neurons / {tokens} tokens / ${cost:.4f}, left "
             f"{left.neurons:.0f} / {left.tokens} / ${left.cost_usd:.4f} "
             f"({'incl. the reserve' if reserve else 'reserve held back'})",
@@ -676,48 +624,56 @@ class ImageGrandAgent(Agent):
         )
 
     async def _generate(self, ctx: RunContext) -> None:
-        step = await self._begin(ctx, "generate")
+        records = ctx.state.round
+        step = await self._begin(ctx, "generate", branches=len(records))
         if step is None:
             return
         resolved = Resolved.model_validate(ctx.step("enhance").output["resolved"])
-        records = ctx.state.round
-        step.branches_total, step.branches_done, step.branches_aborted = len(records), 0, 0
-        step.partial_outputs = []
-        live = Live()
+        funded = self._fund(ctx, step, records)
 
-        jobs = [self._generate_job(ctx, step, record, resolved, live) for record in records]
+        jobs = [self._generate_job(ctx, step, record, resolved) for record in funded]
         results, cancelled = await self._run_jobs(
-            ctx, jobs, min(len(records), self._policy.max_parallel_branches)
+            ctx, jobs, min(len(funded), self._policy.max_parallel_branches)
         )
-        self._note_crashed_branches(records, results, "generate")
+        self._note_crashed_branches(funded, results, "generate")
         await self._close_step(
             ctx, step, records, cancelled, made=lambda r: r.image_id is not None, doing="create"
         )
 
+    @staticmethod
+    def _fund(ctx: RunContext, step: PlanStep, records: list[AttemptRecord]) -> list[AttemptRecord]:
+        """Split the step's branches by the ONE guard's verdict (D5): the first `ctx.budgeted`
+        run; the rest are refused BEFORE any paid call (BRANCH_BUDGET), in one place."""
+        funded, refused = records[: ctx.budgeted], records[ctx.budgeted :]
+        for record in refused:
+            record.failure = BRANCH_BUDGET
+        if refused:
+            log.warning("supervisor.branches_budget_refused", count=len(refused))
+        step.branches_total, step.branches_done = len(records), 0
+        step.branches_aborted = len(refused)
+        step.partial_outputs = []
+        return funded
+
     def _generate_job(
-        self, ctx: RunContext, step: PlanStep, record: AttemptRecord, resolved: Resolved, live: Live
+        self, ctx: RunContext, step: PlanStep, record: AttemptRecord, resolved: Resolved
     ) -> Callable[[], Awaitable[None]]:
         async def job() -> None:
-            if not await self._branch_gate(ctx, "generate", step, record, live):
+            if not await self._branch_gate(ctx, step, record):
                 return
-            live.inflight += 1
-            try:
-                with tracing.scope(ctx.trace, "generate", record.number, record.branch):
-                    env = await self._creator.run(
-                        Goal(task="generate", instructions="Create the image."),
-                        self._stop(ctx, "generate"),
-                        ctx.auth,
-                        {
-                            "prompt": resolved.prompt,
-                            "width": resolved.width,
-                            "height": resolved.height,
-                            "seed": record.seed,
-                            "tier": record.tier,
-                            "chain_offset": record.chain_offset,
-                        },
-                    )
-            finally:
-                live.inflight -= 1
+            with tracing.scope(ctx.trace, "generate", record.number, record.branch):
+                env = await self._creator.run(
+                    Goal(task="generate", instructions="Create the image."),
+                    self._stop(ctx, "generate"),
+                    ctx.auth,
+                    {
+                        "prompt": resolved.prompt,
+                        "width": resolved.width,
+                        "height": resolved.height,
+                        "seed": record.seed,
+                        "tier": record.tier,
+                        "chain_offset": record.chain_offset,
+                    },
+                )
             self._charge(ctx, step, env)
             if env.state.status is Status.DONE:
                 record.image_id = env.output["image_id"]
@@ -725,7 +681,6 @@ class ImageGrandAgent(Agent):
                 record.width = int(env.output["width"])
                 record.height = int(env.output["height"])
                 record.shape_issues = self._shape_issues(env.output, resolved)
-                live.pending_critique += 1
                 step.branches_done = (step.branches_done or 0) + 1
                 step.partial_outputs.append(record.image_id)
                 step.output_ref = step.output_ref or record.image_id
@@ -737,20 +692,18 @@ class ImageGrandAgent(Agent):
         return job
 
     async def _critique(self, ctx: RunContext) -> None:
-        step = await self._begin(ctx, "critique")
+        records = [r for r in ctx.state.round if r.image_id and r.verdict is None]
+        step = await self._begin(ctx, "critique", branches=len(records))
         if step is None:
             return
         enhanced = ctx.step("enhance").output
-        records = [r for r in ctx.state.round if r.image_id and r.verdict is None]
-        step.branches_total, step.branches_done, step.branches_aborted = len(records), 0, 0
-        step.partial_outputs = []
-        live = Live()
+        funded = self._fund(ctx, step, records)
 
-        jobs = [self._critique_job(ctx, step, record, enhanced, live) for record in records]
+        jobs = [self._critique_job(ctx, step, record, enhanced) for record in funded]
         results, cancelled = await self._run_jobs(
-            ctx, jobs, min(len(records), self._policy.max_parallel_branches)
+            ctx, jobs, min(len(funded), self._policy.max_parallel_branches)
         )
-        self._note_crashed_branches(records, results, "critique")
+        self._note_crashed_branches(funded, results, "critique")
         await self._close_step(
             ctx, step, records, cancelled, made=lambda r: r.verdict is not None, doing="check"
         )
@@ -761,32 +714,27 @@ class ImageGrandAgent(Agent):
         step: PlanStep,
         record: AttemptRecord,
         enhanced: dict[str, Any],
-        live: Live,
     ) -> Callable[[], Awaitable[None]]:
         async def job() -> None:
-            if not await self._branch_gate(ctx, "critique", step, record, live):
+            if not await self._branch_gate(ctx, step, record):
                 return
-            live.inflight += 1
-            try:
-                with tracing.scope(ctx.trace, "critique", record.number, record.branch):
-                    env = await self._critic.run(
-                        Goal(task="critique", instructions="Review the image."),
-                        self._stop(ctx, "critique"),
-                        ctx.auth,
-                        {
-                            "image_id": record.image_id,
-                            "prompt": ctx.user_prompt,
-                            "must_have": enhanced["must_have"],
-                        },
-                    )
-            finally:
-                live.inflight -= 1
+            with tracing.scope(ctx.trace, "critique", record.number, record.branch):
+                env = await self._critic.run(
+                    Goal(task="critique", instructions="Review the image."),
+                    self._stop(ctx, "critique"),
+                    ctx.auth,
+                    {
+                        "image_id": record.image_id,
+                        "prompt": ctx.user_prompt,
+                        "must_have": enhanced["must_have"],
+                    },
+                )
             self._charge(ctx, step, env)
             if env.state.status is Status.REJECTED:
-                # Terminal, whatever the score or plan. The Critic marked the image orphaned;
-                # it is not delivered.
+                # This IMAGE is blocked, whatever its score: the Critic orphaned it and it is
+                # never delivered. The RUN is decided at settle (spec §5.5): the other images
+                # still stand, and only when every reviewed image is blocked is it REJECTED.
                 record.verdict = "block"
-                ctx.outcome = Outcome(Status.REJECTED, env.state.reason)
                 ctx.trace.decide("critique", f"image {record.image_id} blocked: {env.state.reason}")
                 if record.image_id:  # the Critic orphaned it; note it in the trace
                     ctx.trace.orphan(record.image_id, "safety_block")
@@ -795,11 +743,13 @@ class ImageGrandAgent(Agent):
                 record.quality_score = int(env.output["quality_score"])
                 record.critique = str(env.output["critique"])
                 record.summary = env.summary
+                # Allowed by the Critic: safe to show now, before the run ends (§5.3 streaming).
+                self._emit(ctx, step, "image_ready", image_id=record.image_id)
                 step.branches_done = (step.branches_done or 0) + 1
                 step.output_ref = step.output_ref or record.image_id
             else:
                 # No verdict: the image stays unchecked. It is orphaned only once the run
-                # settles (the Critic may be re-asked on the same image first).
+                # settles (the Critic already retried once inside its step).
                 record.failure = env.output.get("failure") or BRANCH_ABORTED
                 step.branches_aborted = (step.branches_aborted or 0) + 1
             await self._branch_done(ctx, step)
@@ -844,7 +794,7 @@ class ImageGrandAgent(Agent):
         doing: str,
     ) -> None:
         """After the branches: freeze on a cancel, or settle the step's status and, when no
-        branch got anywhere, the attempt's failure (what the re-ask decision reads)."""
+        branch got anywhere, the attempt's failure."""
         step.output = {
             "branches": [
                 {
@@ -934,17 +884,28 @@ class ImageGrandAgent(Agent):
             ),
         )
 
-        if any(a.verdict == "block" for a in state.attempts) or (
-            outcome is not None and outcome.status is Status.REJECTED
-        ):
-            # Block is terminal and nothing is delivered, not even an allowed image.
-            # Decided from the records, not only from `outcome`: whatever finished last (a
-            # cancel, a budget refusal) must not hide that an image was blocked.
+        blocked = [a for a in state.attempts if a.verdict == "block"]
+        if outcome is not None and outcome.status is Status.REJECTED:
+            # The Gate's verdict (defence in depth): nothing ran, nothing is delivered.
             for a in checked:
                 await self._mark_orphaned(ctx, str(a.image_id), ORPHAN_RUN_REJECTED)
-            if outcome is not None and outcome.status is Status.REJECTED:
-                return outcome
-            return Outcome(Status.REJECTED, "an image did not pass the safety review")
+            return outcome
+        if blocked and not checked:
+            # Settle rule (spec §5.5): EVERY reviewed image was blocked. The input Gate let
+            # through a request whose every output is unsafe: a gate miss, logged so the Gate's
+            # filter can be tuned. Nothing is delivered.
+            log.warning(
+                "supervisor.gate_miss",
+                run_id=state.run_id,
+                blocked=len(blocked),
+                gate=state.gate.safety if state.gate else None,
+            )
+            ctx.trace.decide(
+                "settle",
+                f"GATE MISS: all {len(blocked)} reviewed image(s) blocked by the Critic after "
+                f"the Gate allowed the request",
+            )
+            return Outcome(Status.REJECTED, "the images did not pass the safety review")
         if outcome is not None and outcome.status is Status.CANCELLED:
             return Outcome(
                 Status.CANCELLED, outcome.reason, {"image_ids": [a.image_id for a in ranked]}
@@ -960,7 +921,9 @@ class ImageGrandAgent(Agent):
         threshold = self._policy.quality_threshold[ctx.auth.plan]
         weak = (best.quality_score or 0) < threshold
         issues: list[str] = [best.critique or ""] if weak else []
-        missing = ctx.n - len(delivered)
+        if blocked:  # settle rule (spec §5.5): flagged images are dropped, the rest delivered
+            issues.append(f"{len(blocked)} of {ctx.n} images were removed by the safety review.")
+        missing = ctx.n - len(delivered) - len(blocked)
         if missing:
             issues.append(f"{missing} of {ctx.n} requested images could not be created.")
         for position, a in enumerate(delivered, start=1):  # every delivered image
@@ -974,6 +937,11 @@ class ImageGrandAgent(Agent):
         status = Status.DONE_WITH_ISSUES if issues else Status.DONE
         output: dict[str, Any] = {
             "image_ids": [a.image_id for a in delivered],
+            # §4.3: the same delivery as documents (one image layer each, ranked). Additive:
+            # `image_ids` stays until the backend has moved over (an open owner decision).
+            "documents": [
+                _document(a, rank).model_dump() for rank, a in enumerate(delivered, start=1)
+            ],
             "quality_score": best.quality_score,
             "issues": issues,
             "assumptions": resolved.assumptions,
@@ -1070,9 +1038,11 @@ class ImageGrandAgent(Agent):
         except Exception:  # bookkeeping must never change the outcome
             log.exception("supervisor.mark_orphaned_failed", reason=reason)
 
-    def _emit(self, ctx: RunContext, step: PlanStep, phase: Phase) -> None:
-        event = make_event(ctx.state.run_id, step.step, step.public_label, phase)
-        ctx.state.events.append(event.model_dump())
+    def _emit(
+        self, ctx: RunContext, step: PlanStep, phase: Phase, image_id: str | None = None
+    ) -> None:
+        event = make_event(ctx.state.run_id, step.step, step.public_label, phase, image_id)
+        ctx.state.events.append(event.model_dump(exclude_none=True))
         safe_emit(self._events, event)
 
     async def _save(self, ctx: RunContext) -> None:
@@ -1080,14 +1050,27 @@ class ImageGrandAgent(Agent):
             await self._store.save(ctx.state)
 
 
+def _document(record: AttemptRecord, rank: int) -> Document:
+    """A delivered image as a one-layer document (version 1). Deterministic ids: the document is
+    named after its image, so the same run always describes the same documents."""
+    image_id = str(record.image_id)
+    suffix = image_id.removeprefix("img_")
+    return Document(
+        document_id=f"doc_{suffix}",
+        size=DocumentSize(w=record.width or 1, h=record.height or 1),
+        layers=[Layer(id=f"lyr_{suffix}_1", type="image", image_id=image_id, role="base")],
+        scores={"quality_score": record.quality_score} if record.quality_score is not None else {},
+        rank=rank,
+    )
+
+
 def _step_failure(records: list[AttemptRecord]) -> str | None:
-    """Why a step produced nothing, as one failure kind: a refusal wins, then a failure the
-    Critic must not be re-asked after, then whichever came first."""
+    """Why a step produced nothing, as one failure kind: a refusal wins, then whichever came
+    first."""
     failures = [r.failure for r in records if r.failure]
     if "content_refused" in failures:
         return "content_refused"
-    final = [f for f in failures if f in CRITIC_NO_REASK]
-    return final[0] if final else (failures[0] if failures else None)
+    return failures[0] if failures else None
 
 
 def _failure_reason(doing: str, env: Envelope) -> str:

@@ -8,6 +8,7 @@ import {
   cancelRun,
   createRun,
   getTrace,
+  imageUrl,
   INSPECTOR,
   MOCK,
   subscribe,
@@ -38,6 +39,8 @@ export default function Home() {
   const [steps, setSteps] = useState<StepState[]>(["pending", "pending", "pending"]);
   const [progress, setProgress] = useState<number[]>([0, 0, 0]);
   const [result, setResult] = useState<RunResult | null>(null);
+  // Images streamed while the run is still going (image_ready events), in arrival order.
+  const [streamed, setStreamed] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [currentRun, setCurrentRun] = useState<string | null>(null);
@@ -75,6 +78,11 @@ export default function Home() {
   function onEvent(event: RunEvent) {
     const i = event.step - 1;
     if (i < 0 || i > 2) return;
+    if (event.phase === "image_ready") {
+      const id = event.image_id;
+      if (id) setStreamed((s) => (s.includes(id) ? s : [...s, id]));
+      return;
+    }
     if (event.phase === "progress") {
       setProgress((p) => p.map((v, k) => (k === i ? v + 1 : v)));
     } else {
@@ -89,6 +97,7 @@ export default function Home() {
     setSteps(["pending", "pending", "pending"]);
     setProgress([0, 0, 0]);
     setResult(null);
+    setStreamed([]);
     setError(null);
     setCancelling(false);
     setTrace(null);
@@ -228,6 +237,16 @@ export default function Home() {
       {running && (
         <section className="rounded-lg border border-neutral-200 bg-white p-4">
           <Stepper states={steps} progress={progress} total={n} />
+          {streamed.length > 0 && (
+            <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {streamed.map((id, i) => (
+                <li key={id} className="overflow-hidden rounded border border-neutral-200">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={imageUrl(id)} alt={`Image ${i + 1}, ready`} className="aspect-square w-full object-cover" />
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 

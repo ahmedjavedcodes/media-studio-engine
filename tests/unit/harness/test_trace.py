@@ -223,7 +223,7 @@ async def test_reasoning_tokens_are_reported_when_the_provider_sends_them(store)
 # -- decisions, timing, orphans ---------------------------------------------------------------
 
 
-async def test_decisions_cover_guards_enhancement_reasks_and_ranking(store):
+async def test_decisions_cover_guards_enhancement_and_ranking(store):
     run_store = RecordingStore()
     llm = ScriptedChat([enhanced(), "junk", "junk", verdict(9)])
 
@@ -231,12 +231,11 @@ async def test_decisions_cover_guards_enhancement_reasks_and_ranking(store):
 
     state = final_state(run_store)
     text = "\n".join(f"{d.step}: {d.text}" for d in state.decisions)
-    assert "guard before generate [step]: cancel not requested; budget ok: needs" in text
-    assert "guard before generate [branch 0]:" in text
+    assert "guard before generate [1 of 1 branches]: cancel not requested; budget ok" in text
+    assert "[branch 0]" not in text  # D5: one guard per step, not one per branch
     assert "resolved prompt:" in text and "must_have:" in text
-    assert "critic re-ask: the same images are checked again" in text
-    assert "critic re-asks 1 of" in text
-    assert "passed through at no cost" in text  # enhance and generate were not redone
+    assert "attempt ended: reached a verdict" in text  # one pass; the Critic retried in-step
+    assert "re-ask" not in text and "passed through" not in text  # no step was re-run
     assert "ranking (best first):" in text and "score 9" in text
     assert state.supervisor_spend.llm_calls == 0  # the supervisor makes no call of its own
 
@@ -287,7 +286,7 @@ async def test_the_snapshot_has_everything_the_inspector_shows(store):
         "wall_ms",
     } <= set(snap)
     assert snap["totals"]["llm_calls"] == 2 and snap["totals"]["image_calls"] == 1
-    assert snap["meta"]["critic_reask_cap"] == CFG.policy.max_critic_reasks
+    assert "critic_reask_cap" not in snap["meta"] and "retry_cap" not in snap["meta"]
     assert snap["budget"]["reserve_fraction"] == CFG.policy.budgets["free"].reserve_fraction
     json.dumps(snap)  # JSON-safe
 

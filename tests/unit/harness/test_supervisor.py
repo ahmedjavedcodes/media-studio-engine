@@ -152,6 +152,23 @@ async def test_happy_path_envelope(store):
         "width": 1024,
         "height": 1024,
         "billable": True,  # an image was generated
+        "documents": [  # §4.3: the same delivery as a one-layer document
+            {
+                "document_id": "doc_" + image_id.removeprefix("img_"),
+                "version": 1,
+                "size": {"w": 1024, "h": 1024},
+                "layers": [
+                    {
+                        "id": "lyr_" + image_id.removeprefix("img_") + "_1",
+                        "type": "image",
+                        "image_id": image_id,
+                        "role": "base",
+                    }
+                ],
+                "scores": {"quality_score": 9},
+                "rank": 1,
+            }
+        ],
     }
     assert env.summary == "A warm coffee shop interior at dusk."  # the Critic's summary
     assert await store.orphaned() == []
@@ -260,8 +277,11 @@ async def test_events_use_public_labels_only(store):
         (2, "Creating your image", "started"),
         (2, "Creating your image", "finished"),
         (3, "Finishing up", "started"),
+        (3, "Finishing up", "image_ready"),  # streamed as soon as the Critic allowed it
         (3, "Finishing up", "finished"),
     ]
+    (ready,) = [e for _, e in sink.events if e["phase"] == "image_ready"]
+    assert ready["image_id"] == env.output["image_ids"][0]
     blob = json.dumps([e for _, e in sink.events]) + env.model_dump_json()
     assert not any(name in blob for name in AGENT_NAMES)  # never in events or output
 

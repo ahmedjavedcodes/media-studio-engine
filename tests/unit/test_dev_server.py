@@ -63,7 +63,9 @@ def test_a_run_streams_public_events_then_one_result_with_image_urls(shim):
         results = [data for name, data in events if name == "result"]
 
         assert {s["public_label"] for s in steps} <= PUBLIC
-        assert all(set(s) == {"run_id", "step", "public_label", "phase", "ts"} for s in steps)
+        base = {"run_id", "step", "public_label", "phase", "ts"}
+        for s in steps:  # only image_ready adds a key: the image id, after the Critic allowed it
+            assert set(s) == (base | {"image_id"} if s["phase"] == "image_ready" else base)
         assert len(results) == 1 and events[-1][0] == "result"  # exactly one, and last
         result = results[0]
         assert result["status"] == "done"

@@ -11,8 +11,8 @@ FAILED envelopes (with the failure kind), and the caller ends the run before any
 for. The Gate and the Brief are deliberately two separate calls (§3): a model with one job and a
 strict schema is much harder to talk out of its job than one that also writes prompts.
 
-inputs (Gate):           prompt: str
-inputs (SafetyReviewer): prompt: str, safety_categories: list[str] (the Gate's concerns)
+inputs (Gate):           prompt: str, settings: dict[str, str] (optional; user text too)
+inputs (SafetyReviewer): prompt: str, settings (optional), safety_categories: list[str]
 """
 
 from __future__ import annotations
@@ -32,7 +32,8 @@ GATE_INPUT = PROMPTS_DIR / "image_create" / "gate.input.md"
 REVIEW_INPUT = PROMPTS_DIR / "image_create" / "safety_review.input.md"
 GATE_SUMMARY = "Checked the request."
 REVIEW_SUMMARY = "Reviewed the request."
-_TAG = tag_stripper("user_request", "concerns")
+_TAG = tag_stripper("user_request", "concerns", "settings")
+NONE_GIVEN = "none given"
 
 log = get_logger("agents.gate")
 
@@ -42,6 +43,17 @@ def _clean_prompt(inputs: dict[str, Any]) -> str:
     return _TAG.sub("", raw).strip() if isinstance(raw, str) else ""
 
 
+def _clean_settings(inputs: dict[str, Any]) -> str:
+    """User-chosen settings as `key: value` lines, tags stripped. They are judged with the
+    prompt: a `style` value is as much user text as the request itself."""
+    lines = []
+    for key, value in (inputs.get("settings") or {}).items():
+        k, v = _TAG.sub("", str(key)).strip(), _TAG.sub("", str(value)).strip()
+        if k and v:
+            lines.append(f"{k}: {v}")
+    return "\n".join(lines) or NONE_GIVEN
+
+
 class Gate(Agent):
     async def run(
         self, goal: Goal, stop: StoppingCondition, auth: AuthContext, inputs: dict[str, Any]
@@ -49,7 +61,7 @@ class Gate(Agent):
         prompt = _clean_prompt(inputs)
         if not prompt:
             return self.failed("no prompt given", Spend(), "invalid_input")
-        content = render(load_prompt(GATE_INPUT), prompt=prompt)
+        content = render(load_prompt(GATE_INPUT), prompt=prompt, settings=_clean_settings(inputs))
         result = await self.call_structured(auth, stop, content, GateDecision)
         if result.output is None:
             # Fail closed: an undecided Gate is never an allow.
@@ -94,7 +106,10 @@ class SafetyReviewer(Agent):
             _TAG.sub("", str(c)).strip() for c in inputs.get("safety_categories") or [] if c
         ]
         content = render(
-            load_prompt(REVIEW_INPUT), prompt=prompt, concerns=", ".join(concerns) or "none given"
+            load_prompt(REVIEW_INPUT),
+            prompt=prompt,
+            settings=_clean_settings(inputs),
+            concerns=", ".join(concerns) or NONE_GIVEN,
         )
         result = await self.call_structured(auth, stop, content, SafetyReview)
         if result.output is None:

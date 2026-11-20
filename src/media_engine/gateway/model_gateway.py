@@ -63,6 +63,9 @@ class ImageResult(BaseModel):
     is_fallback: bool
     attempts: list[AttemptInfo] = Field(default_factory=list)  # developer trace only
     steps: int | None = None  # steps sent (None: the provider's default)
+    # What the PROVIDER said each image is (response field, else its own byte sniff); None =
+    # not reported. The Image Creator still reads the type from the bytes before storing.
+    media_types: list[str | None] = Field(default_factory=list)
 
 
 class ModelGateway:
@@ -118,6 +121,7 @@ class ModelGateway:
             is_fallback=result.is_fallback,
             attempts=attempt_infos(result.attempts),
             steps=steps,
+            media_types=list(output.media_types),
         )
 
 

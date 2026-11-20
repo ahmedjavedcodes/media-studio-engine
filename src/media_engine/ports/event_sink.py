@@ -11,7 +11,10 @@ from pydantic import BaseModel, ConfigDict
 from media_engine.core.logging import get_logger
 from media_engine.harness.run_state import PublicLabel
 
-Phase = Literal["started", "progress", "finished"]
+# `image_ready`: one image passed the Critic's safety check and can be shown NOW, before the run
+# ends (IMAGE-CREATE-OPTIMIZE §5.3: stream each image as it finishes). Never sent for an image
+# that is unchecked or blocked.
+Phase = Literal["started", "progress", "finished", "image_ready"]
 
 log = get_logger("events")
 
@@ -26,15 +29,21 @@ class Event(BaseModel):
     public_label: PublicLabel
     phase: Phase
     ts: str
+    image_id: str | None = None  # only on `image_ready`: an id, never bytes or an internal name
 
 
-def make_event(run_id: str, step: int, public_label: PublicLabel, phase: Phase) -> Event:
+def make_event(
+    run_id: str, step: int, public_label: PublicLabel, phase: Phase, image_id: str | None = None
+) -> Event:
+    if (phase == "image_ready") != (image_id is not None):
+        raise ValueError("image_id is set exactly when phase is image_ready")
     return Event(
         run_id=run_id,
         step=step,
         public_label=public_label,
         phase=phase,
         ts=datetime.now(UTC).isoformat(),
+        image_id=image_id,
     )
 
 
@@ -52,7 +61,9 @@ def safe_emit(sink: EventSink, event: Event) -> None:
     if not isinstance(event, Event):
         raise TypeError(f"safe_emit takes an Event, got {type(event).__name__}; use make_event()")
     try:
-        sink.emit(event.run_id, event.model_dump())
+        # exclude_none: an ordinary event keeps its exact public shape; only `image_ready`
+        # carries `image_id`.
+        sink.emit(event.run_id, event.model_dump(exclude_none=True))
     except Exception:  # noqa: BLE001 - by contract an event failure must never surface
         with contextlib.suppress(Exception):
             log.warning("events.emit_failed", run_id=event.run_id)

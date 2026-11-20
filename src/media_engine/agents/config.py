@@ -30,6 +30,8 @@ class AgentPolicy(BaseModel):
     requires: list[Capability]
     models: dict[Plan, str]  # plan -> gateway chain name
     reasoning_effort: ReasoningEffort | None = None
+    # Sampling temperature sent with every call; None = the provider's default.
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     params: dict[str, Any] = Field(default_factory=dict)  # per-agent tunables, agent-validated
 
     @model_validator(mode="after")

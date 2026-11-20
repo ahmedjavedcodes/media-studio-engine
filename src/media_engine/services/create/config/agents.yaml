@@ -21,6 +21,10 @@ prompt_enhancer:
   prompt: image_create/prompt_enhancer.md
   requires: [structured_output]
   reasoning_effort: low
+  # D4: the enhancement runs ONCE per request and every image shares it, so temperature buys
+  # no variety (the seeds do that); it only makes the same input give a different prompt each
+  # run, which makes changes untestable. 0.2, per IMAGE-CREATE-OPTIMIZE §4.2.
+  temperature: 0.2
   params:
     # must_have grounding: keep an item only if at least this fraction of its word stems
     # appear in the user's request (or the item appears in it verbatim).
@@ -39,6 +43,9 @@ critic:
     # base64 per review (and twice that with a repair). Re-encoded as JPEG at this quality.
     max_side: 768
     jpeg_quality: 90
+    # One more attempt, inside the Critic, when a review ends with no verdict (create is linear:
+    # the supervisor never re-runs a step). Not after a block or an unfixable failure.
+    retries: 1
   models: {free: vision, pro: vision, max: vision, ultra: vision}
 
 image_grand_agent: # the supervisor: makes NO LLM call (create is linear, v2.2), so the chain is never used
@@ -47,6 +54,11 @@ image_grand_agent: # the supervisor: makes NO LLM call (create is linear, v2.2),
 
 image_creator: # no LLM: formats a request and calls the image gateway
   requires: [image]
+  params:
+    # Made ONCE at store time (spec §5.3): one resize serves the Critic, preview and gallery.
+    # Which size the Critic should read is experiment E1's question (it still sends 768 px).
+    thumbnail_sizes: [512, 256]
+    thumbnail_quality: 85
   models: {free: image_create, pro: image_create, max: image_create, ultra: image_create}
 
 grand_agent: # multi-step planner: a stub for now. Makes no LLM call, so the chain is never used.

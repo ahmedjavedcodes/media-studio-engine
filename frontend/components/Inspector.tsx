@@ -6,7 +6,7 @@ import { ms, num, since, usd } from "@/lib/format";
 
 /**
  * Developer inspector. Everything about a run: steps, every model call and which model served
- * it, tokens, reasoning, Critic re-asks, budget and decisions. Create is linear (v2.2): there
+ * it, tokens, reasoning, budget and decisions. Create is linear (v2.2): there
  * are no retries or levers to show. It reads GET /runs/:id/trace, a channel
  * apart from the public events, and is the ONE place internal names and model ids are shown.
  */
@@ -62,7 +62,6 @@ function statusTone(status: string): "gray" | "green" | "red" | "amber" | "blue"
 
 function SummaryBar({ trace, running }: { trace: Trace; running: boolean }) {
   const t = trace.totals;
-  const m = trace.meta;
   const items: [string, React.ReactNode][] = [
     ["Status", <Badge key="s" tone={statusTone(trace.status)}>{trace.status}</Badge>],
     ["Wall time", <span key="w">{ms(trace.wall_ms)}{running ? " …" : ""}</span>],
@@ -70,7 +69,6 @@ function SummaryBar({ trace, running }: { trace: Trace; running: boolean }) {
     ["Tokens", `${num(t.prompt_tokens)} in / ${num(t.completion_tokens)} out / ${num(t.reasoning_tokens)} reasoning / ${num(t.total_tokens)} total`],
     ["Neurons", num(t.neurons, 1)],
     ["USD", usd(t.cost_usd)],
-    ["Critic re-asks", `${trace.critic_reasks_used} of ${m.critic_reask_cap ?? "?"}`],
   ];
   return (
     <section className={panel}>
@@ -97,27 +95,33 @@ function Meter({ label, spent, total, reserve, fmt }: { label: string; spent: nu
     );
   }
   const usable = total * (1 - reserve);
-  const touched = spent > usable;
+  const over = spent > usable;
   const pct = Math.min(100, (spent / total) * 100);
+  // reserve 0 since create became linear: nothing re-runs a step, so no marker is drawn
+  const label2 = reserve > 0 ? (over ? "reserve touched" : "reserve untouched") : over ? "over budget" : "within budget";
   return (
     <div>
       <div className="mb-1 flex flex-wrap justify-between gap-2">
         <span className="font-medium">{label}</span>
         <span>
-          {fmt(spent)} of {fmt(total)} <Badge tone={touched ? "red" : "green"}>{touched ? "reserve touched" : "reserve untouched"}</Badge>
+          {fmt(spent)} of {fmt(total)} <Badge tone={over ? "red" : "green"}>{label2}</Badge>
         </span>
       </div>
       <div className="relative h-3 rounded bg-neutral-200">
-        <div className={`h-3 rounded ${touched ? "bg-red-500" : "bg-indigo-500"}`} style={{ width: `${pct}%` }} />
-        <div
-          className="absolute top-[-3px] h-[18px] w-0.5 bg-neutral-900"
-          style={{ left: `${(1 - reserve) * 100}%` }}
-          title={`${Math.round(reserve * 100)}% reserve starts here (kept for Critic re-asks)`}
-        />
+        <div className={`h-3 rounded ${over ? "bg-red-500" : "bg-indigo-500"}`} style={{ width: `${pct}%` }} />
+        {reserve > 0 && (
+          <div
+            className="absolute top-[-3px] h-[18px] w-0.5 bg-neutral-900"
+            style={{ left: `${(1 - reserve) * 100}%` }}
+            title={`${Math.round(reserve * 100)}% reserve starts here`}
+          />
+        )}
       </div>
-      <div className="mt-0.5 text-xs text-neutral-500">
-        marker: where the {Math.round(reserve * 100)}% reserve for Critic re-asks begins ({fmt(usable)})
-      </div>
+      {reserve > 0 && (
+        <div className="mt-0.5 text-xs text-neutral-500">
+          marker: where the {Math.round(reserve * 100)}% reserve begins ({fmt(usable)})
+        </div>
+      )}
     </div>
   );
 }
@@ -290,7 +294,7 @@ function Timeline({ trace }: { trace: Trace }) {
     });
   }
   for (const d of trace.decisions) {
-    const retry = d.step === "supervise" || d.text.includes("re-ask");
+    const retry = d.step === "supervise";
     entries.push({ ts: d.ts, sort: 2, kind: "decision", tone: retry ? "retry" : undefined, text: <span><Badge tone={retry ? "amber" : "gray"}>{d.step}</Badge> {d.text}</span> });
   }
   entries.sort((a, b) => a.ts.localeCompare(b.ts) || a.sort - b.sort);
@@ -306,7 +310,7 @@ function Timeline({ trace }: { trace: Trace }) {
           </li>
         ))}
       </ol>
-      <p className="mt-2 text-xs text-neutral-500">Amber rows are supervisor decisions and Critic re-asks (the same images checked again, no new image).</p>
+      <p className="mt-2 text-xs text-neutral-500">Amber rows are supervisor decisions.</p>
     </section>
   );
 }

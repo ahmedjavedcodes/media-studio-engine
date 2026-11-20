@@ -47,8 +47,11 @@ def store(tmp_path: Path) -> LocalArtifactStore:
     return LocalArtifactStore(tmp_path / ".artifacts")
 
 
-def critic(backend: ScriptedChat, store: Any) -> Critic:
-    config = AgentConfig.from_policy("critic", CFG.agent("critic"), CriticOutput)
+def critic(backend: ScriptedChat, store: Any, *, retries: int | None = None) -> Critic:
+    policy = CFG.agent("critic")
+    if retries is not None:  # override the configured in-step retry
+        policy = policy.model_copy(update={"params": {**policy.params, "retries": retries}})
+    config = AgentConfig.from_policy("critic", policy, CriticOutput)
     gateway = LLMGateway(backend, chain_resolver(CFG.agents))
     return Critic(config, gateway, ListEventSink(), artifacts=store)
 
@@ -165,14 +168,45 @@ async def test_envelope_has_no_image_data(store):
 
 
 async def test_invalid_output_after_repair_is_failed_and_not_safety_checked(store):
-    backend = ScriptedChat(['{"quality_score": 11}', '{"quality_score": "high"}'])
+    bad = ['{"quality_score": 11}', '{"quality_score": "high"}']  # a reply and its repair
+    backend = ScriptedChat(bad * 2)  # the first attempt, then the one in-step retry
 
     _, env = await review(backend, store)
 
     assert env.state.status is Status.FAILED
     assert env.output == {"failure": "invalid_output"}
     assert "image_id" not in env.output  # nothing here may be read as a deliverable
-    assert env.state.spend.llm_calls == 2
+    assert env.state.spend.llm_calls == 4  # both attempts are charged to the step
+
+
+async def test_a_review_with_no_verdict_is_retried_once_inside_the_step(store):
+    backend = ScriptedChat(["junk", "junk", verdict(quality_score=8)])
+
+    _, env = await review(backend, store)
+
+    assert env.state.status is Status.DONE and env.output["quality_score"] == 8
+    assert env.state.spend.llm_calls == 3
+
+
+async def test_a_block_is_never_retried_even_when_the_reply_was_invalid(store):
+    # The first reply says block but fails validation; its repair is junk. Block wins and the
+    # in-step retry never runs: 2 requests (the reply and its repair), not 4.
+    backend = ScriptedChat(['{"safety_verdict": "block", "safety_reason": "gore"', "junk"])
+
+    _, env = await review(backend, store)
+
+    assert env.state.status is Status.REJECTED
+    assert len(backend.requests) == 2
+
+
+async def test_an_unfixable_failure_is_not_retried(store):
+    from media_engine.gateway.errors import AllProvidersFailed
+
+    backend = ScriptedChat([AllProvidersFailed("vision", [])])  # a retry would raise: none left
+
+    _, env = await review(backend, store)
+
+    assert env.output == {"failure": "no_provider"} and len(backend.requests) == 1
 
 
 async def test_vision_model_refusing_to_look_is_failed_with_its_spend(store):
@@ -298,7 +332,7 @@ async def test_the_old_6000_token_budget_could_not_repair(store):
     image_id = await store.put(image_bytes(), "image/png")
     small = STOP.model_copy(update={"max_tokens": 6000})
 
-    env = await critic(backend, store).run(
+    env = await critic(backend, store, retries=0).run(  # the repair budget, not the retry
         GOAL, small, AUTH, {"image_id": image_id, "prompt": USER_PROMPT}
     )
 

@@ -57,7 +57,7 @@ from media_engine.contracts import (
 from media_engine.core.logging import get_logger
 from media_engine.gateway.llm_gateway import LLMGateway, chain_resolver
 from media_engine.gateway.router import Gateway
-from media_engine.guardrails.code_checks import check_prompt
+from media_engine.guardrails.code_checks import check_prompt, check_settings
 from media_engine.harness import trace as tracing
 from media_engine.harness.run_state import GateRecord
 from media_engine.harness.trace import Trace
@@ -173,6 +173,8 @@ async def create_images(
 
     # 0. code checks: no model, no cost. A refusal never reaches the Gate.
     checked = check_prompt(prompt)
+    if checked.ok:
+        checked = check_settings(settings or {})
     if not checked.ok:
         trace.decide("route", f"code check refused the request: {checked.rule}")
         log.info("create.code_check_refused", run_id=run_id, rule=checked.rule)
@@ -197,7 +199,7 @@ async def create_images(
             Goal(task="gate", instructions="Check the request and decide how to handle it."),
             stop,
             auth,
-            {"prompt": prompt},
+            {"prompt": prompt, "settings": settings or {}},  # settings are user text too
         )
     spend = gated.state.spend
     if gated.state.status is not Status.DONE:
@@ -234,7 +236,11 @@ async def create_images(
                 Goal(task="review", instructions="Decide whether the request may be made."),
                 stop,
                 auth,
-                {"prompt": prompt, "safety_categories": verdict.safety_categories},
+                {
+                    "prompt": prompt,
+                    "settings": settings or {},
+                    "safety_categories": verdict.safety_categories,
+                },
             )
         spend = spend.plus(reviewed.state.spend)
         if reviewed.state.status is not Status.DONE:

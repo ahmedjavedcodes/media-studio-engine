@@ -148,7 +148,8 @@ class RunState(BaseModel):
     attempts: list[AttemptRecord] = Field(default_factory=list)  # one per attempt, oldest first
     # DEPRECATED (v2.2): always 0 (it counted lever retries). Contract only, see replans_used.
     retries_used: int = 0
-    critic_reasks_used: int = 0  # Critic re-asks on the same image (harness.yaml max_critic_reasks)
+    # DEPRECATED (create is linear; the Critic retries inside its step): always 0. Contract only.
+    critic_reasks_used: int = 0
     # The supervisor's own LLM calls: always zero since v2.2 (it made the lever choice). Kept
     # apart from the plan so that "the
     # supervisor made zero LLM calls" can be read straight off RunState; run_spend adds it in.

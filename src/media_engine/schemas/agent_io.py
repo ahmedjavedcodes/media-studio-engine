@@ -137,6 +137,8 @@ class GenerationResult(BaseModel):
     width: int
     height: int
     mime: str
+    # Thumbnail sizes (long side, px) stored with the image; a failed one is simply absent.
+    thumbnails: list[int] = Field(default_factory=list)
 
 
 def _normalise_verdict(value: Any) -> Any:
@@ -156,3 +158,33 @@ class CriticOutput(BaseModel):
     def _verdict_case(cls, value: Any) -> Any:
         # "Block" / " BLOCK " must still be a block, not a validation error.
         return _normalise_verdict(value)
+
+
+# -- the service output: a document, not an image (IMAGE-CREATE-OPTIMIZE §4.3) ------------------
+
+
+class DocumentSize(BaseModel):
+    w: int = Field(gt=0)
+    h: int = Field(gt=0)
+
+
+class Layer(BaseModel):
+    """One layer of a document. Create emits one `image` layer with role `base`; edit replaces
+    a layer (version 2), merge holds several image layers, a poster adds text layers."""
+
+    id: str
+    type: Literal["image", "text"]
+    image_id: str | None = None  # for image layers
+    role: str = "base"
+
+
+class Document(BaseModel):
+    """A created image is a document with one layer. `scores` is the Critic's quality reading
+    (information only: create never acts on it); `rank` is 1 for the best."""
+
+    document_id: str
+    version: int = Field(default=1, ge=1)
+    size: DocumentSize
+    layers: list[Layer] = Field(min_length=1)
+    scores: dict[str, int] = Field(default_factory=dict)
+    rank: int = Field(ge=1)

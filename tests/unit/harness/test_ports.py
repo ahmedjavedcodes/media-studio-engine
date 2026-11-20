@@ -62,8 +62,18 @@ async def test_orphaned_images_are_recorded_and_swept(tmp_path: Path) -> None:
 
 
 def test_make_event_has_exact_public_shape() -> None:
-    event = make_event("run_1", 2, "Creating your image", "started").model_dump()
+    # Serialised as safe_emit does (exclude_none): an ordinary event keeps its exact shape.
+    event = make_event("run_1", 2, "Creating your image", "started").model_dump(exclude_none=True)
     assert set(event) == {"run_id", "step", "public_label", "phase", "ts"}
+
+
+def test_image_ready_carries_exactly_an_image_id() -> None:
+    event = make_event("run_1", 3, "Finishing up", "image_ready", image_id="img_x")
+    assert event.model_dump(exclude_none=True)["image_id"] == "img_x"
+    with pytest.raises(ValueError):
+        make_event("run_1", 3, "Finishing up", "image_ready")  # no id
+    with pytest.raises(ValueError):
+        make_event("run_1", 3, "Finishing up", "finished", image_id="img_x")  # id on another
 
 
 def test_make_event_refuses_internal_names() -> None:

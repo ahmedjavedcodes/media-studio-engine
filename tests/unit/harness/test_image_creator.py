@@ -66,7 +66,9 @@ async def test_generates_stores_and_returns_only_the_id(store):
     assert await store.get(result.image_id) == png  # the bytes live in the store...
     # ...and the envelope holds only the GenerationResult scalars, no encoding of them.
     assert set(env.output) == set(GenerationResult.model_fields)
-    assert all(v is None or isinstance(v, str | int | float | bool) for v in env.output.values())
+    scalars = {k: v for k, v in env.output.items() if k != "thumbnails"}
+    assert all(v is None or isinstance(v, str | int | float | bool) for v in scalars.values())
+    assert all(isinstance(size, int) for size in env.output["thumbnails"])  # sizes, not bytes
     assert base64.b64encode(png).decode()[:64] not in env.model_dump_json()
     assert (result.provider, result.model, result.seed) == (
         "cloudflare",
@@ -243,3 +245,89 @@ async def test_a_cancel_during_the_store_still_finishes_the_put_and_orphans_the_
     orphans = [json.loads(row) for row in (slow.root / "orphaned.jsonl").read_text().splitlines()]
     assert [o["reason"] for o in orphans] == ["cancelled"]  # not leaked: it will be swept
     assert await slow.get(orphans[0]["image_id"])  # and the put really finished
+
+
+# -- step 5: the stored type comes from the bytes; the provider's claim is passed through ------
+
+
+class ClaimingImages(ScriptedImages):
+    """A backend whose provider CLAIMS a media type for each image (like OpenRouter's
+    data[].media_type), which may disagree with the bytes."""
+
+    def __init__(self, replies: Any, claims: list[str | None]) -> None:
+        super().__init__(replies)
+        self.claims = claims
+
+    async def image(self, task: str, request: Any, **kwargs: Any) -> Any:
+        import dataclasses
+
+        result = await super().image(task, request, **kwargs)
+        output = result.output.model_copy(update={"media_types": self.claims})
+        return dataclasses.replace(result, output=output)
+
+
+async def test_the_stored_type_comes_from_the_bytes_and_a_wrong_claim_is_logged(store):
+    from structlog.testing import capture_logs
+
+    backend = ClaimingImages([image_bytes()], claims=["image/jpeg"])  # the bytes are PNG
+
+    with capture_logs() as logs:
+        env = await creator(backend, store).run(
+            GOAL, STOP, AUTH, {"prompt": "a cat", "width": 1024, "height": 1024, "seed": 1}
+        )
+
+    assert env.state.status is Status.DONE and env.output["mime"] == "image/png"
+    assert (store.root / f"{env.output['image_id']}.png").exists()  # never .jpg
+    mismatch = [e for e in logs if e["event"] == "creator.media_type_mismatch"]
+    assert mismatch and mismatch[0]["claimed"] == "image/jpeg"
+
+
+async def test_a_matching_claim_is_not_logged(store):
+    from structlog.testing import capture_logs
+
+    backend = ClaimingImages([image_bytes()], claims=["image/png"])
+
+    with capture_logs() as logs:
+        await creator(backend, store).run(
+            GOAL, STOP, AUTH, {"prompt": "a cat", "width": 1024, "height": 1024, "seed": 1}
+        )
+
+    assert not [e for e in logs if e["event"] == "creator.media_type_mismatch"]
+
+
+# -- step 5: thumbnails are made once, at store time, and go with their image -------------------
+
+
+async def test_thumbnails_are_stored_with_the_image(store):
+    from media_engine.core.images import inspect_image
+
+    env = await run(ScriptedImages([image_bytes(1024, 1024)]), store)
+
+    result = GenerationResult.model_validate(env.output)
+    assert result.thumbnails == [512, 256]
+    for size in (512, 256):
+        info = inspect_image(await store.get_thumbnail(result.image_id, size))
+        assert max(info.width, info.height) == size and info.mime == "image/jpeg"
+    assert await store.get(result.image_id) == image_bytes(1024, 1024)  # never a thumbnail
+
+
+async def test_an_orphaned_image_takes_its_thumbnails_with_it(store):
+    env = await run(ScriptedImages([image_bytes(1024, 1024)]), store)
+    image_id = env.output["image_id"]
+
+    await store.mark_orphaned(image_id, "unchecked")
+    removed = await store.sweep_orphaned()
+
+    assert removed == 3  # the image and both thumbnails
+    assert list(store.root.glob(f"{image_id}*")) == []
+
+
+async def test_a_failed_thumbnail_never_fails_the_image(store):
+    class NoThumbs(LocalArtifactStore):
+        async def put_thumbnail(self, image_id, size, data, mime):  # type: ignore[no-untyped-def]
+            raise OSError("disk full")
+
+    broken = NoThumbs(store.root)
+    env = await run(ScriptedImages([image_bytes(1024, 1024)]), broken)
+
+    assert env.state.status is Status.DONE and env.output["thumbnails"] == []

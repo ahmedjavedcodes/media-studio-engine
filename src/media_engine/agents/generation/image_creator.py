@@ -41,7 +41,7 @@ from media_engine.contracts import (
     Status,
     StoppingCondition,
 )
-from media_engine.core.images import NotAnImage, inspect_image
+from media_engine.core.images import NotAnImage, downscale, inspect_image
 from media_engine.core.logging import get_logger
 from media_engine.gateway.errors import ContentRefused, GatewayError
 from media_engine.gateway.model_gateway import ImageResult, ModelGateway
@@ -68,6 +68,15 @@ class CreatorInputs(BaseModel):
     chain_offset: int = Field(default=0, ge=0)
 
 
+class CreatorParams(BaseModel):
+    """`params` block for image_creator in agents.yaml."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    thumbnail_sizes: list[int] = Field(default_factory=list)  # long side, px
+    thumbnail_quality: int = Field(default=85, ge=1, le=95)
+
+
 class ImageCreator(Agent):
     def __init__(
         self,
@@ -82,6 +91,22 @@ class ImageCreator(Agent):
         super().__init__(config, None, events)  # no LLM gateway, by design
         self._images = images
         self._artifacts = artifacts
+        self.params = CreatorParams.model_validate(config.model_policy.params)
+
+    async def _thumbnails(self, image_id: str, data: bytes) -> list[int]:
+        """Best effort: a thumbnail that fails is logged and skipped, never fails the image
+        (the original is what was paid for). Returns the sizes stored."""
+        made: list[int] = []
+        for size in self.params.thumbnail_sizes:
+            try:
+                thumb, mime = await asyncio.to_thread(
+                    downscale, data, size, self.params.thumbnail_quality
+                )
+                await self._artifacts.put_thumbnail(image_id, size, thumb, mime)
+                made.append(size)
+            except Exception:
+                log.warning("creator.thumbnail_failed", size=size, exc_info=True)
+        return made
 
     async def run(
         self, goal: Goal, stop: StoppingCondition, auth: AuthContext, inputs: dict[str, Any]
@@ -132,7 +157,27 @@ class ImageCreator(Agent):
                 args, tier, started_at, started, result=result, size=len(data), failure="bad_image"
             )
             return self.failed(str(err), spend, "bad_image")
-        put = asyncio.ensure_future(self._artifacts.put(data, info.mime))
+        claimed = result.media_types[0] if result.media_types else None
+        if claimed is not None and claimed != info.mime:
+            # The stored type always comes from the bytes (never a hard-coded extension, never
+            # the provider's word alone); a disagreement is worth knowing about.
+            log.warning(
+                "creator.media_type_mismatch",
+                provider=result.provider,
+                model=result.model,
+                claimed=claimed,
+                detected=info.mime,
+            )
+        stored: list[int] = []
+
+        async def store() -> str:
+            # The image and its thumbnails in ONE shielded task: a cancel can never lose the id
+            # of something already stored (it is orphaned and swept instead).
+            new_id = await self._artifacts.put(data, info.mime)
+            stored.extend(await self._thumbnails(new_id, data))
+            return new_id
+
+        put = asyncio.ensure_future(store())
         try:
             # Shielded: a cancel must not abandon a put half-way, or the image is stored but its
             # id is lost and it is never swept.
@@ -166,6 +211,7 @@ class ImageCreator(Agent):
             width=info.width,
             height=info.height,
             mime=info.mime,
+            thumbnails=stored,
         )
         if (info.width, info.height) != (args.width, args.height):
             log.info(

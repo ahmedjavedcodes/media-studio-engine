@@ -34,7 +34,8 @@ export const PUBLIC_LABELS = [
 ] as const;
 export type PublicLabel = (typeof PUBLIC_LABELS)[number];
 
-export type Phase = "started" | "progress" | "finished";
+// image_ready: one image passed the safety check and can be shown now, before the run ends.
+export type Phase = "started" | "progress" | "finished" | "image_ready";
 
 export interface CreateRequest {
   prompt: string;
@@ -51,6 +52,7 @@ export interface RunEvent {
   public_label: PublicLabel;
   phase: Phase;
   ts: string;
+  image_id?: string; // only on image_ready
 }
 
 export interface ImageResult {
@@ -81,6 +83,11 @@ const BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replac
 
 function isPublicLabel(value: unknown): value is PublicLabel {
   return PUBLIC_LABELS.some((label) => label === value);
+}
+
+/** URL of a stored image, for an <img> (never bytes). */
+export function imageUrl(imageId: string): string {
+  return absolute(`/images/${imageId}`);
 }
 
 function absolute(url: string): string {

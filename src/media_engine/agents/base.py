@@ -324,6 +324,7 @@ class Agent(ABC):
                 max_tokens=max_tokens,
                 json_mode=True,
                 reasoning_effort=self.config.model_policy.reasoning_effort,
+                temperature=self.config.model_policy.temperature,
             )
         except BaseException as err:  # trace the call that never returned, then re-raise
             self._trace_failed(result, messages, err, was_repair, started_at, started)

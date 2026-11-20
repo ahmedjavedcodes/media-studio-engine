@@ -3,7 +3,8 @@
 Plain code: no model, no network, no cost. A refused request never reaches the Gate, so it
 spends nothing, not even a free Groq call. The rules live in `rules.yaml` (config, not code).
 
-What is checked today (the owner chose a MINIMAL list, 2026-11-20):
+What is checked today (the owner chose a MINIMAL list, 2026-11-20), on the prompt AND on every
+`settings` key and value (`check_settings`: they reach the enhancer's prompt too):
     - prompt length and characters (control characters other than newline and tab)
     - prompt-injection phrases (a short, specific regex list)
     - banned terms and protected (celebrity / brand) names: the lists exist but are EMPTY
@@ -108,4 +109,17 @@ def check_prompt(prompt: str, compiled: _Compiled | None = None) -> CheckResult:
     return CheckResult(True)
 
 
-__all__ = ["CheckResult", "Rules", "check_prompt", "compile_rules"]
+def check_settings(settings: dict[str, str], compiled: _Compiled | None = None) -> CheckResult:
+    """The same checks on every settings KEY and VALUE: they reach the enhancer's prompt, so
+    they are user text like the prompt (review round 2). Empty values are skipped, not refused."""
+    for key, value in settings.items():
+        for text in (str(key), str(value)):
+            if not text.strip():
+                continue
+            result = check_prompt(text, compiled)
+            if not result.ok:
+                return CheckResult(False, result.rule, f"a setting failed: {result.reason}")
+    return CheckResult(True)
+
+
+__all__ = ["CheckResult", "Rules", "check_prompt", "check_settings", "compile_rules"]

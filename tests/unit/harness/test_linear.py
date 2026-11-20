@@ -169,47 +169,38 @@ async def test_no_provider_for_the_creator_fails_at_once(store, plan):
     assert len(images.requests) == 1
 
 
-# -- the Critic re-ask: the same images, its own cap, no new image -------------------------------
+# -- the Critic retries once INSIDE its step: no step is re-run, no new image -----------------
 
 
-async def test_a_critic_failure_checks_the_same_image_again_without_regenerating(store):
+async def test_a_critic_glitch_is_retried_inside_the_step_without_regenerating(store):
     llm = ScriptedChat([enhanced(), "garbage", "more garbage", verdict(9)])
     images = ScriptedImages([red()])
     run_store = RecordingStore()
 
     env = await create(build(llm, images, store, run_store=run_store), "free")
 
+    state = final_state(run_store)
     assert env.state.status is Status.DONE
     assert len(images.requests) == 1  # no second image: the same image, checked again
-    assert calls_by_agent(llm) == {ENHANCER: 1, CRITIC: 3}
-    assert final_state(run_store).critic_reasks_used == 1
+    assert calls_by_agent(llm) == {ENHANCER: 1, CRITIC: 3}  # attempt + repair, then the retry
+    assert state.critic_reasks_used == 0  # deprecated: the supervisor re-runs nothing
+    assert [s.status for s in state.plan] == ["done", "done", "done"]
     assert await store.orphaned() == []
 
 
-async def test_critic_re_asks_have_their_own_small_cap(store):
-    cap = CFG.policy.max_critic_reasks
-    bad = ["junk", "junk"]  # one failed critique: the reply and its one repair
-    llm = ScriptedChat([enhanced(), *bad * (cap + 1)])
+async def test_a_critic_that_fails_twice_leaves_the_image_unchecked_and_undelivered(store):
+    llm = ScriptedChat([enhanced(), "junk", "junk", "junk", "junk"])  # 2 attempts x (reply+repair)
     images = ScriptedImages([red()])
 
     env = await create(build(llm, images, store), "ultra")
 
     assert env.state.status is Status.FAILED and len(images.requests) == 1
-    assert calls_by_agent(llm)[CRITIC] == 2 * (cap + 1)  # asked, re-asked `cap` times, stops
-
-
-async def test_a_critic_failure_after_the_cap_leaves_the_image_unchecked_and_undelivered(store):
-    bad = ["garbage", "more garbage"]
-    llm = ScriptedChat([enhanced(), *bad * (CFG.policy.max_critic_reasks + 1)])
-
-    env = await create(build(llm, ScriptedImages([red()]), store), "free")
-
-    assert env.state.status is Status.FAILED
+    assert calls_by_agent(llm)[CRITIC] == 4  # the one in-step retry, then it stops
     assert env.output["image_ids"] == []
     assert list(orphan_reasons(store).values()) == ["unchecked"]
 
 
-async def test_no_provider_for_the_critic_is_not_re_asked(store):
+async def test_no_provider_for_the_critic_is_not_retried(store):
     llm = ScriptedChat([enhanced(), AllProvidersFailed("vision", [])])
     images = ScriptedImages([red()])
 
@@ -316,7 +307,7 @@ async def test_the_dollar_estimate_is_ignored_when_paid_providers_are_off(store)
 # -- RunState, events, labels -------------------------------------------------------------------
 
 
-async def test_run_state_round_trips_at_every_boundary_with_a_critic_re_ask(store):
+async def test_run_state_round_trips_at_every_boundary_with_a_critic_retry(store):
     run_store = RecordingStore()
     llm = ScriptedChat([enhanced(), "junk", "junk", verdict(9)])
 
@@ -385,13 +376,61 @@ async def test_the_production_budget_affords_the_plans_images(store, plan, n):
     assert len(env.output["image_ids"]) == n and len(images.requests) == n
 
 
-async def test_a_critic_re_ask_still_fits_on_free_after_two_images(store):
-    # A re-ask is checked against the whole remaining budget, not just the reserve.
-    llm = ScriptedChat([enhanced(), "junk", "junk", "junk", "junk", verdict(9), verdict(8)])
-    images = ScriptedImages([red(), blue()])
-    run_store = RecordingStore()
+# -- D4: the enhancer runs at temperature 0.2; nothing else sets one ----------------------------
 
-    env = await create(build(llm, images, store, run_store=run_store), "free", n=2)
 
-    assert env.state.status is Status.DONE and len(env.output["image_ids"]) == 2
-    assert final_state(run_store).critic_reasks_used == 1 and len(images.requests) == 2
+async def test_the_enhancer_sends_temperature_0_2_and_the_critic_none(store):
+    llm = ScriptedChat([enhanced(), verdict(9)])
+
+    await create(build(llm, ScriptedImages([red()]), store), "free")
+
+    by_agent = dict(zip(llm.agents, (req for _, req in llm.requests), strict=True))
+    assert by_agent[ENHANCER].temperature == 0.2
+    assert by_agent[CRITIC].temperature is None
+
+
+# -- §4.3: the delivery is also a list of one-layer documents, ranked -------------------------------
+
+
+async def test_n_images_are_delivered_as_ranked_one_layer_documents(store):
+    from media_engine.schemas import Document
+
+    llm = ScriptedChat([enhanced(), verdict(6), verdict(9), verdict(7)])
+    images = ScriptedImages([red(), blue(), image_bytes(color="green")])
+
+    env = await create(build(llm, images, store), "ultra", n=3)
+
+    documents = [Document.model_validate(d) for d in env.output["documents"]]
+    assert [d.rank for d in documents] == [1, 2, 3]
+    assert [d.scores["quality_score"] for d in documents] == [9, 7, 6]  # best first
+    assert [d.layers[0].image_id for d in documents] == env.output["image_ids"]  # same order
+    assert all(len(d.layers) == 1 and d.layers[0].role == "base" for d in documents)
+    assert all(d.version == 1 for d in documents)
+
+
+async def test_a_rejected_run_has_no_documents(store):
+    block = verdict(9, safety_verdict="block", safety_reason="gore")
+    env = await create(build(ScriptedChat([enhanced(), block]), ScriptedImages([red()]), store))
+    assert env.state.status is Status.REJECTED and "documents" not in env.output
+
+
+# -- §5.3 streaming: only an image the Critic ALLOWED is ever streamed ------------------------------
+
+
+async def test_a_blocked_image_is_never_streamed(store):
+    sink = ListEventSink()
+    block = verdict(9, safety_verdict="block", safety_reason="gore")
+    llm = ScriptedChat([enhanced(), block])
+
+    await create(build(llm, ScriptedImages([red()]), store, events=sink), "free")
+
+    assert not [e for _, e in sink.events if e["phase"] == "image_ready"]
+
+
+async def test_an_unchecked_image_is_never_streamed(store):
+    sink = ListEventSink()
+    llm = ScriptedChat([enhanced(), "junk", "junk", "junk", "junk"])  # the Critic never decides
+
+    await create(build(llm, ScriptedImages([red()]), store, events=sink), "free")
+
+    assert not [e for _, e in sink.events if e["phase"] == "image_ready"]

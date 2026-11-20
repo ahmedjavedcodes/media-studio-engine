@@ -75,6 +75,7 @@ class LLMGateway:
         max_tokens: int | None = None,
         json_mode: bool = True,
         reasoning_effort: ReasoningEffort | None = None,
+        temperature: float | None = None,
     ) -> LLMResult:
         # TODO: let auth.model_demand ("cheap"/"best") shift the chain once tiers are priced.
         chain = self._resolve_chain(agent, auth.plan)
@@ -83,6 +84,7 @@ class LLMGateway:
             max_tokens=max_tokens,
             json_mode=json_mode,
             reasoning_effort=reasoning_effort,
+            temperature=temperature,
         )
         started = time.perf_counter()
         result = await self._backend.chat(chain, request)

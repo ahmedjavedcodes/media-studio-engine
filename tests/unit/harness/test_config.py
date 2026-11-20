@@ -107,7 +107,9 @@ def test_create_has_no_retry_policy(cfg) -> None:  # type: ignore[no-untyped-def
     assert "max_retries" not in fields and "levers" not in fields
     for plan in PLANS:
         assert cfg.policy.stopping_condition("generate", plan, "x").max_retries == 0
-    assert cfg.policy.max_critic_reasks == 2  # the one re-run left: same images, no new spend
+    assert "max_critic_reasks" not in fields  # no step is re-run; the Critic retries in-step
+    assert cfg.agent("critic").params["retries"] == 1
+    assert all(b.reserve_fraction == 0.0 for b in cfg.policy.budgets.values())
 
 
 def test_the_supervisor_makes_no_llm_call(cfg) -> None:  # type: ignore[no-untyped-def]

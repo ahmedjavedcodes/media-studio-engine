@@ -276,15 +276,33 @@ async def test_a_low_score_does_not_retry_an_n_image_request(store):
     assert len(env.output["image_ids"]) == 2  # every image, whatever its score
 
 
-async def test_a_block_among_n_images_rejects_the_run_and_delivers_none(store):
+async def test_a_block_among_n_images_drops_that_image_and_delivers_the_rest(store):
+    # Settle rule (spec §5.5): one flagged image is dropped, the other three were paid for and
+    # are allowed, so they are delivered. (It used to reject the whole run.)
     block = verdict(9, safety_verdict="block", safety_reason="graphic violence")
     llm = ScriptedChat([enhanced(), verdict(9), verdict(9), block, verdict(9)])
 
     env = await create(build(llm, ScriptedImages(pics(4)), store, cfg=rich()), "ultra", n=4)
 
-    assert env.state.status is Status.REJECTED
-    assert env.output["image_ids"] == []
-    assert Counter(orphan_reasons(store).values()) == {"run_rejected": 3, "safety_block": 1}
+    assert env.state.status is Status.DONE_WITH_ISSUES
+    assert len(env.output["image_ids"]) == 3
+    assert "1 of 4 images were removed by the safety review." in env.output["issues"]
+    assert Counter(orphan_reasons(store).values()) == {"safety_block": 1}
+    assert env.output["billable"] is True
+
+
+async def test_every_image_blocked_rejects_the_run_and_logs_a_gate_miss(store):
+    block = verdict(9, safety_verdict="block", safety_reason="graphic violence")
+    llm = ScriptedChat([enhanced(), block, block])
+    run_store = RecordingStore()
+
+    env = await create(
+        build(llm, ScriptedImages(pics(2)), store, run_store=run_store, cfg=rich()), "ultra", n=2
+    )
+
+    assert env.state.status is Status.REJECTED and env.output["image_ids"] == []
+    assert Counter(orphan_reasons(store).values()) == {"safety_block": 2}
+    assert any("GATE MISS" in d.text for d in final_state(run_store).decisions)
 
 
 async def test_the_budget_is_checked_before_each_branchs_generation_call(store):
@@ -318,7 +336,10 @@ async def test_branch_progress_events_use_public_labels_only(store):
         "Creating your image",
         "Finishing up",
     }
-    assert all(set(e) == {"run_id", "step", "public_label", "phase", "ts"} for e in events)
+    base = {"run_id", "step", "public_label", "phase", "ts"}
+    for e in events:  # only image_ready adds a key: the image id, after the Critic allowed it
+        assert set(e) == (base | {"image_id"} if e["phase"] == "image_ready" else base)
+    assert progress[(3, "image_ready")] == 3  # each image streamed as soon as it was allowed
 
 
 async def test_a_raising_event_sink_does_not_fail_a_run_with_branches(store):
@@ -516,10 +537,13 @@ async def test_a_cancel_set_in_the_store_survives_the_harness_saving_over_it(sto
     assert env.state.status is Status.CANCELLED
 
 
-# -- review fix 2: a block is never overwritten by a cancel (rule 4) -----------------------------
+# -- a block drops ONE image; a cancel still returns only images the Critic allowed --------------
 
 
-async def test_block_plus_cancel_in_flight_is_still_rejected_and_delivers_nothing(store):
+async def test_block_plus_cancel_in_flight_returns_only_the_allowed_image(store):
+    # Settle rule (spec §5.5): the block drops its own image only. The cancel ends the run and,
+    # as for any cancel, returns the images the Critic had allowed; the blocked image and the
+    # unchecked (hanging) one are never returned.
     block = verdict(9, safety_verdict="block", safety_reason="graphic violence")
     llm = HangingChat([enhanced(), block, verdict(9), "HANG"])  # blocked, allowed, hanging
     run_store = FlagStore(lambda: llm.hung == 1)
@@ -527,14 +551,14 @@ async def test_block_plus_cancel_in_flight_is_still_rejected_and_delivers_nothin
 
     env = await run(create(agent, "free", n=3))
 
-    assert env.state.status is Status.REJECTED  # not CANCELLED, whatever arrived last
-    assert env.output["image_ids"] == []  # not even the image that was allowed
+    assert env.state.status is Status.CANCELLED
+    assert len(env.output["image_ids"]) == 1  # the allowed one only
     reasons = Counter(orphan_reasons(store).values())
-    assert reasons == {"safety_block": 1, "run_rejected": 1, "unchecked": 1}
+    assert reasons == {"safety_block": 1, "unchecked": 1}
 
 
 async def test_a_branch_gate_cannot_overwrite_a_block_set_while_it_awaited_the_store(store):
-    from media_engine.agents.image_grand.supervisor import Live, Outcome
+    from media_engine.agents.image_grand.supervisor import Outcome
 
     agent = build(ScriptedChat([]), ScriptedImages([]), store, cfg=rich())
     ctx = agent.new_context(auth_for_tests(), {"prompt": "x", "n": 2})
@@ -546,11 +570,11 @@ async def test_a_branch_gate_cannot_overwrite_a_block_set_while_it_awaited_the_s
 
     agent._refresh_cancel = sibling_blocks_during_the_await  # type: ignore[method-assign]
 
-    assert await agent._branch_gate(ctx, "critique", step, record, Live()) is False
+    assert await agent._branch_gate(ctx, step, record) is False
     assert ctx.outcome is not None and ctx.outcome.status is Status.REJECTED
 
 
-async def test_settle_returns_rejected_whenever_any_image_was_blocked(store):
+async def test_settle_never_delivers_a_blocked_image_whatever_the_outcome(store):
     from media_engine.agents.image_grand.supervisor import Outcome
 
     agent = build(ScriptedChat([]), ScriptedImages([]), store, cfg=rich())
@@ -562,7 +586,18 @@ async def test_settle_returns_rejected_whenever_any_image_was_blocked(store):
 
     outcome = await agent._settle(ctx)
 
-    assert outcome.status is Status.REJECTED and outcome.output == {}
+    assert outcome.status is Status.CANCELLED and outcome.output == {"image_ids": ["img_a"]}
+
+
+async def test_settle_rejects_when_every_reviewed_image_was_blocked(store):
+    agent = build(ScriptedChat([]), ScriptedImages([]), store, cfg=rich())
+    ctx = agent.new_context(auth_for_tests(), {"prompt": "x", "n": 2})
+    for record, image_id in zip(ctx.state.round, ("img_a", "img_b"), strict=True):
+        record.image_id, record.verdict = image_id, "block"
+
+    outcome = await agent._settle(ctx)
+
+    assert outcome.status is Status.REJECTED
 
 
 # -- review fix 6: the branch gate does not charge the generate estimate twice -------------------
@@ -577,7 +612,8 @@ async def test_the_gate_counts_a_generated_image_as_owing_only_its_critique(stor
     assert old_formula > exact
 
     budgets = {
-        plan: b.model_copy(update={"tokens_total": 10**7, "neurons_total": exact / 0.7 + 0.01})
+        # reserve_fraction is 0 (create is linear): the whole budget is usable by the steps
+        plan: b.model_copy(update={"tokens_total": 10**7, "neurons_total": exact + 0.01})
         for plan, b in CFG.policy.budgets.items()
     }
     cfg = CFG.model_copy(update={"policy": CFG.policy.model_copy(update={"budgets": budgets})})
@@ -587,3 +623,33 @@ async def test_the_gate_counts_a_generated_image_as_owing_only_its_critique(stor
     assert agent._affordable(ctx, "generate", units=1, owed=owed) is True  # fits exactly
     assert agent._affordable(ctx, "generate", units=1, owed=owed + 1) is False
     assert agent._affordable(ctx, "generate", units=2, owed=owed) is False  # one more in flight
+
+
+# -- D5: ONE guard per step, taking the branch count; cancel still checked per branch ----------
+
+
+async def test_one_guard_decision_per_step_not_per_branch(store):
+    llm = ScriptedChat([enhanced(), *[verdict(9)] * 4])
+    run_store = RecordingStore()
+
+    await create(
+        build(llm, ScriptedImages(pics(4)), store, run_store=run_store, cfg=rich()), "ultra", n=4
+    )
+
+    guards = [d.text for d in final_state(run_store).decisions if d.text.startswith("guard before")]
+    assert len(guards) == 3  # enhance, generate, critique: not one per branch (was 9)
+    assert any("guard before generate [4 of 4 branches]" in g for g in guards)
+
+
+async def test_the_one_guard_funds_what_it_can_and_refuses_the_rest_before_any_call(store):
+    llm = ScriptedChat([enhanced(), *[verdict(9)] * 4])
+    images = ScriptedImages(pics(4))
+    run_store = RecordingStore()
+
+    env = await create(build(llm, images, store, run_store=run_store), "free", n=4)
+
+    state = final_state(run_store)
+    funded = len(images.requests)
+    assert 1 <= funded < 4  # free cannot afford four: the rest never reach a provider
+    assert [r.failure for r in state.round].count("budget") == 4 - funded
+    assert len(env.output["image_ids"]) == funded

@@ -64,7 +64,6 @@ class HarnessPolicy(_Strict):
     # Below this the delivery carries the critique as an issue. Information only: create never
     # regenerates on a low score (v2.2), the user picks from every image.
     quality_threshold: dict[Plan, int]
-    max_critic_reasks: int = Field(ge=0)  # re-asks of the Critic on the SAME images, per run
     safety_review: SafetyReviewPolicy
     negative_prompt: str
     max_parallel_branches: int = Field(gt=0)
