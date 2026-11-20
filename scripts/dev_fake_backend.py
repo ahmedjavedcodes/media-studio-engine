@@ -11,6 +11,11 @@ image. Words in the prompt pick the outcome:
     "issues"   -> the critic scores 4       -> retries, then done_with_issues
     anything else                           -> done (score 9)
 
+Each call is reported as served by the FIRST model of its real chain (gateway/chains.yaml), with
+" (fake)" after the provider name, so the inspector's provider split looks like production (Groq
+agents, Cloudflare images) while making clear nothing real was called. Neurons are reported only
+for Cloudflare, as in production.
+
 Lives outside `src/media_engine`; nothing in the library imports it.
 """
 
@@ -26,7 +31,8 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from media_engine.gateway.errors import AllProvidersFailed
-from media_engine.gateway.types import CallResult, ImageResponse, LLMResponse
+from media_engine.gateway.router import load_chains
+from media_engine.gateway.types import CallResult, ImageResponse, LLMResponse, ModelRef
 
 QUESTION = "Which city should the street be in?"
 _REQUEST = re.compile(r"<user_request>\s*(.*?)\s*</user_request>", re.DOTALL)
@@ -36,6 +42,17 @@ def _text(content: Any) -> str:
     if isinstance(content, str):
         return content
     return " ".join(part.get("text", "") for part in content if isinstance(part, dict))
+
+
+_CHAINS = load_chains()
+
+
+def _served_by(task: str) -> ModelRef:
+    """The model production would try first for this chain, marked as fake."""
+    first = next((r for r in _CHAINS.get(task, []) if not r.is_placeholder), None)
+    if first is None:
+        return ModelRef("dev-fake", "dev-fake")
+    return ModelRef(f"{first.provider} (fake)", first.model)
 
 
 class FakeBackend:
@@ -76,14 +93,15 @@ class FakeBackend:
             }
         body = json.dumps(reply)
         usage = {"prompt_tokens": 80, "completion_tokens": 40, "total_tokens": 120}
+        ref = _served_by(task)
         return CallResult(
             output=LLMResponse(text=body, usage=usage),
             task=task,
-            provider="dev-fake",
-            model="dev-fake",
+            provider=ref.provider,
+            model=ref.model,
             latency_ms=1.0,
             is_fallback=False,
-            neurons=2.0,
+            neurons=2.0 if ref.provider.startswith("cloudflare") else None,
         )
 
     async def image(self, task: str, request: Any, **kwargs: Any) -> CallResult:
@@ -98,12 +116,13 @@ class FakeBackend:
         draw.text((150, 400), f"dev fake  seed {request.seed}", fill=(255, 255, 255))
         buffer = io.BytesIO()
         picture.save(buffer, "PNG")
+        ref = _served_by(task)
         return CallResult(
-            output=ImageResponse(images=[buffer.getvalue()]),
+            output=ImageResponse(images=[buffer.getvalue()], media_types=["image/png"]),
             task=task,
-            provider="dev-fake",
-            model="dev-fake",
+            provider=ref.provider,
+            model=ref.model,
             latency_ms=1.0,
             is_fallback=False,
-            neurons_est=57.6,
+            neurons_est=57.6 if ref.provider.startswith("cloudflare") else None,
         )

@@ -22,6 +22,7 @@ export default function Inspector({ trace, running }: { trace: Trace | null; run
     <div className="space-y-6 text-sm">
       <SummaryBar trace={trace} running={running} />
       <Budget trace={trace} />
+      <Providers calls={trace.calls} />
       <Timeline trace={trace} />
       <StepCards steps={trace.steps} />
       <CallsTable calls={trace.calls} />
@@ -131,6 +132,120 @@ function Budget({ trace }: { trace: Trace }) {
         <Meter label="Tokens" spent={b.tokens_spent} total={b.tokens_total} reserve={b.reserve_fraction} fmt={(v) => num(v)} />
         <Meter label="Neurons" spent={b.neurons_spent} total={b.neurons_total} reserve={b.reserve_fraction} fmt={(v) => num(v, 1)} />
         <Meter label="USD" spent={b.cost_spent_usd} total={b.cost_cap_usd} reserve={b.reserve_fraction} fmt={usd} />
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------- providers ------
+
+// Free-tier limits the provider split is about (CLAUDE.md, "Model provider strategy"):
+// Cloudflare's neurons are ONE daily pool shared by LLM and image calls; Groq limits are PER MODEL.
+const CF_DAILY_NEURONS = 10_000;
+const GROQ_TOKENS_PER_MINUTE = 8_000;
+
+// The dev fake backend reports e.g. "groq (fake)": group it with the real provider.
+function providerOf(c: CallRecord): string {
+  return (c.provider ?? "none").replace(/ \(fake\)$/, "");
+}
+
+function Providers({ calls }: { calls: CallRecord[] }) {
+  const served = calls.filter((c) => c.model);
+  if (served.length === 0) return null;
+
+  type Row = { provider: string; model: string; kinds: Set<string>; roles: Set<string>; calls: number; tokens: number; neurons: number; usd: number };
+  const rows = new Map<string, Row>();
+  for (const c of served) {
+    const key = `${providerOf(c)}/${c.model}`;
+    const r = rows.get(key) ?? { provider: providerOf(c), model: c.model ?? "", kinds: new Set(), roles: new Set(), calls: 0, tokens: 0, neurons: 0, usd: 0 };
+    r.kinds.add(c.kind);
+    r.roles.add(c.role);
+    r.calls += 1;
+    r.tokens += c.kind === "llm" ? c.total_tokens : 0;
+    r.neurons += c.neurons;
+    r.usd += c.cost_usd;
+    rows.set(key, r);
+  }
+
+  const cf = served.filter((c) => providerOf(c) === "cloudflare");
+  const cfAgents = cf.filter((c) => c.kind === "llm").reduce((s, c) => s + c.neurons, 0);
+  const cfImages = cf.filter((c) => c.kind === "image").reduce((s, c) => s + c.neurons, 0);
+  const cfTotal = cfAgents + cfImages;
+  const groq = [...rows.values()].filter((r) => r.provider === "groq");
+
+  return (
+    <section className={panel}>
+      <h3 className={h}>Providers</h3>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <div className="mb-1 font-medium">Cloudflare neuron pool (shared by agents and images)</div>
+          {cfTotal === 0 ? (
+            <p className="text-neutral-500">No Cloudflare neurons used this run.</p>
+          ) : (
+            <>
+              <div className="flex h-3 overflow-hidden rounded bg-neutral-200" title="agents vs images">
+                <div className="h-3 bg-amber-500" style={{ width: `${(cfAgents / cfTotal) * 100}%` }} />
+                <div className="h-3 bg-indigo-500" style={{ width: `${(cfImages / cfTotal) * 100}%` }} />
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-4 text-xs">
+                <span><span className="text-amber-700">■</span> agents {num(cfAgents, 1)} ({Math.round((cfAgents / cfTotal) * 100)}%)</span>
+                <span><span className="text-indigo-700">■</span> images {num(cfImages, 1)} ({Math.round((cfImages / cfTotal) * 100)}%)</span>
+              </div>
+            </>
+          )}
+          <p className="mt-1 text-xs text-neutral-500">
+            {num(cfTotal, 1)} of {num(CF_DAILY_NEURONS)} neurons/day ({((cfTotal / CF_DAILY_NEURONS) * 100).toFixed(2)}%).
+            {cfAgents > 0 && " Agent calls on Cloudflare spend image budget: a Groq agent was unavailable (see FALLBACK)."}
+          </p>
+        </div>
+        <div>
+          <div className="mb-1 font-medium">Groq tokens per model (limit {num(GROQ_TOKENS_PER_MINUTE)}/min each)</div>
+          {groq.length === 0 ? (
+            <p className="text-neutral-500">No Groq calls this run.</p>
+          ) : (
+            <ul className="space-y-2">
+              {groq.map((r) => {
+                const pct = Math.min(100, (r.tokens / GROQ_TOKENS_PER_MINUTE) * 100);
+                return (
+                  <li key={r.model}>
+                    <div className="flex justify-between gap-2 text-xs">
+                      <span>{r.model} <span className="text-neutral-500">({[...r.roles].join(", ")})</span></span>
+                      <span>{num(r.tokens)} ({pct.toFixed(0)}%)</span>
+                    </div>
+                    <div className="h-2 rounded bg-neutral-200">
+                      <div className={`h-2 rounded ${pct > 50 ? "bg-red-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="mt-1 text-xs text-neutral-500">
+            Share of one minute&apos;s budget used by this run alone. Red above 50%: two such runs in a minute hit the limit.
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[640px] text-xs">
+          <thead>
+            <tr>{["Provider", "Model", "Used by", "Calls", "LLM tokens", "Neurons", "USD"].map((c) => <th key={c} className={th}>{c}</th>)}</tr>
+          </thead>
+          <tbody>
+            {[...rows.values()].map((r) => (
+              <tr key={`${r.provider}/${r.model}`} className="border-t border-neutral-200">
+                <td className={td}>
+                  <Badge tone={r.provider === "groq" ? "green" : r.provider === "cloudflare" ? "blue" : r.usd > 0 ? "red" : "gray"}>{r.provider}</Badge>
+                </td>
+                <td className={td}>{r.model}</td>
+                <td className={td}>{[...r.roles].join(", ")}</td>
+                <td className={td}>{r.calls}</td>
+                <td className={td}>{r.kinds.has("llm") ? num(r.tokens) : "–"}</td>
+                <td className={td}>{r.provider === "cloudflare" ? num(r.neurons, 1) : "–"}</td>
+                <td className={td}>{r.usd > 0 ? usd(r.usd) : r.provider === "openrouter" ? usd(0) : "free"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </section>
   );
@@ -278,7 +393,7 @@ function CallsTable({ calls }: { calls: CallRecord[] }) {
                       {c.tokens_estimated && <span className="ml-1 text-amber-700">(estimated)</span>}
                     </td>
                     <td className={td}>{c.reasoning_effort ?? "–"}</td>
-                    <td className={td}>{num(c.neurons, 1)}</td>
+                    <td className={td}>{providerOf(c) === "cloudflare" ? num(c.neurons, 1) : "–"}</td>
                     <td className={td}>{usd(c.cost_usd)}</td>
                     <td className={td}>{ms(c.duration_ms)}</td>
                     <td className={td}>

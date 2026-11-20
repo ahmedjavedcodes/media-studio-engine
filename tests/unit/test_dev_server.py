@@ -185,5 +185,10 @@ def test_the_trace_endpoint_serves_the_inspector_data_without_changing_the_publi
 
     # the public channels carry none of it
     public = json.dumps([d for _, d in events])
-    for secret in ("prompt_enhancer", "image_creator", "critic", "router", "dev-fake", "provider"):
+    secrets = ("prompt_enhancer", "image_creator", "critic", "router", "provider", "(fake)")
+    for secret in (*secrets, "groq", "cloudflare", "gpt-oss", "qwen", "@cf/"):
         assert secret not in public, secret
+    # the trace (developer channel) does name the models the fake stood in for
+    served = {(c["provider"], c["model"]) for c in trace["calls"]}
+    assert ("groq (fake)", "openai/gpt-oss-120b") in served
+    assert ("cloudflare (fake)", "@cf/black-forest-labs/flux-1-schnell") in served

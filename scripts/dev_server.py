@@ -12,8 +12,9 @@ It keeps everything in memory (runs, events) and stores images in ./.artifacts/.
 DEBUG_TRACE=1 also serves GET /runs/:id/trace (the developer inspector channel; 404 without it).
 
 DEV_FAKE=1 answers every model call from a scripted fake (scripts/dev_fake_backend.py): no .env,
-no real calls. WITHOUT it this makes REAL provider calls (Cloudflare Workers AI, free tier) with
-the keys in `.env`; paid providers stay off unless ALLOW_PAID=true is set in the environment.
+no real calls. WITHOUT it this makes REAL provider calls with the keys in `.env`: agents on Groq
+(free tier) first, images on Cloudflare Workers AI (free tier) first, as gateway/chains.yaml
+orders them; paid providers stay off unless ALLOW_PAID=true is set in the environment.
 Note: n above 1 needs a plan whose budget can afford it (max or ultra); pro and free refuse the
 extra branches before their paid call.
 """
