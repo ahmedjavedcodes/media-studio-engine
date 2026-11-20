@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from media_engine.gateway.errors import ProviderError
 from media_engine.gateway.providers.base import Provider
 from media_engine.gateway.types import ImageRequest, ImageResponse, LLMRequest, LLMResponse
+from tests.unit.waiting import wait_for_event
 
 HANG = "hang"  # script entry: block until cancelled (a provider that never answers)
 
@@ -50,7 +51,7 @@ class FakeProvider(Provider):
         if isinstance(entry, Gated):
             entry.started.set()
             try:
-                await entry.release.wait()
+                await wait_for_event(entry.release)
             except asyncio.CancelledError:
                 self.cancelled += 1
                 raise

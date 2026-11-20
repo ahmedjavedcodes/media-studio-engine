@@ -13,6 +13,7 @@
  */
 import type {
   Catalog,
+  CatalogModel,
   CreateRequest,
   Handlers,
   Operation,
@@ -51,15 +52,30 @@ export function mockImageUrl(imageId: string): string {
   return `/mock/placeholder-${((k - 1) % PLACEHOLDERS) + 1}.svg`;
 }
 
+const RANK: Record<Plan, number> = { free: 0, pro: 1, max: 2, ultra: 3 };
+// A few options from the real catalogue (services/catalog.py), one per plan and a batch-only one.
+const MOCK_MODELS: Omit<CatalogModel, "locked" | "upgrade_to">[] = [
+  { id: "openai/gpt-image-2@low", slug: "openai/gpt-image-2", name: "GPT Image 2 (low)", plan: "free", settings: { quality: "low" }, price_usd: 0.006, batch_only: false },
+  { id: "black-forest-labs/flux.2-klein-4b", slug: "black-forest-labs/flux.2-klein-4b", name: "FLUX.2 Klein 4B", plan: "free", settings: {}, price_usd: 0.014, batch_only: false },
+  { id: "black-forest-labs/flux.2-pro", slug: "black-forest-labs/flux.2-pro", name: "FLUX.2 Pro", plan: "pro", settings: {}, price_usd: 0.03, batch_only: false },
+  { id: "recraft/recraft-v4.1", slug: "recraft/recraft-v4.1", name: "Recraft v4.1", plan: "max", settings: {}, price_usd: 0.035, batch_only: false },
+  { id: "google/gemini-3.1-flash-image", slug: "google/gemini-3.1-flash-image", name: "Nano Banana 2", plan: "ultra", settings: {}, price_usd: 0.067, batch_only: false },
+  { id: "openai/gpt-image-2@high", slug: "openai/gpt-image-2", name: "GPT Image 2 (high)", plan: "ultra", settings: { quality: "high" }, price_usd: 0.211, batch_only: true },
+];
+
 export async function mockCatalog(plan: Plan): Promise<Catalog> {
   return {
     plan,
     default_model: "auto",
-    models: [], // the model picker comes with batch (b)
+    models: MOCK_MODELS.map((m) => {
+      const locked = RANK[m.plan] > RANK[plan];
+      return { ...m, locked, upgrade_to: locked ? m.plan : null };
+    }),
     max_images: plan === "free" ? 2 : 4,
     aspect_ratios: ["1:1", "4:3", "3:4", "16:9", "9:16", "4:5", "3:2"],
     default_aspect_ratio: "1:1",
     max_resolution: plan === "ultra" ? "4K" : "2K",
+    resolutions: plan === "ultra" ? ["1K", "2K", "4K"] : ["1K", "2K"],
     modes: ["auto", "manual"],
     operations: { create: "live", edit: "coming_soon", merge: "coming_soon", restyle: "coming_soon" },
   };

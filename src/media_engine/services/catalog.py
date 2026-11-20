@@ -59,6 +59,7 @@ class Catalog(BaseModel):
     aspect_ratios: list[str]
     default_aspect_ratio: str
     max_resolution: str
+    resolutions: list[str]  # what the resolution picker may offer: 1K up to max_resolution
     modes: list[str]
     operations: dict[str, OperationState]
 
@@ -120,16 +121,35 @@ def catalog(
             m.name,
         )
     )
+    ceiling = _max_resolution(plan, specs)
     return Catalog(
         plan=plan,
         models=models,
         max_images=cfg.policy.max_images_per_request[plan],
         aspect_ratios=list(cfg.presets.aspect_ratios),
         default_aspect_ratio=cfg.presets.defaults.aspect_ratio,
-        max_resolution=_max_resolution(plan, specs),
+        max_resolution=ceiling,
+        resolutions=list(RESOLUTIONS[: RESOLUTIONS.index(ceiling) + 1]),
         modes=["auto", "manual"],
         operations={op: "live" if op in LIVE_OPERATIONS else "coming_soon" for op in OPERATIONS},
     )
 
 
-__all__ = ["Catalog", "CatalogModel", "catalog"]
+def resolve_pick(
+    model_id: str, plan: Plan, *, registry: ImageRegistry | None = None
+) -> CatalogModel:
+    """The catalogue option `model_id` names, if this plan may pick it on an interactive run.
+    Raises ValueError (with a reason for the user) when it is unknown, locked or batch only.
+    Checked before any model call; the gateway enforces the plan again on the call itself."""
+    options = {m.id: m for m in catalog(plan, registry=registry).models}
+    option = options.get(model_id)
+    if option is None:
+        raise ValueError(f"model {model_id!r} is not in the catalogue")
+    if option.locked:
+        raise ValueError(f"model {model_id!r} needs the {option.upgrade_to} plan")
+    if option.batch_only:
+        raise ValueError(f"model {model_id!r} is batch only, not for an interactive run")
+    return option
+
+
+__all__ = ["Catalog", "CatalogModel", "catalog", "resolve_pick"]

@@ -45,9 +45,10 @@ from media_engine.contracts import (
 from media_engine.core.images import NotAnImage, downscale, inspect_image
 from media_engine.core.logging import get_logger
 from media_engine.gateway.errors import ContentRefused, GatewayError
+from media_engine.gateway.image_registry import image_registry
 from media_engine.gateway.model_gateway import ImageResult, ModelGateway
 from media_engine.gateway.registry import card_or_default
-from media_engine.gateway.types import attempt_infos
+from media_engine.gateway.types import ModelRef, attempt_infos
 from media_engine.harness import trace as tracing
 from media_engine.ports.artifact_store import ArtifactStore
 from media_engine.ports.event_sink import EventSink
@@ -71,6 +72,11 @@ class CreatorInputs(BaseModel):
     brief: dict[str, Any] | None = None
     # What this one call may cost in USD (the gateway checks its estimate before a paid call).
     max_cost_usd: float | None = Field(default=None, ge=0)
+    # The user's pick from the plan catalogue: an OpenRouter image model slug, tried before the
+    # chain (validated against the plan by create_images and again by the gateway), and the
+    # billed quality it fixes. None = auto: the chain decides.
+    model: str | None = None
+    quality: str | None = None
 
 
 class CreatorParams(BaseModel):
@@ -124,6 +130,16 @@ class ImageGenModel(Agent):
             )
         started_at, started = tracing.now(), time.perf_counter()
         tier = args.tier or auth.plan
+        pick: ModelRef | None = None
+        if args.model:
+            spec = image_registry().get(args.model)
+            if spec is None:  # create_images validates picks; this is a caller bug, not a fallback
+                return self.failed(
+                    f"the picked model {args.model!r} is not in the image registry",
+                    Spend(),
+                    "invalid_input",
+                )
+            pick = ModelRef(spec.provider, spec.slug)
         try:
             result = await self._images.generate(
                 args.prompt,
@@ -135,6 +151,8 @@ class ImageGenModel(Agent):
                 chain_offset=args.chain_offset,
                 brief=args.brief,
                 max_cost_usd=args.max_cost_usd,
+                pick=pick,
+                quality=args.quality,
             )
         except asyncio.CancelledError:
             self._trace(args, tier, started_at, started, failure="aborted")

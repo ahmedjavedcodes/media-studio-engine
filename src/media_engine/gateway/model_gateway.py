@@ -25,6 +25,7 @@ from media_engine.gateway.types import (
     CallResult,
     ImageRequest,
     ImageResponse,
+    ModelRef,
     attempt_infos,
 )
 
@@ -45,6 +46,7 @@ class ImageBackend(Protocol):
         start_at: int = 0,
         plan: Plan | None = None,
         max_cost_usd: float | None = None,
+        first: ModelRef | None = None,
     ) -> Awaitable[CallResult]: ...
 
 
@@ -94,14 +96,24 @@ class ModelGateway:
         chain_offset: int = 0,
         brief: dict[str, Any] | None = None,
         max_cost_usd: float | None = None,
+        pick: ModelRef | None = None,
+        quality: str | None = None,
     ) -> ImageResult:
         """`tier` is a plan tier, not necessarily the user's plan: the `raise_tier` retry
         lever passes the next tier up. `chain_offset` skips that many leading chain entries:
         the `switch_model` lever starts at the next model. `deadline_ms` comes from the
-        step's StoppingCondition and bounds the whole chain walk."""
+        step's StoppingCondition and bounds the whole chain walk. `pick` is the model the user
+        chose: tried first, then the chain (the gateway enforces the plan on it). `quality` is
+        the billed quality the pick fixes (e.g. gpt-image-2 "low"); None = the model's default."""
         chain = self._resolve_chain(self._agent, tier)
         request = ImageRequest(
-            prompt=prompt, width=width, height=height, seed=seed, steps=steps, brief=brief
+            prompt=prompt,
+            width=width,
+            height=height,
+            seed=seed,
+            steps=steps,
+            brief=brief,
+            quality=quality,
         )
         started = time.perf_counter()
         # The plan travels to the gateway, which enforces it (model tier, paid settings).
@@ -112,6 +124,7 @@ class ModelGateway:
             start_at=chain_offset,
             plan=tier,
             max_cost_usd=max_cost_usd,
+            first=pick,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
         output = result.output

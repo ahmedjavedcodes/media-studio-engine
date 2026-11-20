@@ -10,3 +10,4 @@ outputs/
 .coverage
 .cache/
 .artifacts/
+.runs/

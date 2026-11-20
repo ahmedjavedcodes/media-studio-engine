@@ -27,6 +27,7 @@ from media_engine.schemas import GenerationResult
 from media_engine.services.create.loader import load_create_config
 from media_engine.tools.image_gen_model import ImageGenModel
 from tests.unit.harness.fakes import ScriptedImages, image_bytes
+from tests.unit.waiting import wait_for_event
 
 AUTH = AuthContext(plan="free", execution_mode="auto", model_demand="balanced")
 GOAL = Goal(task="generate", instructions="Create the image.")
@@ -236,7 +237,7 @@ class SlowStore(LocalArtifactStore):
 async def test_a_cancel_during_the_store_still_finishes_the_put_and_orphans_the_image(tmp_path):
     slow = SlowStore(tmp_path / ".artifacts")
     task = asyncio.ensure_future(run(ScriptedImages([image_bytes(1024, 1024)]), slow))
-    await slow.started.wait()
+    await wait_for_event(slow.started)
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):  # the cancel is still delivered to the caller

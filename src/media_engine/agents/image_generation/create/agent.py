@@ -109,6 +109,23 @@ def derive_seed(run_id: str, round_number: int, max_seed: int) -> int:
 
 PRESET_KINDS = ("aspect_ratio", "size", "style")
 
+# settings["resolution"] -> how many times the preset (1K, long side <= 1024) is scaled. The
+# gateway then fits the size to each model's max side (a model that cannot go higher gets 1K).
+RESOLUTION_SCALE = {"1K": 1, "2K": 2, "4K": 4}
+
+# Added to a delivered image the user's picked model did not make (it was refused or failed, and
+# the gateway fell back down the chain).
+PICK_NOT_USED = "The model you chose was not available, so another model made this image."
+# Added when the user asked for 2K or 4K and the model that made the image cannot go that high.
+RESOLUTION_LIMITED = (
+    "The resolution you asked for is higher than the model that made this image supports, "
+    "so it was made smaller."
+)
+# These describe the whole run, not one image: reported once, never "image k: ..." per image.
+RUN_LEVEL_NOTES = (PICK_NOT_USED, RESOLUTION_LIMITED)
+# Returned images within this fraction of the requested long side count as the size asked for.
+RESOLUTION_TOLERANCE = 0.9
+
 # (step kind, internal agent name, public label). Internal names never leave RunState.
 PLAN: tuple[tuple[StepKind, str, PublicLabel], ...] = (
     ("enhance", "prompt_enhancer", "Understanding your request"),
@@ -165,6 +182,10 @@ class SupervisorInputs(BaseModel):
     # The Gate's verdict from the entry point. Stored once on RunState, never re-derived here:
     # the supervisor only ever runs for a request the Gate (or its reviewer) allowed.
     gate: GateRecord | None = None
+    # The user's pick from the plan catalogue (validated by create_images): an OpenRouter slug
+    # and the billed quality it fixes. None = auto.
+    model: str | None = None
+    quality: str | None = None
 
     @field_validator("n")
     @classmethod
@@ -196,6 +217,8 @@ class RunContext:
     user_prompt: str
     settings: dict[str, str]
     n: int = 1  # images wanted (an immutable input)
+    model: str | None = None  # the user's pick (immutable input); None = auto
+    quality: str | None = None
     trace: Trace = field(default_factory=Trace)  # developer trace (not run state)
     t0: dict[int, float] = field(default_factory=dict)  # step number -> perf_counter at start
     budgeted: int = 0  # branches the current step's ONE guard found affordable (D5)
@@ -362,7 +385,18 @@ class ImageCreateAgent(Agent):
             "reserve_fraction": state.budget.reserve_fraction,
             "max_parallel_branches": self._policy.max_parallel_branches,
         }
-        return RunContext(state, auth, args.prompt, dict(args.settings), n=args.n, trace=trace)
+        if args.model:
+            trace.meta["model_pick"] = args.model + (f" ({args.quality})" if args.quality else "")
+        return RunContext(
+            state,
+            auth,
+            args.prompt,
+            dict(args.settings),
+            n=args.n,
+            model=args.model,
+            quality=args.quality,
+            trace=trace,
+        )
 
     def _base_seed(self, run_id: str, number: int) -> int:
         if self._seed_source is not None:
@@ -717,6 +751,8 @@ class ImageCreateAgent(Agent):
                         "chain_offset": record.chain_offset,
                         "brief": resolved.brief,
                         "max_cost_usd": self._call_cap_usd(ctx),
+                        "model": ctx.model,
+                        "quality": ctx.quality,
                     },
                 )
             self._charge(ctx, step, env)
@@ -726,6 +762,15 @@ class ImageCreateAgent(Agent):
                 record.width = int(env.output["width"])
                 record.height = int(env.output["height"])
                 record.shape_issues = self._shape_issues(env.output, resolved)
+                if ctx.model and env.output.get("model") != ctx.model:
+                    record.shape_issues.append(PICK_NOT_USED)
+                asked = max(resolved.width, resolved.height)
+                got = max(record.width, record.height)
+                if (
+                    ctx.settings.get("resolution", "1K") != "1K"
+                    and got < asked * RESOLUTION_TOLERANCE
+                ):
+                    record.shape_issues.append(RESOLUTION_LIMITED)
                 step.branches_done = (step.branches_done or 0) + 1
                 step.partial_outputs.append(record.image_id)
                 step.output_ref = step.output_ref or record.image_id
@@ -995,9 +1040,15 @@ class ImageCreateAgent(Agent):
         missing = ctx.n - len(delivered) - len(blocked)
         if missing:
             issues.append(f"{missing} of {ctx.n} requested images could not be created.")
+        run_notes: list[str] = []
         for position, a in enumerate(delivered, start=1):  # every delivered image
             for issue in a.shape_issues:
+                if issue in RUN_LEVEL_NOTES:  # about the run: said once, not once per image
+                    if issue not in run_notes:
+                        run_notes.append(issue)
+                    continue
                 issues.append(f"image {position}: {issue}" if len(delivered) > 1 else issue)
+        issues.extend(run_notes)
         if outcome is not None:  # FAILED after some images were checked (e.g. budget)
             issues.append(STOPPED_ISSUES.get(outcome.failure or "", STOPPED_DEFAULT))
 
@@ -1077,7 +1128,9 @@ class ImageCreateAgent(Agent):
                 f"aspect_ratio: {presets.defaults.aspect_ratio} ({ratio} is not supported)"
             )
             ratio = presets.defaults.aspect_ratio
-        size = presets.aspect_ratios[ratio]
+        base = presets.aspect_ratios[ratio]
+        scale = RESOLUTION_SCALE.get(chosen.get("resolution", "1K"), 1)  # validated upstream
+        size = base.model_copy(update={"width": base.width * scale, "height": base.height * scale})
 
         prompt = str(enhanced["enhanced_prompt"])
         if style_from_default:  # a user-chosen style already reached the Enhancer in settings

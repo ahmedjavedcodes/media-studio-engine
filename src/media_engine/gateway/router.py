@@ -77,6 +77,9 @@ RouteCheck = Callable[[Provider, ModelRef], Route]
 # Plan assumed when an image caller does not say: the most restrictive one (fail closed). A bug
 # that drops the plan can then only make a request cheaper, never dearer.
 DEFAULT_PLAN: Plan = "free"
+# Largest side sent to a Cloudflare image model whose card names no max_side. The FLUX.2 Klein
+# limits are not verified, so higher resolutions go only to models known to support them.
+CLOUDFLARE_DEFAULT_MAX_SIDE = 1024
 
 
 def parse_ref(entry: str) -> ModelRef:
@@ -175,9 +178,18 @@ class Gateway:
         start_at: int = 0,
         plan: Plan | None = None,
         max_cost_usd: float | None = None,
+        first: ModelRef | None = None,
     ) -> CallResult:
         """`start_at` skips that many leading chain entries: the `switch_model` retry lever
         starts the walk at the next model. 0 is the normal walk.
+
+        `first`: the model the USER picked. It is tried before the chain (and counts as the
+        primary entry, not a fallback); if it is refused or fails, the walk continues down the
+        normal chain. It goes through exactly the same plan, price and settings checks as a
+        chain entry, so a pick can never reach a model the plan may not use.
+
+        Each entry gets the request SIZED for it (`_sized_for`): a model with a known max side
+        is never sent more, and the cost/neuron estimate uses the size actually sent.
 
         `plan` is enforced HERE, not by the agents: before any entry is called, its provider's
         `route_image` checks the model's tier, every price-multiplying setting that would be
@@ -191,15 +203,43 @@ class Gateway:
         return await self._run(
             task,
             "image",
-            lambda p, m: p.generate_image(m, self._compiled_for(request, p.name, m)),
+            lambda p, m: p.generate_image(
+                m, self._compiled_for(self._sized_for(request, p.name, m), p.name, m)
+            ),
             estimate=lambda ref: estimate_image_neurons(
-                card_or_default(ref.provider, ref.model, "image"), request
+                card_or_default(ref.provider, ref.model, "image"),
+                self._sized_for(request, ref.provider, ref.model),
             ),
             deadline_s=deadline_s,
             start_at=start_at,
             route=lambda p, ref: self._affordable(
-                p.route_image(ref.model, request, effective_plan), ref, request, max_cost_usd
+                p.route_image(
+                    ref.model, self._sized_for(request, ref.provider, ref.model), effective_plan
+                ),
+                ref,
+                self._sized_for(request, ref.provider, ref.model),
+                max_cost_usd,
             ),
+            first=first,
+        )
+
+    @staticmethod
+    def _sized_for(request: ImageRequest, provider: str, model: str) -> ImageRequest:
+        """The request scaled down, ratio kept, so its long side fits what THIS model takes
+        (its card's max_side; a Cloudflare model with none is held to 1024). Sides are kept
+        multiples of 16. Unchanged when it already fits."""
+        card = card_or_default(provider, model, "image")
+        limit = card.max_side or (CLOUDFLARE_DEFAULT_MAX_SIDE if provider == "cloudflare" else None)
+        side = max(request.width, request.height)
+        if limit is None or side <= limit:
+            return request
+        scale = limit / side
+
+        def fit(value: int) -> int:
+            return max(16, int(value * scale) // 16 * 16)
+
+        return request.model_copy(
+            update={"width": fit(request.width), "height": fit(request.height)}
         )
 
     @staticmethod
@@ -268,6 +308,7 @@ class Gateway:
         deadline_s: float | None = None,
         start_at: int = 0,
         route: RouteCheck | None = None,
+        first: ModelRef | None = None,
     ) -> CallResult:
         """Walk the chain. `deadline_s` bounds the whole walk, retries, fallbacks and probe
         waits included: each call gets only the time that is left, and is cancelled (httpx
@@ -288,6 +329,11 @@ class Gateway:
         if start_at < 0:
             raise ValueError(f"start_at must be >= 0, got {start_at}")
         entries = list(enumerate(self.chains[task]))[start_at:]
+        if first is not None:
+            if first.provider not in self.providers:
+                raise ValueError(f"Unknown provider for the picked model: {first.provider!r}")
+            # The pick is entry 0 (the primary); the chain follows as fallbacks, without it.
+            entries = [(0, first)] + [(i + 1, ref) for i, ref in entries if ref != first]
         limits: list[str] = []  # pre-call guard refusals (plan, paid setting, n)
 
         for walk in (1, 2):

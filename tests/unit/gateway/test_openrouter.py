@@ -21,7 +21,7 @@ from media_engine.gateway.providers.cloudflare import CloudflareProvider
 from media_engine.gateway.providers.groq import GroqProvider
 from media_engine.gateway.providers.openrouter import OpenRouterProvider
 from media_engine.gateway.router import Gateway, parse_ref
-from media_engine.gateway.types import ImageRequest, LLMRequest
+from media_engine.gateway.types import ImageRequest, LLMRequest, ModelRef
 
 from .conftest import (
     ACCOUNT,
@@ -489,3 +489,157 @@ async def test_openrouter_is_skipped_without_a_key(settings, sleeps, state):
         await gateway.aclose()
     assert "provider_not_configured" in str(exc.value)
     assert route.call_count == 0
+
+
+# -- batch (b): the user's pick is tried first, then the chain ----------------------------------
+
+
+def _cf_ok() -> httpx.Response:
+    return httpx.Response(200, json={"result": {"image": base64.b64encode(b"cf").decode()}})
+
+
+@respx.mock
+async def test_a_picked_model_is_tried_first_and_is_not_a_fallback(gw):
+    route = respx.post(OR_IMAGES).mock(return_value=image_ok())
+
+    result = await gw.image(
+        "image_create", ImageRequest(prompt="a"), first=ModelRef("openrouter", SEEDREAM)
+    )
+
+    assert result.model == SEEDREAM and result.is_fallback is False
+    assert [json.loads(c.request.content)["model"] for c in route.calls] == [SEEDREAM]
+
+
+@respx.mock
+async def test_a_failed_pick_falls_back_down_the_normal_chain(gw):
+    respx.post(OR_IMAGES).mock(
+        side_effect=lambda r: (
+            or_error(503, "down") if json.loads(r.content)["model"] == SEEDREAM else image_ok()
+        )
+    )
+
+    result = await gw.image(
+        "image_create", ImageRequest(prompt="a"), first=ModelRef("openrouter", SEEDREAM)
+    )
+
+    assert result.model == GEMINI and result.is_fallback is True  # the chain's first entry
+
+
+@respx.mock
+async def test_a_pick_the_plan_may_not_use_is_skipped_never_called(tmp_path, gw):
+    install_registry(
+        tmp_path / "r",
+        [ImageModelInfo(id=GEMINI, supported_parameters={})],
+        [entry_model(GEMINI), entry_model(SEEDREAM, tier="ultra")],
+    )
+    route = respx.post(OR_IMAGES).mock(return_value=image_ok())
+
+    result = await gw.image(
+        "image_create",
+        ImageRequest(prompt="a"),
+        plan="free",
+        first=ModelRef("openrouter", SEEDREAM),
+    )
+
+    assert [json.loads(c.request.content)["model"] for c in route.calls] == [GEMINI]
+    assert result.model == GEMINI
+    refused = [a for a in result.attempts if a.model == SEEDREAM]
+    assert refused and refused[0].outcome == "skipped" and "ultra" in (refused[0].reason or "")
+
+
+@respx.mock
+async def test_the_pick_is_not_tried_twice_when_it_is_also_in_the_chain(gw):
+    route = respx.post(OR_IMAGES).mock(return_value=or_error(503, "down"))
+    respx.post(SCHNELL).mock(return_value=_cf_ok())
+
+    result = await gw.image(
+        "image_create", ImageRequest(prompt="a"), first=ModelRef("openrouter", GEMINI)
+    )
+
+    assert result.provider == "cloudflare"
+    models = [json.loads(c.request.content)["model"] for c in route.calls]
+    assert set(models) == {GEMINI} and len(models) <= 2  # its own retry, never a second turn
+
+
+# -- resolution: each model gets a size it can take ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "size", "want"),
+    [
+        ("cloudflare", "@cf/black-forest-labs/flux-1-schnell", (2048, 1152), (1024, 576)),
+        ("cloudflare", "@cf/black-forest-labs/flux-2-klein-4b", (1632, 2048), (816, 1024)),
+        ("cloudflare", "@cf/black-forest-labs/flux-2-klein-4b", (1024, 576), (1024, 576)),
+        ("openrouter", SEEDREAM, (2048, 2048), (2048, 2048)),  # OpenRouter maps to its tiers
+    ],
+)
+def test_each_model_is_sent_a_size_it_can_take(provider, model, size, want):
+    request = ImageRequest(prompt="a", width=size[0], height=size[1])
+    sized = Gateway._sized_for(request, provider, model)
+    assert (sized.width, sized.height) == want
+    assert sized.width % 16 == 0 and sized.height % 16 == 0
+
+
+@respx.mock
+async def test_a_2k_request_is_sent_as_2k_to_a_model_that_supports_it(gw):
+    route = respx.post(OR_IMAGES).mock(return_value=image_ok())
+
+    await gw.image(
+        "image_create",
+        ImageRequest(prompt="a", width=2048, height=2048),
+        first=ModelRef("openrouter", SEEDREAM),
+    )
+
+    assert json.loads(route.calls[0].request.content)["resolution"] == "2K"
+
+
+# -- a resolution above a model's top tier is clamped, not refused ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("allowed", "want"),
+    [
+        (["1K", "2K"], "2K"),  # 4K asked, the model tops out at 2K: its top tier
+        (["1K", "2K", "4K"], "4K"),
+        (["1K"], "1K"),
+    ],
+)
+def test_a_4k_request_is_clamped_to_the_models_top_tier(allowed, want):
+    from media_engine.gateway.providers.openrouter import closest_resolution
+
+    assert closest_resolution(4096, 4096, allowed) == want
+
+
+@respx.mock
+async def test_a_4k_request_to_a_2k_model_is_sent_as_2k_not_refused(tmp_path, or_settings, state):
+    from .conftest import install_registry
+
+    install_registry(
+        tmp_path,
+        [
+            ImageModelInfo(
+                id=SEEDREAM,
+                supported_parameters={
+                    "aspect_ratio": {"type": "enum", "values": ["1:1"]},
+                    "resolution": {"type": "enum", "values": ["1K", "2K"]},
+                },
+                input_modalities=["text"],
+                output_modalities=["image"],
+            )
+        ],
+        [entry_model(SEEDREAM)],
+    )
+    route = respx.post(OR_IMAGES).mock(return_value=image_ok())
+    client = httpx.AsyncClient()
+    gateway = Gateway(
+        or_settings,
+        chains={"image_create": [parse_ref(f"openrouter/{SEEDREAM}")]},
+        providers={"openrouter": OpenRouterProvider(client, or_settings)},
+        state=state,
+        client=client,
+    )
+
+    await gateway.image("image_create", ImageRequest(prompt="a", width=4096, height=4096))
+    await client.aclose()
+
+    assert json.loads(route.calls[0].request.content)["resolution"] == "2K"

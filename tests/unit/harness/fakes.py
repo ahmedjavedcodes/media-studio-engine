@@ -180,6 +180,7 @@ class ScriptedImages:
         self.requests: list[tuple[str, ImageRequest, float | None]] = []
         self.start_at: list[int] = []  # the chain offset of each call
         self.plans: list[str | None] = []  # the plan each call was made for (gateway-enforced)
+        self.firsts: list[Any] = []  # the user's picked model (a ModelRef) on each call, or None
 
     async def image(
         self,
@@ -190,8 +191,10 @@ class ScriptedImages:
         start_at: int = 0,
         plan: str | None = None,
         max_cost_usd: float | None = None,
+        first: Any = None,
     ) -> CallResult:
         self.requests.append((task, request, deadline_s))
+        self.firsts.append(first)
         self.start_at.append(start_at)
         self.plans.append(plan)
         if not self.replies:

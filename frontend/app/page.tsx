@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Inspector from "@/components/Inspector";
+import RunHistory from "@/components/RunHistory";
 import ResultView from "@/components/ResultView";
 import Stepper, { type StepState } from "@/components/Stepper";
 import {
@@ -20,6 +21,7 @@ import {
   type Mode,
   type Operation,
   type Plan,
+  type Resolution,
   type RunEvent,
   type RunResult,
   type Trace,
@@ -48,6 +50,8 @@ export default function Home() {
   const [n, setN] = useState(1);
   const [ratio, setRatio] = useState<AspectRatio>("1:1");
   const [operation, setOperation] = useState<Operation>("create");
+  const [model, setModel] = useState<string | null>(null); // null = Auto
+  const [resolution, setResolution] = useState<Resolution>("1K");
   // What this plan may pick (sizes, image cap, live operations). Locks are UX only: the backend
   // enforces the plan on every call.
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -78,6 +82,9 @@ export default function Home() {
         setCatalog(next);
         setN((v) => Math.min(v, next.max_images));
         setRatio((r) => (next.aspect_ratios.includes(r) ? r : next.default_aspect_ratio));
+        setResolution((r) => (next.resolutions.includes(r) ? r : "1K"));
+        // A pick this plan may not make falls back to Auto.
+        setModel((m) => (next.models.some((o) => o.id === m && !o.locked && !o.batch_only) ? m : null));
       })
       .catch(() => alive && setCatalog(null));
     return () => {
@@ -165,7 +172,15 @@ export default function Home() {
     if (!text) return;
     // A slash command overrides the selected button for this request.
     const op = slash.operation ?? operation;
-    void start({ prompt: text, plan, mode, n, operation: op, settings: { aspect_ratio: ratio } });
+    void start({
+      prompt: text,
+      plan,
+      mode,
+      n,
+      operation: op,
+      model,
+      settings: { aspect_ratio: ratio, resolution },
+    });
   }
 
   function answer(answers: Record<string, string>) {
@@ -271,6 +286,39 @@ export default function Home() {
             </select>
           </label>
         </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[3fr_1fr]">
+          <label className="text-sm">
+            Image model
+            <select
+              className={select}
+              value={model ?? "auto"}
+              disabled={running}
+              onChange={(e) => setModel(e.target.value === "auto" ? null : e.target.value)}
+            >
+              <option value="auto">Auto (we pick the best model)</option>
+              {(catalog?.models ?? []).map((o) => (
+                <option key={o.id} value={o.id} disabled={o.locked || o.batch_only}>
+                  {o.name}
+                  {o.price_usd !== null ? ` · $${o.price_usd.toFixed(3)}` : ""}
+                  {o.locked ? ` · ${o.upgrade_to} plan` : o.batch_only ? " · batch only" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            Resolution
+            <select
+              className={select}
+              value={resolution}
+              disabled={running}
+              onChange={(e) => setResolution(e.target.value as Resolution)}
+            >
+              {(catalog?.resolutions ?? ["1K"]).map((r) => (
+                <option key={r}>{r}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="flex items-center gap-3">
           <button
             onClick={generate}
@@ -334,6 +382,11 @@ export default function Home() {
         </section>
       )}
     </main>
+    {INSPECTOR && (
+      <div className="mx-auto max-w-6xl px-4 pb-8">
+        <RunHistory refreshKey={phase === "finished" ? currentRun : null} />
+      </div>
+    )}
     {INSPECTOR && showInspector && (
       <div className="mx-auto max-w-6xl px-4 pb-16">
         <h2 className="mb-3 text-lg font-semibold">Inspector <span className="text-sm font-normal text-neutral-500">(developer view: not part of the product UI)</span></h2>

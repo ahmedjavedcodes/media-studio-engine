@@ -30,6 +30,7 @@ def shim(tmp_path):
     sys.modules["dev_server"] = module  # pydantic resolves the shim's annotations through it
     spec.loader.exec_module(module)
     module.ARTIFACTS = LocalArtifactStore(tmp_path / ".artifacts")
+    module.HISTORY_DIR = tmp_path / ".runs"  # never the repo's own folder
     module.POLL_SECONDS = 0.01
     return module
 
@@ -231,3 +232,73 @@ def test_the_trace_endpoint_serves_the_inspector_data_without_changing_the_publi
     served = {(c["provider"], c["model"]) for c in trace["calls"]}
     assert ("groq (fake)", "openai/gpt-oss-120b") in served
     assert ("cloudflare (fake)", "@cf/black-forest-labs/flux-1-schnell") in served
+
+
+# -- run history (developer view) ---------------------------------------------------------------
+
+
+def _run(client: TestClient, body: dict) -> dict:
+    run_id = client.post("/runs", json=body).json()["run_id"]
+    (result,) = [d for name, d in sse(client, run_id) if name == "result"]
+    return result
+
+
+def test_run_history_is_off_unless_debug_trace_is_set(shim):
+    shim.DEBUG_TRACE = False
+    shim.GATEWAY = Backend(
+        ScriptedChat([ROUTE_SIMPLE, enhanced(), verdict(9)]), ScriptedImages([image_bytes()])
+    )
+    with TestClient(shim.app) as client:
+        _run(client, {"prompt": "a cat"})
+        assert client.get("/history").status_code == 404
+    assert not shim.HISTORY_DIR.exists()  # nothing written either
+
+
+def test_finished_runs_are_saved_and_listed_newest_first_with_their_full_detail(shim):
+    from dev_fake_backend import FakeBackend
+
+    shim.DEBUG_TRACE = True
+    shim.GATEWAY = FakeBackend(delay=0)
+    with TestClient(shim.app) as client:
+        first = _run(client, {"prompt": "a cozy cafe", "plan": "pro", "n": 2})
+        second = _run(client, {"prompt": "a comic", "operation": "edit"})
+        rows = client.get("/history").json()
+        detail = client.get(f"/history/{first['run_id']}").json()
+        assert client.get("/history/run_nope").status_code == 404
+        assert client.get("/history/..%2Fsecret").status_code == 404
+
+    assert [r["run_id"] for r in rows] == [second["run_id"], first["run_id"]]
+    top = rows[1]
+    assert top["prompt"] == "a cozy cafe" and top["plan"] == "pro" and top["n"] == 2
+    assert top["status"] == "done" and top["model_pick"] == "auto" and top["models"]
+    assert top["llm_calls"] >= 3 and top["wall_ms"] is not None
+    assert rows[0]["operation"] == "edit" and rows[0]["status"] == "escalate"
+    # the detail view: input, route decisions, every call, the output document, totals
+    assert detail["request"]["prompt"] == "a cozy cafe"
+    assert any(d["step"] == "route" for d in detail["trace"]["decisions"])
+    assert {c["role"] for c in detail["trace"]["calls"]} >= {"gate", "prompt_enhancer", "critic"}
+    assert len(detail["output"]["documents"]) == 2
+    assert detail["result"]["status"] == "done"
+
+
+def test_history_keeps_only_the_newest_runs(shim):
+    from dev_fake_backend import FakeBackend
+
+    shim.DEBUG_TRACE = True
+    shim.HISTORY_KEEP = 2
+    shim.GATEWAY = FakeBackend(delay=0)
+    with TestClient(shim.app) as client:
+        ids = [_run(client, {"prompt": f"a cat {i}"})["run_id"] for i in range(3)]
+        rows = client.get("/history").json()
+    assert {r["run_id"] for r in rows} == set(ids[1:])
+
+
+def test_a_model_pick_goes_through_the_shim_and_a_locked_pick_is_refused(shim):
+    from dev_fake_backend import FakeBackend
+
+    shim.GATEWAY = FakeBackend(delay=0)
+    with TestClient(shim.app) as client:
+        ok = _run(client, {"prompt": "a cozy cafe", "model": "openai/gpt-image-2@low"})
+        locked = _run(client, {"prompt": "a cozy cafe", "model": "black-forest-labs/flux.2-pro"})
+    assert ok["status"] in {"done", "done_with_issues"}
+    assert locked["status"] == "failed" and "needs the pro plan" in locked["reason"]

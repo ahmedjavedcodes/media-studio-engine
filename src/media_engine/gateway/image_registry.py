@@ -57,6 +57,9 @@ class ModelEntry(BaseModel):
 
     slug: str
     name: str
+    # The gateway provider that serves this model. Every model in models.yaml is OpenRouter
+    # today; a pick is routed by this field, never by an assumption.
+    provider: str = "openrouter"
     tier: Tier
     billing_unit: BillingUnit
     price_measured_usd: float | None
@@ -111,6 +114,7 @@ class ImageModelSpec(BaseModel):
 
     slug: str
     name: str
+    provider: str
     tier: Tier
     billing_unit: BillingUnit
     price_measured_usd: float | None
@@ -246,6 +250,7 @@ def merge(
     spec = ImageModelSpec(
         slug=entry.slug,
         name=entry.name,
+        provider=entry.provider,
         tier=entry.tier,
         billing_unit=entry.billing_unit,
         price_measured_usd=entry.price_measured_usd,

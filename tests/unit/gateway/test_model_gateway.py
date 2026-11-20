@@ -24,6 +24,7 @@ from media_engine.gateway.model_gateway import ModelGateway
 from media_engine.gateway.router import Gateway
 from media_engine.gateway.types import ImageRequest, LLMRequest, ModelRef
 from media_engine.services.create.loader import load_create_config
+from tests.unit.waiting import wait_for_event
 
 from .conftest import NOW
 from .fakes import (
@@ -387,7 +388,7 @@ async def test_concurrent_half_open_requests_make_exactly_one_provider_call(cloc
     before = alpha.calls
 
     probe = asyncio.create_task(gw.image("image_create", REQ))
-    await gate.started.wait()
+    await wait_for_event(gate.started)
     other = await gw.image("image_create", REQ)  # beta works, so no reason to wait
 
     assert other.provider == "beta"
@@ -404,10 +405,10 @@ async def test_a_stale_call_cancelled_mid_probe_does_not_open_a_second_probe(clo
     gw, board = build(alpha, FakeProvider("beta"), clock)
 
     stale = asyncio.create_task(gw.image("image_create", REQ))
-    await stale_gate.started.wait()
+    await wait_for_event(stale_gate.started)
     await half_open(gw, clock)
     probe = asyncio.create_task(gw.image("image_create", REQ))
-    await probe_gate.started.wait()
+    await wait_for_event(probe_gate.started)
     calls_with_probe_in_flight = alpha.calls
 
     stale.cancel()
@@ -439,7 +440,7 @@ async def test_m8_shape_waiters_get_the_probe_verdict_instead_of_failing(clock):
     beta_before = beta.calls
 
     branches = [asyncio.create_task(gw.image("image_create", REQ)) for _ in range(4)]
-    await gate.started.wait()
+    await wait_for_event(gate.started)
     await asyncio.sleep(0.01)  # let the other three reach the probe wait
     assert not any(b.done() for b in branches)
     gate.release.set()
@@ -464,7 +465,7 @@ async def test_waiters_fail_without_calling_when_the_probe_fails(clock):
     await half_open(gw, clock)
 
     probe = asyncio.create_task(gw.image("image_create", REQ))
-    await gate.started.wait()
+    await wait_for_event(gate.started)
     waiter = asyncio.create_task(gw.image("image_create", REQ))
     await asyncio.sleep(0.01)
     calls = alpha.calls
@@ -484,7 +485,7 @@ async def test_probe_wait_is_bounded_by_the_deadline(clock):
     await half_open(gw, clock)
 
     probe = asyncio.create_task(gw.image("image_create", REQ))
-    await gate.started.wait()
+    await wait_for_event(gate.started)
     with pytest.raises(DeadlineExceeded):
         await gw.image("image_create", REQ, deadline_s=0.05)
 

@@ -2,6 +2,8 @@
  * Typed client for the contract in project-status/ARCHITECTURE.md, section 8.
  *
  *   GET  /catalog?plan=      -> Catalog (what the prompt bar may offer this plan)
+ *   GET  /history            -> HistoryRow[]   (developer view, DEBUG_TRACE=1 only)
+ *   GET  /history/:id        -> HistoryRecord  (one finished run in full)
  *   POST /runs               -> { run_id }
  *   GET  /runs/:id/events    -> SSE: "step" (RunEvent, many) then "result" (RunResult, once)
  *   POST /runs/:id/cancel
@@ -12,6 +14,8 @@
  * the UI works without a backend. Set NEXT_PUBLIC_MOCK=0 to use the real API.
  */
 import { mockCancel, mockCatalog, mockCreateRun, mockGetRun, mockImageUrl, mockSubscribe } from "./mock";
+
+export type Resolution = "1K" | "2K" | "4K";
 
 export type Plan = "free" | "pro" | "max" | "ultra";
 export type Mode = "auto" | "manual";
@@ -48,7 +52,9 @@ export interface CreateRequest {
   mode: Mode;
   n: number; // 1..Catalog.max_images for the plan
   operation: Operation;
-  /** aspect_ratio, plus one entry per answered question (keyed by the question text). */
+  /** A Catalog model id (e.g. "openai/gpt-image-2@low"); null = auto (the system decides). */
+  model: string | null;
+  /** aspect_ratio, resolution, plus one entry per answered question (keyed by the question text). */
   settings: Record<string, string>;
 }
 
@@ -73,6 +79,7 @@ export interface Catalog {
   aspect_ratios: AspectRatio[];
   default_aspect_ratio: AspectRatio;
   max_resolution: string;
+  resolutions: Resolution[]; // what the resolution picker may offer: 1K up to max_resolution
   modes: Mode[];
   operations: Record<Operation, "live" | "coming_soon">;
 }
@@ -341,4 +348,48 @@ export async function getTrace(runId: string): Promise<Trace | null> {
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return (await response.json()) as Trace;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Run history (developer view): GET /history, GET /history/:id. Served only when DEBUG_TRACE=1;
+// shown only when NEXT_PUBLIC_INSPECTOR=1. Never part of the product UI.
+// ---------------------------------------------------------------------------------------------
+
+export interface HistoryRow {
+  run_id: string;
+  created_at: string | null;
+  prompt: string;
+  plan: Plan;
+  operation: Operation;
+  n: number;
+  model_pick: string; // "auto" or the picked catalogue id
+  models: string[]; // the image models that actually served the run
+  status: Status;
+  cost_usd: number;
+  neurons: number;
+  llm_calls: number;
+  wall_ms: number | null;
+}
+
+export interface HistoryRecord {
+  run_id: string;
+  request: CreateRequest;
+  result: RunResult;
+  /** The envelope's output: image ids, scores, issues and the documents (layers). */
+  output: Record<string, unknown> & {
+    documents?: { document_id: string; rank: number; layers: { id: string; type: string; image_id?: string; role: string }[]; scores: Record<string, number> }[];
+  };
+  trace: Trace;
+}
+
+export async function getHistory(): Promise<HistoryRow[] | null> {
+  if (MOCK) return null;
+  const response = await fetch(`${BASE}/history`);
+  if (response.status === 404) return null; // history is off (DEBUG_TRACE unset)
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return (await response.json()) as HistoryRow[];
+}
+
+export async function getHistoryRun(runId: string): Promise<HistoryRecord> {
+  return request<HistoryRecord>(`/history/${runId}`);
 }

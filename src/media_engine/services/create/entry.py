@@ -55,6 +55,7 @@ from media_engine.ports import (
     LocalArtifactStore,
     RunStore,
 )
+from media_engine.services.catalog import catalog, resolve_pick
 from media_engine.services.create.loader import CreateConfig, get_create_config
 
 DEFAULT_AUTH = AuthContext(plan="free", execution_mode="auto", model_demand="balanced")
@@ -90,6 +91,7 @@ async def create_images(
     trace: Trace | None = None,
     operation: str | None = None,
     decider: Decider | None = None,
+    model: str | None = None,
 ) -> Envelope:
     """Turn `prompt` into `n` quality-checked images. See the create agent's docstring for the
     envelope's output. Never talks to the user: NEEDS_INPUT and ESCALATE are returned upward.
@@ -100,7 +102,13 @@ async def create_images(
 
     `operation` (optional): an explicit operation (create|edit|merge|restyle) from a button or a
     slash command, routed by plain code. None: inferred (the Decider, else create). `decider`
-    (optional): routes ambiguous text; without one, every ambiguous request is a create."""
+    (optional): routes ambiguous text; without one, every ambiguous request is a create.
+
+    `model` (optional): the user's pick, a catalogue option id (`slug` or `slug@quality`, from
+    services/catalog.py). None = auto. `settings["resolution"]` (optional): 1K / 2K / 4K. Both
+    are checked against the plan's catalogue HERE, before any model call: a pick the plan may
+    not use, or a batch-only one, is invalid_input (the gateway enforces the plan again on the
+    call itself)."""
     cfg = cfg or get_create_config()
     if not prompt.strip():
         return invalid("no prompt given")
@@ -109,6 +117,21 @@ async def create_images(
         return invalid(f"n must be between 1 and {cap} on the {auth.plan} plan")
     if operation is not None and operation not in OPERATIONS:
         return invalid(f"operation must be one of {', '.join(OPERATIONS)}")
+    resolution = (settings or {}).get("resolution")
+    if resolution is not None:
+        allowed = catalog(auth.plan, cfg=cfg).resolutions
+        if resolution not in allowed:
+            return invalid(
+                f"resolution must be one of {', '.join(allowed)} on the {auth.plan} plan"
+            )
+    pick_slug: str | None = None
+    pick_quality: str | None = None
+    if model is not None:
+        try:
+            option = resolve_pick(model, auth.plan)
+        except ValueError as err:
+            return invalid(str(err))
+        pick_slug, pick_quality = option.slug, option.settings.get("quality")
 
     backend = gateway or get_gateway()
     sink = events if events is not None else ListEventSink()
@@ -151,6 +174,8 @@ async def create_images(
             "run_id": run_id,
             "user_id": user_id,
             "operation": operation,
+            "model": pick_slug,
+            "quality": pick_quality,
         },
     )
 
