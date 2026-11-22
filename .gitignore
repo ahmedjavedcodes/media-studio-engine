@@ -1,0 +1,25 @@
+# secrets: never commit (CLAUDE.md)
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+
+# node
+node_modules/
+.next/
+
+# local data and caches
+.cache/
+.artifacts/
+.runs/
+outputs/
+.checkpoints.sqlite
+
+# macOS
+.DS_Store
