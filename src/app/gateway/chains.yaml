@@ -1,0 +1,3 @@
+# PROVIDER_MODE picks one chain. Agent code never knows which is on.
+build: {}   # Cloudflare only
+test: {}    # paid providers, only when Ahmed asks
