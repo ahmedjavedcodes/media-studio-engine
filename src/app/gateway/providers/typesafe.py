@@ -3,11 +3,13 @@
 from typing import Any
 
 import httpx
+import structlog
 
 from app.core.errors import ProviderCallFailed
 from app.gateway.providers.http import post_json
 
 JEV_MODEL = "jev-1.13.0"
+log = structlog.get_logger("provider")
 
 
 class TypeSafeJev:
@@ -28,6 +30,15 @@ class TypeSafeJev:
             json={"state": state, "model": self.model, "questions": questions},
             timeout=timeout,
         )
+        usage = body.get("usage")
+        if isinstance(usage, dict):  # cost tracking: tokens per call
+            log.info(
+                "provider_usage",
+                provider="typesafe",
+                model=self.model,
+                input_tokens=usage.get("input_tokens"),
+                output_tokens=usage.get("output_tokens"),
+            )
         answers = body.get("answers")
         if not isinstance(answers, dict):
             raise ProviderCallFailed("jev response has no answers", retryable=False)

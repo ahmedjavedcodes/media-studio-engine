@@ -13,7 +13,7 @@ from app.gateway.providers.cloudflare import (
 )
 from app.gateway.providers.openrouter import OpenRouterLlamaGuard
 from app.gateway.providers.typesafe import TypeSafeJev
-from app.guardrails.agent import GuardDeps
+from app.guardrails.agent import GuardDeps, Timing
 from app.local.fake_strikes import FakeStrikeLedger
 
 
@@ -23,8 +23,10 @@ def get_guard_deps() -> GuardDeps:
     client = httpx.AsyncClient()
     jev: JevPort
     vision: VisionPort
-    if s.provider_mode == "test":  # paid providers, only when Ahmed asks
+    use_typesafe_jev = s.provider_mode == "test" or s.jev_provider == "typesafe"
+    if use_typesafe_jev:
         jev = TypeSafeJev(client, api_key=s.typesafe_api_key, base_url=s.typesafe_base_url)
+    if s.provider_mode == "test":  # paid providers, only when Ahmed asks
         vision = OpenRouterLlamaGuard(
             client, api_key=s.openrouter_api_key, base_url=s.openrouter_base_url
         )
@@ -33,6 +35,8 @@ def get_guard_deps() -> GuardDeps:
             client, account_id=s.cloudflare_account_id, api_token=s.cloudflare_api_token
         )
         prompt = (prompts_dir() / "guardrail" / "vision_standin.md").read_text("utf-8")
-        jev = CloudflareJev(cf)
+        if not use_typesafe_jev:
+            jev = CloudflareJev(cf)
         vision = CloudflareVisionStandIn(cf, system_prompt=prompt)
-    return GuardDeps(jev=jev, vision=vision, ledger=FakeStrikeLedger(), settings=s)
+    timing = Timing(jev_timeout_s=s.jev_timeout_s, vision_timeout_s=s.vision_timeout_s)
+    return GuardDeps(jev=jev, vision=vision, ledger=FakeStrikeLedger(), settings=s, timing=timing)

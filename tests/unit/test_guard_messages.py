@@ -2,7 +2,7 @@ import pytest
 
 from app.guardrails.messages import blocked_by, build_reject_body, message_for, tip_for
 from app.guardrails.schemas import Category, Decision, GuardDecision, GuardVerdict
-from app.guardrails.text_check import QUESTION_CATEGORY
+from app.guardrails.text_check import load_questions
 
 
 def verdict(source: str, decision: Decision, cat: Category) -> GuardVerdict:
@@ -37,7 +37,7 @@ def test_every_reject_category_has_message() -> None:
     assert tip_for(Category.CSAM) is None
     assert tip_for(Category.HATE_HARASSMENT) is None
     assert tip_for(Category.NSFW_EXPLICIT) == "Try a fully clothed version."
-    assert set(QUESTION_CATEGORY.values()) <= set(Category)
+    assert {c for c in load_questions().category_of.values() if c} <= set(Category)
 
 
 @pytest.mark.parametrize(

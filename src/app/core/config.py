@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     fal_key: str = ""
     anthropic_api_key: str = ""
     typesafe_api_key: str = ""
+    # Which Jev to use in build mode. Cloudflare has no Jev model, so "typesafe" is the only
+    # one that works today. It is opt-in because TypeSafe is not a Cloudflare (free) provider.
+    jev_provider: Literal["cloudflare", "typesafe"] = "cloudflare"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     typesafe_base_url: str = "https://api.typesafe.ai"
     cors_origins: str = "http://localhost:3000"
@@ -29,6 +32,10 @@ class Settings(BaseSettings):
     langsmith_tracing: bool = True
     langsmith_api_key: str = ""
     langsmith_project: str = "app-dev"
+
+    # Guardrail timeouts in seconds. Defaults are the spec's section 9 values.
+    jev_timeout_s: float = 0.5
+    vision_timeout_s: float = 1.5
 
     # Guardrail strikes and cooldowns (env: INSTANT_STRIKE_LIMIT, ...)
     instant_strike_limit: int = 5  # strike N of this limit bans the account

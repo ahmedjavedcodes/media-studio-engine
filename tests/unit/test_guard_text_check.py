@@ -9,14 +9,15 @@ from app.gateway.providers.cloudflare import CloudflareClient, CloudflareJev
 from app.gateway.providers.typesafe import TypeSafeJev
 from app.guardrails.clean import clean_text
 from app.guardrails.schemas import Category, Decision
-from app.guardrails.text_check import QUESTION_CATEGORY, check_text, load_questions
+from app.guardrails.text_check import check_text, load_questions
+from tests.unit.guard_helpers import ALIAS
 
 URL = "https://api.typesafe.ai/v1/systemone"
 
 
 def answers(**over: float) -> dict[str, dict[str, object]]:
-    base = {k: 0.01 for k in QUESTION_CATEGORY}
-    base.update(over)
+    base = {k: 0.01 for k in load_questions().questions}
+    base.update({ALIAS.get(k, k): v for k, v in over.items()})
     return {k: {"type": "noul", "noul": v} for k, v in base.items()}
 
 
@@ -30,10 +31,19 @@ async def run_check(body: object, status: int = 200) -> object:
 
 def test_questions_file_covers_all_categories() -> None:
     qs = load_questions()
-    assert set(qs) == set(QUESTION_CATEGORY)
-    for q in qs.values():
-        assert q["type"] == "noul"
-        assert q["criteria"]["true"] and q["criteria"]["false"]  # allow examples present
+    assert {c for c in qs.category_of.values() if c} == set(Category) - {
+        Category.SAFE,
+        Category.OTHER_UNSAFE,  # vision only
+    }
+    assert qs.category_of["involves_minor"] is None  # helper, never rejects alone
+    assert qs.context
+    for q in qs.questions.values():
+        assert q["type"] == "noul" and q["instructions"]
+    assert qs.questions["sexual_content"]["criteria"] == {
+        "true": qs.questions["sexual_content"]["criteria"]["true"],
+        "false": qs.questions["sexual_content"]["criteria"]["false"],
+    }
+    assert "criteria" not in qs.questions["involves_minor"]  # both sides missing -> omitted
 
 
 async def test_safe_prompt_approves() -> None:
@@ -54,8 +64,14 @@ async def test_request_body_shape() -> None:
     sent = json.loads(req.content)
     assert req.headers["authorization"] == "Bearer secret-key"
     assert sent["model"] == "jev-1.13.0"
-    assert sent["state"] == {"prompt_raw": "N u d e", "prompt_clean": "nude", "has_image": True}
-    assert set(sent["questions"]) == set(QUESTION_CATEGORY)
+    state = sent["state"]
+    assert state["context"] == load_questions().context
+    assert {k: state[k] for k in ("prompt_raw", "prompt_clean", "has_image")} == {
+        "prompt_raw": "N u d e",
+        "prompt_clean": "nude",
+        "has_image": True,
+    }
+    assert set(sent["questions"]) == set(load_questions().questions)
 
 
 @pytest.mark.parametrize(
@@ -132,3 +148,29 @@ async def test_cloudflare_jev() -> None:
             v = await check_text(jev, clean_text("a fox"), has_image=False, timeout=0.5)
     assert v.model == "typesafe/jev"
     assert route.calls[0].request.headers["authorization"] == "Bearer tok"
+
+
+async def test_highest_question_score_per_category_wins() -> None:
+    # two questions feed GORE_SELF_HARM: the higher one decides
+    v = await run_check({"answers": answers(self_harm=0.9, graphic_gore=0.1)})
+    assert (v.decision, v.category) == (Decision.INSTANT_REJECT, Category.GORE_SELF_HARM)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("over", "decision"),
+    [
+        ({"involves_minor": 0.99}, Decision.APPROVE),  # helper alone never rejects
+        ({"involves_minor": 0.95, "sexual_content": 0.95}, Decision.INSTANT_REJECT),  # combo
+        ({"involves_minor": 0.95, "undress_real_person": 0.9}, Decision.INSTANT_REJECT),
+        ({"involves_minor": 0.1, "sexual_content": 0.95}, Decision.STANDARD_REJECT),  # adult nsfw
+        (
+            {"involves_minor": 0.95, "sexual_content": 0.1},
+            Decision.APPROVE,
+        ),  # child, nothing sexual
+    ],
+)
+async def test_csam_combo_rule(over: dict[str, float], decision: Decision) -> None:
+    v = await run_check({"answers": answers(**over)})
+    assert v.decision is decision  # type: ignore[attr-defined]
+    if decision is Decision.INSTANT_REJECT:
+        assert v.category is Category.CSAM  # type: ignore[attr-defined]

@@ -7,10 +7,13 @@ TypeSafe's own API (`state`, `questions` in; `answers` out). Check it on the fir
 from typing import Any
 
 import httpx
+import structlog
 
 from app.contracts.ports import VisionRaw
 from app.core.errors import ProviderCallFailed
 from app.gateway.providers.http import parse_chat_completion, post_json
+
+log = structlog.get_logger("provider")
 
 CF_JEV_MODEL = "typesafe/jev"
 CF_VISION_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
@@ -36,6 +39,11 @@ class CloudflareClient:
         result = data.get("result", data)
         if not isinstance(result, dict):
             raise ProviderCallFailed("cloudflare returned unexpected result", retryable=False)
+        usage = result.get("usage")
+        if isinstance(usage, dict):  # cost tracking: neurons count against the free daily limit
+            log.info(
+                "provider_usage", provider="cloudflare", model=model, neurons=usage.get("neurons")
+            )
         return result
 
 

@@ -12,15 +12,27 @@ from app.contracts.ports import VisionRaw
 from app.core.config import Settings
 from app.core.errors import ProviderCallFailed
 from app.guardrails.agent import GuardDeps, Timing
-from app.guardrails.text_check import QUESTION_CATEGORY
+from app.guardrails.text_check import load_questions
 from app.local.fake_strikes import FakeStrikeLedger
 
 T0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
+# Short names used in tests -> question ids in jev_questions.yaml
+ALIAS = {
+    "ncii_undressing": "undress_real_person",
+    "gore_self_harm": "graphic_gore",
+    "terrorism_weapons": "weapon_making",
+    "nsfw_explicit": "sexual_content",
+    "celebrity_likeness": "real_public_figure",
+    "hate_harassment": "hate",
+    "pii_watermark": "id_or_financial_document",
+}
+
+
 def jev_answers(**over: float) -> dict[str, Any]:
-    base = {k: 0.01 for k in QUESTION_CATEGORY}
-    base.update(over)
+    base = {k: 0.01 for k in load_questions().questions}
+    base.update({ALIAS.get(k, k): v for k, v in over.items()})
     return {k: {"type": "noul", "noul": v} for k, v in base.items()}
 
 

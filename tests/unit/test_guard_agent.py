@@ -42,11 +42,9 @@ async def test_image_request_runs_both_with_right_inputs() -> None:
     d = await check(inp("N u d e fox", [png()]), make_deps(jev, vision))
     assert d.decision is Decision.APPROVE
     assert {v.source for v in d.verdicts} == {"jev", "vision"}
-    assert jev.states[0] == {
-        "prompt_raw": "N u d e fox",
-        "prompt_clean": "nude fox",
-        "has_image": True,
-    }
+    state = jev.states[0]
+    assert state.pop("context")  # shared context from jev_questions.yaml
+    assert state == {"prompt_raw": "N u d e fox", "prompt_clean": "nude fox", "has_image": True}
     assert vision.calls[0]["text"] == "nude fox"  # vision gets the cleaned text
     assert vision.calls[0]["image_urls"][0].startswith("data:image/jpeg;base64,")
 

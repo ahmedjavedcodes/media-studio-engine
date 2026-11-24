@@ -85,3 +85,18 @@ def decide(category: Category, p: float) -> Decision:
     if tier in (Tier.CRITICAL, Tier.SEVERE) and p >= HARD_THRESHOLD:
         return Decision.INSTANT_REJECT
     return Decision.STANDARD_REJECT
+
+
+def combo_scores(scores: dict[str, float]) -> dict[Category, float]:
+    """Combo rules over Jev question scores (keys are question ids in jev_questions.yaml).
+
+    CSAM: the request involves a minor AND asks for sexual or undressing content.
+    Each side is its own question. Both must be high, so the combo score is the lower one.
+    """
+    minor = scores.get("involves_minor", 0.0)
+    sexual = max(
+        scores.get("sexual_content", 0.0),
+        scores.get("undress_real_person", 0.0),
+        scores.get("explicit_face_swap", 0.0),
+    )
+    return {Category.CSAM: min(minor, sexual)}
