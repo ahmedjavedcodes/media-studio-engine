@@ -1,0 +1,19 @@
+{
+  "id": "V03",
+  "prompt": "make it brighter",
+  "images": [
+    "fake_image.jpg"
+  ],
+  "error": "Image must be JPEG, PNG or WEBP.",
+  "wall_ms": 0,
+  "usage": [],
+  "outcome": "BAD_INPUT",
+  "category": null,
+  "section": "input_checks",
+  "expected": {
+    "decision": "BAD_INPUT",
+    "http": 400
+  },
+  "tests": "magic bytes, not extension",
+  "verdict": "PASS"
+}

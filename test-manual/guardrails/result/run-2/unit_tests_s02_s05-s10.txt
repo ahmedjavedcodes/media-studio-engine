@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.16, pytest-9.2.0, pluggy-1.7.0 -- /Users/apple/Documents/Projects/Final Year Project/Agentic Media Studio Engine/media-studio-engine/.venv/bin/python
+rootdir: /Users/apple/Documents/Projects/Final Year Project/Agentic Media Studio Engine/media-studio-engine
+configfile: pyproject.toml
+plugins: platformdirs-4.14.8, cov-7.1.0, anyio-4.16.0, langsmith-0.16.0, asyncio-1.5.0, respx-0.23.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 9 items / 2 deselected / 7 selected
+
+tests/unit/test_guard_flows.py::test_s02_same_request_id_twice_is_one_strike PASSED [ 14%]
+tests/unit/test_guard_flows.py::test_s05_five_rejects_in_10_min_is_30_min_and_later_1_min_does_not_shorten PASSED [ 28%]
+tests/unit/test_guard_flows.py::test_s06_vision_times_out_jev_approves_is_503_no_strike_not_a_reject PASSED [ 42%]
+tests/unit/test_guard_flows.py::test_s07_vision_times_out_jev_standard_reject_is_422 PASSED [ 57%]
+tests/unit/test_guard_flows.py::test_s08_jev_instant_cancels_running_vision PASSED [ 71%]
+tests/unit/test_guard_flows.py::test_s09_vision_unsafe_without_logprobs_is_standard_reject_needs_review_no_strike PASSED [ 85%]
+tests/unit/test_guard_flows.py::test_s10_vision_returns_safe_with_a_dot_is_503 PASSED [100%]
+
+======================= 7 passed, 2 deselected in 0.55s ========================

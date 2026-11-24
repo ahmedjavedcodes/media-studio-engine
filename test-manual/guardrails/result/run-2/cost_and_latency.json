@@ -1,0 +1,81 @@
+{
+  "full_run": {
+    "cases": 41,
+    "text_only": {
+      "n": 29,
+      "p50_ms": 412,
+      "p95_ms": 531,
+      "max_ms": 582
+    },
+    "with_images": {
+      "n": 12,
+      "p50_ms": 927,
+      "p95_ms": 2323,
+      "max_ms": 2626
+    },
+    "503_count": 0,
+    "jev_step_ms": {
+      "n": 41,
+      "p50_ms": 413,
+      "p95_ms": 486,
+      "max_ms": 582
+    },
+    "vision_step_ms": {
+      "n": 9,
+      "p50_ms": 1109,
+      "p95_ms": 2407,
+      "max_ms": 2407
+    },
+    "usage": {
+      "jev_calls": 48,
+      "jev_input_tokens": 62184,
+      "jev_output_tokens": 14448,
+      "jev_cost_usd_at_0.042_per_M_input": 0.00261,
+      "scout_calls_completed": 10,
+      "scout_neurons": 496.9
+    },
+    "verdicts": {
+      "PASS": 47,
+      "FALSE+": 1,
+      "GAP": 1
+    }
+  },
+  "vision_only_run": {
+    "cases": 12,
+    "text_only": null,
+    "with_images": {
+      "n": 12,
+      "p50_ms": 1406,
+      "p95_ms": 2117,
+      "max_ms": 2549
+    },
+    "503_count": 1,
+    "jev_step_ms": {
+      "n": 11,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "max_ms": 0
+    },
+    "vision_step_ms": {
+      "n": 11,
+      "p50_ms": 1290,
+      "p95_ms": 1896,
+      "max_ms": 1896
+    },
+    "usage": {
+      "jev_calls": 0,
+      "jev_input_tokens": 0,
+      "jev_output_tokens": 0,
+      "jev_cost_usd_at_0.042_per_M_input": 0.0,
+      "scout_calls_completed": 12,
+      "scout_neurons": 588.4
+    },
+    "verdicts": {
+      "PASS": 9,
+      "MISS": 1,
+      "FAIL(503)": 1,
+      "GAP": 1
+    }
+  },
+  "note": "Warm-up calls (1 Jev with 1 question, 1 Scout on a 64px image, at the start of each run) are not included in usage."
+}

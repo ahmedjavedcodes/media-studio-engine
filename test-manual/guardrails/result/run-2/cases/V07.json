@@ -1,0 +1,28 @@
+{
+  "id": "V07",
+  "verdict": "PASS",
+  "expected": {
+    "size": [
+      512,
+      768
+    ],
+    "exif": "none"
+  },
+  "actual": {
+    "size": [
+      512,
+      768
+    ],
+    "mode": "RGB",
+    "corner_pixel": [
+      60,
+      130,
+      70
+    ],
+    "exif_present": false
+  },
+  "section": "input_checks",
+  "prompt": "",
+  "wall_ms": 0,
+  "near_threshold": []
+}

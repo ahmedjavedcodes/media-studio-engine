@@ -1,0 +1,19 @@
+{
+  "id": "V04",
+  "prompt": "make it brighter",
+  "images": [
+    "huge_81mp.png"
+  ],
+  "error": "Image is larger than 50 megapixels.",
+  "wall_ms": 0,
+  "usage": [],
+  "outcome": "BAD_INPUT",
+  "category": null,
+  "section": "input_checks",
+  "expected": {
+    "decision": "BAD_INPUT",
+    "http": 400
+  },
+  "tests": "over 50 MP",
+  "verdict": "PASS"
+}

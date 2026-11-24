@@ -1,0 +1,141 @@
+[
+  {
+    "flow": "S01",
+    "step": 1,
+    "outcome": "INSTANT_REJECT",
+    "category": "GORE_SELF_HARM",
+    "strike_text": "Strike 1 of 5. At 5 strikes your account will be banned.",
+    "retry_after": null,
+    "wall_ms": 481,
+    "usage": [
+      {
+        "provider": "typesafe",
+        "model": "jev-1.13.0",
+        "input_tokens": 1303,
+        "output_tokens": 301
+      }
+    ]
+  },
+  {
+    "flow": "S01",
+    "step": 2,
+    "outcome": "INSTANT_REJECT",
+    "category": "GORE_SELF_HARM",
+    "strike_text": "Strike 2 of 5. At 5 strikes your account will be banned.",
+    "retry_after": null,
+    "wall_ms": 404,
+    "usage": [
+      {
+        "provider": "typesafe",
+        "model": "jev-1.13.0",
+        "input_tokens": 1303,
+        "output_tokens": 301
+      }
+    ]
+  },
+  {
+    "flow": "S01",
+    "step": 3,
+    "outcome": "INSTANT_REJECT",
+    "category": "GORE_SELF_HARM",
+    "strike_text": "Strike 3 of 5. At 5 strikes your account will be banned.",
+    "retry_after": null,
+    "wall_ms": 430,
+    "usage": [
+      {
+        "provider": "typesafe",
+        "model": "jev-1.13.0",
+        "input_tokens": 1303,
+        "output_tokens": 301
+      }
+    ]
+  },
+  {
+    "flow": "S01",
+    "step": 4,
+    "outcome": "INSTANT_REJECT",
+    "category": "GORE_SELF_HARM",
+    "strike_text": "Strike 4 of 5. At 5 strikes your account will be banned.",
+    "retry_after": null,
+    "wall_ms": 443,
+    "usage": [
+      {
+        "provider": "typesafe",
+        "model": "jev-1.13.0",
+        "input_tokens": 1303,
+        "output_tokens": 301
+      }
+    ]
+  },
+  {
+    "flow": "S01",
+    "step": 5,
+    "outcome": "INSTANT_REJECT",
+    "category": "GORE_SELF_HARM",
+    "strike_text": "Strike 5 of 5. Your account has been banned.",
+    "retry_after": null,
+    "wall_ms": 412,
+    "usage": [
+      {
+        "provider": "typesafe",
+        "model": "jev-1.13.0",
+        "input_tokens": 1303,
+        "output_tokens": 301
+      }
+    ]
+  },
+  {
+    "flow": "S01",
+    "step": 6,
+    "outcome": "ACCOUNT_RESTRICTED_403",
+    "category": null,
+    "strike_text": null,
+    "retry_after": null,
+    "wall_ms": 0,
+    "usage": []
+  },
+  {
+    "flow": "S03",
+    "step": 1,
+    "outcome": "STANDARD_REJECT",
+    "category": "NSFW_EXPLICIT",
+    "strike_text": null,
+    "retry_after": 60,
+    "wall_ms": 459,
+    "usage": [
+      {
+        "provider": "typesafe",
+        "model": "jev-1.13.0",
+        "input_tokens": 1295,
+        "output_tokens": 301
+      }
+    ]
+  },
+  {
+    "flow": "S04",
+    "step": 1,
+    "outcome": "COOLDOWN_429",
+    "category": null,
+    "strike_text": null,
+    "retry_after": 60,
+    "wall_ms": 0,
+    "usage": []
+  },
+  {
+    "flow": "S03",
+    "step": 2,
+    "outcome": "STANDARD_REJECT",
+    "category": "NSFW_EXPLICIT",
+    "strike_text": null,
+    "retry_after": 120,
+    "wall_ms": 405,
+    "usage": [
+      {
+        "provider": "typesafe",
+        "model": "jev-1.13.0",
+        "input_tokens": 1295,
+        "output_tokens": 301
+      }
+    ]
+  }
+]

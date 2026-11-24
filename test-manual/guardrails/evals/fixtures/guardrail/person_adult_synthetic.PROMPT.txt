@@ -1,0 +1,2 @@
+model: @cf/black-forest-labs/flux-1-schnell
+prompt: photorealistic photo of an adult woman about 30 years old standing in a sunny park, wearing blue jeans and a plain white t-shirt, full body, neutral relaxed pose, looking at the camera, natural daylight, sharp focus

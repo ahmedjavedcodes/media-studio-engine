@@ -1,0 +1,27 @@
+{
+  "id": "V06",
+  "verdict": "PASS",
+  "expected": {
+    "size": [
+      64,
+      64
+    ]
+  },
+  "actual": {
+    "size": [
+      64,
+      64
+    ],
+    "mode": "RGB",
+    "corner_pixel": [
+      91,
+      150,
+      228
+    ],
+    "exif_present": false
+  },
+  "section": "input_checks",
+  "prompt": "",
+  "wall_ms": 0,
+  "near_threshold": []
+}
