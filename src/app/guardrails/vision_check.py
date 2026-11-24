@@ -77,6 +77,7 @@ def verdict_from_output(
             reason=reason,
             scores=scores,
             needs_review=needs_review,
+            raw_output=text,
             model=model,
             latency_ms=latency_ms,
         )

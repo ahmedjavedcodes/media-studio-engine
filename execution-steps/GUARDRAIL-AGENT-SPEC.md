@@ -21,7 +21,7 @@ Check every request before any generation call.
 0. Account check      frozen/banned → 403 · cooldown → 429
 1. Clean text         keep prompt_raw, build prompt_clean
 1b. Prep images       validate, strip EXIF, downscale to 768
-2. Run together       Jev(text) + LlamaGuard4(images + prompt_clean), 2000 ms deadline
+2. Run together       Jev(text) + LlamaGuard4(images + prompt_clean), deadline per section 9
 3. Merge              strictest wins
 4. Act                APPROVE → generator · reject → 422 + strike rules
 ```
@@ -50,10 +50,13 @@ All model calls go through `gateway/` with `httpx`.
 ## 5. Providers
 | Check | Build mode | Test mode |
 |---|---|---|
-| Jev | Cloudflare `typesafe/jev` | `POST https://api.typesafe.ai/v1/systemone`, model `jev-1.13.0` |
+| Jev | **TypeSafe direct** (decided 2026-11-24): `POST https://api.typesafe.ai/v1/systemone`, model `jev-1.13.0`. Cost is about $0.00005 per check | Same |
 | Vision | Stand-in: `@cf/meta/llama-4-scout-17b-16e-instruct` told to answer in Llama Guard format. Not a safety guarantee | OpenRouter `meta-llama/llama-guard-4-12b` |
 
 Pin versions. No fallback model. Failure = fail closed.
+
+Build mode calls Jev directly through TypeSafe. The Cloudflare route `typesafe/jev` on `/ai/run` returned "No route for that URI", so it is not used (`JEV_PROVIDER=cloudflare` stays as an option but is unverified).
+Each provider has one shared `httpx.AsyncClient` with keep-alive, and API startup sends one warm-up call to Jev and to the vision model. A cold TLS connection costs about 870 ms.
 
 ## 6. Schemas
 ```python
@@ -135,25 +138,29 @@ Merge:
 4. A reject from one check beats a failure in the other. No reject + any failure → 503.
 
 ## 9. Timeouts
-| Part | Timeout | Retry |
+Per `PROVIDER_MODE` (values from the 2026-11-24 eval review; env overrides in `core/config.py`):
+
+| Part | Build (Scout stand-in) | Test (Llama Guard 4) |
 |---|---|---|
-| Jev | 500 ms | 1 × 300 ms |
-| Vision | 1500 ms | 1 × 800 ms |
-| Whole agent | 2000 ms deadline | none |
+| Jev | 800 ms, retry after 400 ms | same |
+| Vision | 2500 ms, no retry | 1500 ms, retry after 800 ms (placeholder, measure first) |
+| Whole agent | text only 1500 ms; with images 3000 ms | 2000 ms (placeholder, set after measuring) |
 
 - Attempt timeout = `min(timeout, deadline − now)`. Skip retry if < 100 ms left.
 - Retry on timeout, 429, 5xx. Not on 400.
 - Fail closed → 503 `"Safety verification timed out. Please try again."`, 0 credits, no strike. Never fail open.
 
-## 10. Strikes (via `StrikeLedger` port, idempotent by `request_id`)
+## 10. Strikes and cooldowns (via `StrikeLedger` port, idempotent by `request_id`)
+Replaced 2026-11-24. Tiers still decide INSTANT vs STANDARD (§8). They do not change these limits.
+
 | Trigger | Action |
 |---|---|
-| INSTANT, CRITICAL | 1 strike → freeze, revoke tokens, ban |
-| INSTANT, SEVERE | Strikes in 30 days: 1 → warn · 2 → 24 h cooldown · 3 → ban |
-| STANDARD | No strike |
-| 5 rejects in 10 min | 30 min cooldown |
+| INSTANT reject (any category) | 1 strike. Count strikes in the last 30 days. Strikes 1 to 4: block + warning "Strike N of 5. At 5 strikes your account will be banned." Strike 5: freeze, revoke tokens, permanent ban |
+| STANDARD reject | No strike. 1 minute cooldown on the first one; 2 minutes if there was another standard reject in the last 10 minutes |
+| 5 rejects of any kind in 10 min | 30 minute cooldown |
 
-503s and cooldown requests do not count as rejects.
+A new cooldown never shortens a running one. 503s and requests blocked by a cooldown do not count as rejects.
+Settings: `INSTANT_STRIKE_LIMIT=5`, `STRIKE_WINDOW_DAYS=30`, `STANDARD_COOLDOWN_SEC=60`, `STANDARD_REPEAT_COOLDOWN_SEC=120`.
 
 ## 11. Errors
 | Case | HTTP | `code` |
@@ -217,13 +224,13 @@ LangSmith trace per check (models, decision, category, latency per step). Audit 
 - [ ] No path reaches the generator without APPROVE from every check
 - [ ] Generator gets raw prompt and original images, byte for byte
 - [ ] Any provider failure → 503, 0 credits, no strike
-- [ ] Agent never exceeds 2050 ms
+- [ ] Agent never exceeds its deadline plus 50 ms (§9: text 1500 ms, images 3000 ms in build mode)
 - [ ] Every 422 has `category`, `blocked_by`, `message` and `tip` from the table
 - [ ] Raw `reason` and `scores` never in API responses
 - [ ] 0 misses on CSAM and NCII red-team prompts
 - [ ] `ruff`, `mypy`, `pytest` pass; works in the frontend
 
 ## 16. Open decisions
-1. Build-mode Jev: Cloudflare `typesafe/jev` (may not use free quota) or TypeSafe direct?
+1. ~~Build-mode Jev: Cloudflare `typesafe/jev` or TypeSafe direct?~~ **Settled 2026-11-24: TypeSafe direct** (see §5).
 2. Build-mode vision: Scout stand-in or OpenRouter `llama-guard-4-12b:free`?
 3. CRITICAL bans: instant final, or freeze then human review?

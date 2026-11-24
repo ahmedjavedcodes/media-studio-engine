@@ -23,18 +23,21 @@ async def call_with_retry[T](
     fn: Callable[[float], Awaitable[T]],
     *,
     timeout: float,
-    retry_delay: float,
+    retry_delay: float | None,
     deadline: float,
     clock: Callable[[], float] = time.monotonic,
 ) -> T:
-    """`fn` gets the attempt timeout. `deadline` is an absolute `clock()` time."""
+    """`fn` gets the attempt timeout. `deadline` is an absolute `clock()` time.
+
+    `retry_delay=None` means no retry.
+    """
     first = min(timeout, deadline - clock())
     if first <= 0:
         raise ProviderCallFailed("no time left for check", retryable=False)
     try:
         return await _attempt(fn, first)
     except ProviderCallFailed as exc:
-        if not exc.retryable:
+        if not exc.retryable or retry_delay is None:
             raise
         # Skip the retry if less than MIN_RETRY_WINDOW_S would be left after the wait.
         if deadline - clock() - retry_delay < MIN_RETRY_WINDOW_S:

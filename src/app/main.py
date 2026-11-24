@@ -1,5 +1,8 @@
 """FastAPI app."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -9,12 +12,23 @@ from app.core.config import get_settings
 from app.core.errors import EngineError
 from app.core.logging import setup_logging
 from app.core.telemetry import setup_telemetry
+from app.guardrails.deps import close_guard_clients, get_guard_deps
+from app.guardrails.warmup import warm_up
 
 settings = get_settings()
 setup_logging(settings.log_level)
 setup_telemetry(settings)
 
-app = FastAPI(title="Media Engine")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    if settings.guard_warmup:  # open warm connections to Jev and vision before the first request
+        await warm_up(get_guard_deps())
+    yield
+    await close_guard_clients()
+
+
+app = FastAPI(title="Media Engine", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],

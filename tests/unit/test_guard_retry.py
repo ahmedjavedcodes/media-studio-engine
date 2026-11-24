@@ -82,3 +82,10 @@ async def test_deadline_already_passed() -> None:
     with pytest.raises(ProviderCallFailed):
         await run(fn, budget=-1)
     assert fn.timeouts == []
+
+
+async def test_retry_delay_none_means_no_retry() -> None:
+    fn = Flaky(ProviderCallFailed("429", retryable=True), "ok")
+    with pytest.raises(ProviderCallFailed):
+        await call_with_retry(fn, timeout=0.5, retry_delay=None, deadline=time.monotonic() + 2)
+    assert len(fn.timeouts) == 1

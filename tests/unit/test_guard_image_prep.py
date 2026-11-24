@@ -70,9 +70,10 @@ def test_downscale_keeps_ratio_and_never_upscales() -> None:
 def test_alpha_goes_on_white() -> None:
     buf = io.BytesIO()
     Image.new("RGBA", (10, 10), (0, 0, 0, 0)).save(buf, format="PNG")
-    px = decode(prep_image(buf.getvalue()).data_url).getpixel((5, 5))
-    assert isinstance(px, tuple)
-    assert min(px) > 250
+    out = decode(prep_image(buf.getvalue()).data_url)
+    assert out.mode == "RGB"
+    assert out.getpixel((0, 0)) == (255, 255, 255)  # V08: corner pixel is exactly white
+    assert out.getpixel((5, 5)) == (255, 255, 255)
 
 
 def test_exif_rotation_applied_and_metadata_stripped() -> None:

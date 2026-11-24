@@ -68,8 +68,10 @@ class GuardrailUnavailable(EngineError):
     code = "guardrail_unavailable"
     http_status = 503
 
-    def __init__(self) -> None:
+    def __init__(self, details: list[dict[str, str]] | None = None) -> None:
         super().__init__("Safety verification timed out. Please try again.")
+        # Internal only (logs, evals). Never part of body().
+        self.details = details or []
 
 
 class ContentBlocked(EngineError):

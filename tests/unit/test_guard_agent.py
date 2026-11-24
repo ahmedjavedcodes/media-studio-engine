@@ -145,17 +145,25 @@ async def test_no_retry_on_non_retryable() -> None:
     assert jev.calls == 1
 
 
-async def test_deadline_never_exceeded() -> None:
-    deps = make_deps(FakeJev(delay=10), FakeVision(delay=10))
+async def test_deadline_text_1_5s_images_3s() -> None:
+    """Build-mode deadlines: 1.5 s for text only, 3.0 s with images (plus 50 ms slack)."""
     start = time.monotonic()
     with pytest.raises(GuardrailUnavailable):
-        await check(inp(images=[png()]), deps)
-    assert time.monotonic() - start < 2.05
+        await check(inp(), make_deps(FakeJev(delay=10)))
+    assert 1.4 < time.monotonic() - start < 1.55
+
+    start = time.monotonic()
+    with pytest.raises(GuardrailUnavailable):
+        await check(inp(images=[png()]), make_deps(FakeJev(delay=10), FakeVision(delay=10)))
+    # vision times out at 2.5 s with no retry, so the 3.0 s deadline is not reached
+    assert 2.4 < time.monotonic() - start < 3.05
 
 
 async def test_hung_check_with_reject_from_other_returns_reject() -> None:
     deps = make_deps(
-        FakeJev(jev_answers(nsfw_explicit=0.9)), FakeVision(delay=10), timing=Timing(deadline_s=0.3)
+        FakeJev(jev_answers(nsfw_explicit=0.9)),
+        FakeVision(delay=10),
+        timing=Timing(deadline_images_s=0.3),
     )
     d = await check(inp(images=[png()]), deps)
     assert d.decision is Decision.STANDARD_REJECT

@@ -53,6 +53,7 @@ class GuardVerdict(BaseModel):
     reason: str  # internal log only
     scores: dict[str, float] = Field(default_factory=dict)
     needs_review: bool = False
+    raw_output: str | None = None  # vision: the model's text. Internal, never in API responses
     model: str
     latency_ms: int
 
@@ -66,5 +67,6 @@ class GuardDecision(BaseModel):
     verdicts: list[GuardVerdict]
     account_action: AccountAction = "none"
     strike_count: int | None = None  # instant rejects only: strikes in the last 30 days
+    timings_ms: dict[str, int] = Field(default_factory=dict)  # internal: prep, checks, total
     retry_after: int | None = None  # seconds until the user can try again, if a cooldown applies
     user_message: str | None = None

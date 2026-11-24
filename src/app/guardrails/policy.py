@@ -15,12 +15,20 @@ IMAGES_PER_CALL = 5
 IMAGE_LONG_SIDE = 768
 JPEG_QUALITY = 90
 
-# Timeouts in seconds (section 9)
-DEADLINE_S = 2.0
-JEV_TIMEOUT_S = 0.5
-JEV_RETRY_DELAY_S = 0.3
-VISION_TIMEOUT_S = 1.5
-VISION_RETRY_DELAY_S = 0.8
+# Timeouts in seconds, per PROVIDER_MODE (GUARDRAIL-EVAL-REVIEW.md, fix 2).
+# Jev is the same in both modes. A retry delay of None means no retry.
+JEV_TIMEOUT_S = 0.8
+JEV_RETRY_DELAY_S = 0.4
+# build: Cloudflare Scout stand-in
+BUILD_VISION_TIMEOUT_S = 2.5
+BUILD_VISION_RETRY_DELAY_S: float | None = None
+BUILD_DEADLINE_TEXT_S = 1.5
+BUILD_DEADLINE_IMAGES_S = 3.0
+# test: Llama Guard 4. Placeholders until real latency is measured.
+TEST_VISION_TIMEOUT_S = 1.5
+TEST_VISION_RETRY_DELAY_S: float | None = 0.8
+TEST_DEADLINE_TEXT_S = 2.0
+TEST_DEADLINE_IMAGES_S = 2.0
 MIN_RETRY_WINDOW_S = 0.1
 
 # Cooldown rules that are not configurable. Strike limits and the 1/2 minute cooldowns

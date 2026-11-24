@@ -22,9 +22,9 @@ class Settings(BaseSettings):
     fal_key: str = ""
     anthropic_api_key: str = ""
     typesafe_api_key: str = ""
-    # Which Jev to use in build mode. Cloudflare has no Jev model, so "typesafe" is the only
-    # one that works today. It is opt-in because TypeSafe is not a Cloudflare (free) provider.
-    jev_provider: Literal["cloudflare", "typesafe"] = "cloudflare"
+    # Build mode calls Jev directly through TypeSafe (open decision 1 settled). The Cloudflare
+    # route `typesafe/jev` returned "No route" on /ai/run, so it is not used.
+    jev_provider: Literal["cloudflare", "typesafe"] = "typesafe"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     typesafe_base_url: str = "https://api.typesafe.ai"
     cors_origins: str = "http://localhost:3000"
@@ -33,9 +33,15 @@ class Settings(BaseSettings):
     langsmith_api_key: str = ""
     langsmith_project: str = "app-dev"
 
-    # Guardrail timeouts in seconds. Defaults are the spec's section 9 values.
-    jev_timeout_s: float = 0.5
-    vision_timeout_s: float = 1.5
+    # Guardrail timeouts in seconds. Unset (None) = the PROVIDER_MODE default in
+    # guardrails/policy.py. Retry delay 0 = no retry.
+    jev_timeout_s: float | None = None
+    jev_retry_delay_s: float | None = None
+    vision_timeout_s: float | None = None
+    vision_retry_delay_s: float | None = None
+    deadline_text_s: float | None = None
+    deadline_images_s: float | None = None
+    guard_warmup: bool = True  # warm provider connections at API startup
 
     # Guardrail strikes and cooldowns (env: INSTANT_STRIKE_LIMIT, ...)
     instant_strike_limit: int = 5  # strike N of this limit bans the account

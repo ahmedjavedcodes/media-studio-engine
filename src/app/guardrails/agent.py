@@ -45,11 +45,17 @@ log = structlog.get_logger("guardrail")
 
 @dataclass(frozen=True)
 class Timing:
-    deadline_s: float = policy.DEADLINE_S
+    """Defaults are the build-mode values. deps.timing_for(settings) picks them per mode."""
+
     jev_timeout_s: float = policy.JEV_TIMEOUT_S
-    jev_retry_delay_s: float = policy.JEV_RETRY_DELAY_S
-    vision_timeout_s: float = policy.VISION_TIMEOUT_S
-    vision_retry_delay_s: float = policy.VISION_RETRY_DELAY_S
+    jev_retry_delay_s: float | None = policy.JEV_RETRY_DELAY_S
+    vision_timeout_s: float = policy.BUILD_VISION_TIMEOUT_S
+    vision_retry_delay_s: float | None = policy.BUILD_VISION_RETRY_DELAY_S
+    deadline_text_s: float = policy.BUILD_DEADLINE_TEXT_S
+    deadline_images_s: float = policy.BUILD_DEADLINE_IMAGES_S
+
+    def deadline_for(self, has_images: bool) -> float:
+        return self.deadline_images_s if has_images else self.deadline_text_s
 
 
 def _utcnow() -> datetime:
@@ -115,9 +121,9 @@ async def _run_vision(
 
 async def _run_checks(
     deps: GuardDeps, text: CleanText, images: list[PreparedImage]
-) -> tuple[list[GuardVerdict], list[BaseException]]:
+) -> tuple[list[GuardVerdict], list[tuple[str, BaseException]]]:
     """Step 2. Both checks together. An INSTANT reject cancels the other one."""
-    deadline = time.monotonic() + deps.timing.deadline_s
+    deadline = time.monotonic() + deps.timing.deadline_for(bool(images))
     tasks: dict[asyncio.Task[GuardVerdict], str] = {
         asyncio.create_task(_run_jev(deps, text, bool(images), deadline)): "jev"
     }
@@ -127,7 +133,7 @@ async def _run_checks(
         )
 
     verdicts: list[GuardVerdict] = []
-    failures: list[BaseException] = []
+    failures: list[tuple[str, BaseException]] = []
     pending = set(tasks)
     try:
         while pending:
@@ -136,7 +142,7 @@ async def _run_checks(
                 pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED
             )
             if not done:  # whole-agent deadline hit
-                failures.append(TimeoutError("guardrail deadline"))
+                failures.append(("deadline", TimeoutError("guardrail deadline")))
                 break
             for task in done:
                 exc = task.exception()
@@ -147,7 +153,7 @@ async def _run_checks(
                         error=type(exc).__name__,
                         detail=str(exc),
                     )
-                    failures.append(exc)
+                    failures.append((tasks[task], exc))
                 else:
                     verdicts.append(task.result())
             if any(v.decision is Decision.INSTANT_REJECT for v in verdicts):
@@ -234,15 +240,30 @@ async def check(inp: GuardInput, deps: GuardDeps) -> GuardDecision:
         if not text.prompt_clean and not inp.images:
             raise BadInput("Prompt is empty.")
         prepared = prep_images(inp.images)
+        prep_ms = int((time.monotonic() - started) * 1000)
 
         verdicts, failures = await _run_checks(deps, text, prepared)
+        checks_ms = int((time.monotonic() - started) * 1000) - prep_ms
         rejects = [v for v in verdicts if v.decision is not Decision.APPROVE]
         if not rejects and (failures or not verdicts):
-            raise GuardrailUnavailable()  # 0 credits, no strike, never fail open
+            raise GuardrailUnavailable(  # 0 credits, no strike, never fail open
+                [
+                    {"source": src, "error": type(exc).__name__, "detail": str(exc)}
+                    for src, exc in failures
+                ]
+            )
 
         final, category, confidence = merge(verdicts)
         result = GuardDecision(
-            decision=final, category=category, confidence=confidence, verdicts=verdicts
+            decision=final,
+            category=category,
+            confidence=confidence,
+            verdicts=verdicts,
+            timings_ms={
+                "prep": prep_ms,
+                "checks": checks_ms,
+                "total": int((time.monotonic() - started) * 1000),
+            },
         )
         if final is not Decision.APPROVE:
             outcome = await _apply_strikes(deps, inp, final)

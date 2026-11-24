@@ -84,7 +84,15 @@ def test_blocked_image_instant_reject_has_strike_text(deps: GuardDeps) -> None:
     assert body["strike_count"] == 1
     assert body["strike_text"] == "Strike 1 of 5. At 5 strikes your account will be banned."
     assert body["tip"] is None
-    for hidden in ("reason", "scores", "verdicts", "confidence", "fake-vision"):
+    for hidden in (
+        "reason",
+        "scores",
+        "verdicts",
+        "confidence",
+        "fake-vision",
+        "raw_output",
+        "timings",
+    ):
         assert hidden not in str(body)
 
 
@@ -131,23 +139,25 @@ def test_data_url_images_are_accepted(deps: GuardDeps) -> None:
 
 
 def test_end_to_end_through_real_providers_with_respx() -> None:
-    """Build-mode wiring: Cloudflare Jev + Scout stand-in, both mocked at the HTTP level."""
+    """Build-mode wiring: Jev through TypeSafe, Scout stand-in on Cloudflare, both mocked."""
     from app.core.config import get_settings
     from app.guardrails.deps import get_guard_deps as real
 
     settings = get_settings()
+    saved = (
+        settings.cloudflare_account_id,
+        settings.cloudflare_api_token,
+        settings.typesafe_api_key,
+    )
     settings.cloudflare_account_id, settings.cloudflare_api_token = "acc", "tok"
+    settings.typesafe_api_key = "ts-key"
     real.cache_clear()
     try:
         with respx.mock:
-            respx.post(
-                "https://api.cloudflare.com/client/v4/accounts/acc/ai/run/typesafe/jev"
-            ).mock(
-                return_value=httpx.Response(
-                    200, json={"success": True, "result": {"answers": jev_answers()}}
-                )
+            jev = respx.post("https://api.typesafe.ai/v1/systemone").mock(
+                return_value=httpx.Response(200, json={"answers": jev_answers()})
             )
-            respx.post(
+            vision = respx.post(
                 "https://api.cloudflare.com/client/v4/accounts/acc/ai/run/@cf/meta/llama-4-scout-17b-16e-instruct"
             ).mock(
                 return_value=httpx.Response(
@@ -156,6 +166,9 @@ def test_end_to_end_through_real_providers_with_respx() -> None:
             )
             res = client.post("/v1/runs", json={"prompt": "a fox", "images": [b64(png())]})
         assert res.status_code == 200
+        assert jev.called and vision.called
+        assert jev.calls[0].request.headers["authorization"] == "Bearer ts-key"
     finally:
         real.cache_clear()
-        settings.cloudflare_account_id = settings.cloudflare_api_token = ""
+        settings.cloudflare_account_id, settings.cloudflare_api_token = saved[0], saved[1]
+        settings.typesafe_api_key = saved[2]
