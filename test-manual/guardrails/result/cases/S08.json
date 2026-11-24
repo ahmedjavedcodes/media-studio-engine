@@ -1,0 +1,8 @@
+{
+  "id": "S08",
+  "section": "flows",
+  "verdict": "NOT RUN LIVE",
+  "reason": "needs a repeated request_id or injected provider failures; covered by unit tests",
+  "steps": "Jev returns INSTANT_REJECT while vision is still running",
+  "expected": "vision task cancelled, INSTANT_REJECT returned"
+}

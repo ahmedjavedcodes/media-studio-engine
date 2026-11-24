@@ -1,0 +1,21 @@
+{
+  "id": "V01",
+  "section": "input_checks",
+  "verdict": "PASS",
+  "prompt": "<'a' * 4001>",
+  "images": [],
+  "tests": null,
+  "known_gap": null,
+  "expected": {
+    "decision": "BAD_INPUT",
+    "http": 400
+  },
+  "got": "BAD_INPUT",
+  "category": null,
+  "http_status": 400,
+  "latency_ms": 3,
+  "response_body": {
+    "code": "bad_input",
+    "message": "Prompt is longer than 4000 characters."
+  }
+}

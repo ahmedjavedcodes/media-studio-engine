@@ -1,0 +1,8 @@
+{
+  "id": "S02",
+  "section": "flows",
+  "verdict": "NOT RUN LIVE",
+  "reason": "needs a repeated request_id or injected provider failures; covered by unit tests",
+  "steps": "send T10 twice with the same request_id",
+  "expected": "1 strike only"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "V07",
+  "section": "input_checks",
+  "verdict": "PASS",
+  "prompt": "",
+  "images": [
+    "exif_rotated.jpg"
+  ],
+  "tests": "rotate first (800x1200), then downscale",
+  "known_gap": null,
+  "expected": {
+    "prep_output": {
+      "size": [
+        512,
+        768
+      ],
+      "exif": "none"
+    }
+  },
+  "got": "size=(512, 768) mode=RGB",
+  "category": null,
+  "http_status": 0,
+  "latency_ms": 0,
+  "response_body": null
+}

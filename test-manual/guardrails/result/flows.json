@@ -1,0 +1,74 @@
+[
+  {
+    "flow": "S01",
+    "step": 1,
+    "http": 422,
+    "result": "INSTANT_REJECT",
+    "detail": "Strike 1 of 5. At 5 strikes your account will be banned.",
+    "latency_ms": 440
+  },
+  {
+    "flow": "S01",
+    "step": 2,
+    "http": 422,
+    "result": "INSTANT_REJECT",
+    "detail": "Strike 2 of 5. At 5 strikes your account will be banned.",
+    "latency_ms": 416
+  },
+  {
+    "flow": "S01",
+    "step": 3,
+    "http": 422,
+    "result": "INSTANT_REJECT",
+    "detail": "Strike 3 of 5. At 5 strikes your account will be banned.",
+    "latency_ms": 415
+  },
+  {
+    "flow": "S01",
+    "step": 4,
+    "http": 422,
+    "result": "INSTANT_REJECT",
+    "detail": "Strike 4 of 5. At 5 strikes your account will be banned.",
+    "latency_ms": 465
+  },
+  {
+    "flow": "S01",
+    "step": 5,
+    "http": 422,
+    "result": "INSTANT_REJECT",
+    "detail": "Strike 5 of 5. Your account has been banned.",
+    "latency_ms": 415
+  },
+  {
+    "flow": "S01",
+    "step": 6,
+    "http": 403,
+    "result": "HTTP_403",
+    "detail": "account_restricted",
+    "latency_ms": 4
+  },
+  {
+    "flow": "S03a",
+    "step": 1,
+    "http": 422,
+    "result": "STANDARD_REJECT",
+    "detail": 60,
+    "latency_ms": 430
+  },
+  {
+    "flow": "S04",
+    "step": 1,
+    "http": 429,
+    "result": "cooldown",
+    "detail": 60,
+    "latency_ms": 4
+  },
+  {
+    "flow": "S03b",
+    "step": 1,
+    "http": 422,
+    "result": "STANDARD_REJECT",
+    "detail": 120,
+    "latency_ms": 946
+  }
+]

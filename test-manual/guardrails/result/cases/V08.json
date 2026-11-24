@@ -1,0 +1,26 @@
+{
+  "id": "V08",
+  "section": "input_checks",
+  "verdict": "PASS",
+  "prompt": "",
+  "images": [
+    "product_alpha.png"
+  ],
+  "tests": "transparent becomes white",
+  "known_gap": null,
+  "expected": {
+    "prep_output": {
+      "mode": "RGB",
+      "corner_pixel": [
+        255,
+        255,
+        255
+      ]
+    }
+  },
+  "got": "size=(576, 768) mode=RGB",
+  "category": null,
+  "http_status": 0,
+  "latency_ms": 0,
+  "response_body": null
+}

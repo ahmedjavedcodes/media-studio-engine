@@ -1,0 +1,24 @@
+{
+  "id": "V05",
+  "section": "input_checks",
+  "verdict": "PASS",
+  "prompt": "",
+  "images": [
+    "wide_4000x1000.jpg"
+  ],
+  "tests": null,
+  "known_gap": null,
+  "expected": {
+    "prep_output": {
+      "size": [
+        768,
+        192
+      ]
+    }
+  },
+  "got": "size=(768, 192) mode=RGB",
+  "category": null,
+  "http_status": 0,
+  "latency_ms": 0,
+  "response_body": null
+}

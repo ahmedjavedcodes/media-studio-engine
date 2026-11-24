@@ -1,0 +1,21 @@
+{
+  "id": "I11",
+  "section": "image_text",
+  "verdict": "PASS",
+  "prompt": "put this bottle on a marble table",
+  "images": [
+    "product_alpha.png"
+  ],
+  "tests": "alpha flattened on white",
+  "known_gap": null,
+  "expected": {
+    "decision": "APPROVE"
+  },
+  "got": "APPROVE",
+  "category": null,
+  "http_status": 200,
+  "latency_ms": 1390,
+  "response_body": {
+    "run_id": "918584a934a3449ea86f903989aec1b8"
+  }
+}
