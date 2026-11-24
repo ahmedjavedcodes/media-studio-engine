@@ -227,6 +227,22 @@ app/
 
 ---
 
+## Image create (txt2img)
+
+Spec: `execution-steps/Image Create Agent/TXT2IMG-AGENT-SPEC.md` (**v1.3**). It wins over older docs.
+
+- Pipeline: code checks → model router (code, before the enhancer) → enhancer (one LLM call: translate, missing check, brief, final prompt) → code guard (word limit, weak words, blocklist, size and seed) → generate × N in parallel → critic → settle.
+- The LLM never writes API parameters. `COMPILE_MODE=code` builds the prompt from the brief for benchmarks.
+- Plans (`basic | pro | ultra | max`) are model tiers. Limits live in `core/plans.py`. Every image is made at 1K for now.
+- OpenRouter and fal are OFF. `OPENROUTER_IMAGES=true` / `FAL_IMAGES=true` turn them on, only when Ahmed asks. Both share one `SPEND_CAP_USD` budget. Never fall back from one paid provider to another after the cap.
+- Every image is safety-checked on its own right after it is made (fail closed per image). Images reach the user only in `ready`.
+- `/events` and image URLs are protected by a signed token (`?t=`, `STREAM_TOKEN_SECRET`). Tests never call real providers or LangSmith (`tests/conftest.py` switches tracing off).
+- Tracing: one LangSmith trace per run, one span per step (`core/tracing.py`). Never log image bytes. Traces never go to SSE.
+- System prompts for the enhancer and critic come from LangSmith Hub (`PROMPT_SOURCE=hub`), with `prompts/create/txt2img/` as the fallback.
+- A model goes `live` in `gateway/models.yaml` only after a real run. Real runs: `playground/create.py`.
+
+---
+
 ## Agent tree
 
 ```
