@@ -1,7 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { API_URL, startRun, type Blocked } from "@/lib/api";
+import ImageGrid from "@/components/ImageGrid";
+import ModelPicker from "@/components/ModelPicker";
+import QuestionCard from "@/components/QuestionCard";
+import {
+  eventsUrl,
+  fetchModels,
+  fetchPlans,
+  resumeRun,
+  startRun,
+  type Blocked,
+  type ImageOut,
+  type ModelInfo,
+  type Plan,
+  type PlansResponse,
+  type Question,
+  type RunEvent,
+  type Settings,
+  type StartResult,
+} from "@/lib/api";
 
 const REPORT_URL = process.env.NEXT_PUBLIC_REPORT_URL ?? "#report-wrong-block";
 
@@ -25,17 +43,59 @@ function formatWait(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+const STREAM_EVENTS = ["status", "question", "ready", "error", "expired"] as const;
+const MAX_RECONNECTS = 3;
+
 export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [images, setImages] = useState<string[]>([]);
+  // Build phase: the plan is picked by hand. It will come from the user's account later.
+  const [plan, setPlan] = useState<Plan>("basic");
+  const [plans, setPlans] = useState<PlansResponse | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [settings, setSettings] = useState<Settings>({
+    model: "auto",
+    aspect_ratio: "1:1",
+    resolution: "1K",
+    n: 1,
+  });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [progress, setProgress] = useState<string[]>([]);
-  const [result, setResult] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("");
+  const [runId, setRunId] = useState<string | null>(null);
+  const token = useRef(""); // signed by the server for this run. It goes in the stream URL
+  const [questions, setQuestions] = useState<Question[] | null>(null);
+  const [shown, setShown] = useState<ImageOut[]>([]);
+  const [recommendation, setRecommendation] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
   // Cooldown: the time (ms) when the user may try again, and a ticking clock for the countdown.
   const [retryAt, setRetryAt] = useState(0);
   const [now, setNow] = useState(0);
   const source = useRef<EventSource | null>(null);
+  const reconnect = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnects = useRef(0); // reset whenever an event arrives, so a long run can drop often
+
+  useEffect(() => {
+    fetchPlans().then(setPlans).catch(() => setNotice({ kind: "error", message: "Could not reach the server." }));
+  }, []);
+
+  // The plan decides which models are locked.
+  useEffect(() => {
+    fetchModels(plan)
+      .then((list) => {
+        setModels(list);
+        // A model the new plan does not allow goes back to Auto.
+        setSettings((s) => (list.some((m) => m.id === s.model && m.locked) ? { ...s, model: "auto" } : s));
+      })
+      .catch(() => setModels([]));
+  }, [plan]);
+
+  // ...and the variation limit.
+  function changePlan(next: Plan) {
+    setPlan(next);
+    const limit = plans?.plans.find((p) => p.id === next)?.max_n ?? 1;
+    setSettings((s) => ({ ...s, n: Math.min(s.n, limit) }));
+  }
 
   useEffect(() => {
     if (retryAt <= Date.now()) return;
@@ -43,48 +103,99 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [retryAt]);
 
-  useEffect(() => () => source.current?.close(), []);
+  useEffect(
+    () => () => {
+      source.current?.close();
+      if (reconnect.current) clearTimeout(reconnect.current);
+    },
+    [],
+  );
 
   const secondsLeft = Math.max(0, Math.ceil((retryAt - now) / 1000));
   const coolingDown = secondsLeft > 0;
+  const maxN = plans?.plans.find((p) => p.id === plan)?.max_n ?? 1;
+  const chosen = models.find((m) => m.id === settings.model);
+  const creditsPer =
+    settings.model === "auto"
+      ? Math.max(1, ...models.filter((m) => !m.locked).map((m) => m.credits_per_image))
+      : (chosen?.credits_per_image ?? 1);
+  const credits = creditsPer * settings.n;
+  const creditText = `${settings.model === "auto" ? "up to " : ""}${credits} credit${credits === 1 ? "" : "s"}`;
 
   function startCooldown(seconds: number) {
     setNow(Date.now());
     setRetryAt(Date.now() + seconds * 1000);
   }
 
-  function watchRun(runId: string) {
+  function pickModel(id: string) {
+    const m = models.find((x) => x.id === id);
+    setSettings((s) => ({
+      ...s,
+      model: id,
+      aspect_ratio: m && !m.aspect_ratios.includes(s.aspect_ratio) ? m.aspect_ratios[0] : s.aspect_ratio,
+    }));
+  }
+
+  function onEvent(ev: RunEvent) {
+    if (ev.type === "status") {
+      setStatus(ev.progress ? `${ev.label} (${ev.progress})` : (ev.label ?? ""));
+    } else if (ev.type === "question") {
+      setQuestions(ev.questions ?? []);
+      setStatus("Need a quick detail");
+    } else if (ev.type === "ready") {
+      setShown(ev.images ?? []);
+      setRecommendation(ev.recommendation ?? null);
+      setStatus("Ready");
+      setDone(true);
+    } else if (ev.type === "expired") {
+      setQuestions(null);
+      setStatus("");
+      setNotice({ kind: "error", message: ev.message ?? "This request timed out. Tap Create to start again." });
+    } else if (ev.type === "error") {
+      setStatus("");
+      setShown([]);
+      setNotice({ kind: "error", message: ev.message ?? "Something went wrong." });
+    }
+  }
+
+  // Reads the run's events. The server keeps them, so after a network drop we can connect again
+  // and get the current phase from the start.
+  function watchRun(id: string, signed: string) {
     source.current?.close();
-    const es = new EventSource(`${API_URL}/v1/runs/${runId}/events`);
+    const es = new EventSource(eventsUrl(id, signed));
     source.current = es;
-    es.addEventListener("progress", (e) => {
-      const data = JSON.parse((e as MessageEvent).data);
-      setProgress((p) => [...p, data.message]);
-    });
-    es.addEventListener("result", (e) => {
-      const data = JSON.parse((e as MessageEvent).data);
-      setResult(data.message);
+    let finished = false;
+    for (const name of STREAM_EVENTS) {
+      es.addEventListener(name, (e) => {
+        reconnects.current = 0;
+        onEvent(JSON.parse((e as MessageEvent).data) as RunEvent);
+        // The server closes the stream after these. Close here too, so it does not reconnect.
+        if (name === "question" || name === "ready" || name === "error" || name === "expired") {
+          finished = true;
+          es.close();
+        }
+      });
+    }
+    es.onerror = () => {
       es.close();
-    });
-    es.onerror = () => es.close();
+      if (finished) return;
+      if (reconnects.current < MAX_RECONNECTS) {
+        const delay = 500 * 2 ** reconnects.current;
+        reconnects.current += 1;
+        reconnect.current = setTimeout(() => watchRun(id, signed), delay);
+      } else {
+        setStatus("");
+        setNotice({ kind: "error", message: "Lost the connection. Please try again." });
+      }
+    };
   }
 
   async function onFiles(files: FileList | null) {
     setImages(files ? await Promise.all(Array.from(files).map(toBase64)) : []);
   }
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (busy || coolingDown) return;
-    setBusy(true);
-    setNotice(null);
-    setProgress([]);
-    setResult(null);
-    const out = await startRun(prompt, images);
-    setBusy(false);
-    if (out.kind === "started") {
-      watchRun(out.runId);
-    } else if (out.kind === "blocked") {
+  function handleFailure(out: Exclude<StartResult, { kind: "started" }>) {
+    if (out.kind === "blocked") {
       setNotice({ kind: "blocked", body: out.body });
       if (out.body.retry_after) startCooldown(out.body.retry_after);
     } else if (out.kind === "cooldown") {
@@ -94,6 +205,49 @@ export default function Home() {
       setNotice({ kind: "error", message: out.message });
     }
   }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy || coolingDown) return;
+    source.current?.close();
+    if (reconnect.current) clearTimeout(reconnect.current);
+    reconnects.current = 0;
+    setBusy(true);
+    setNotice(null);
+    setStatus("Understanding your request");
+    setShown([]);
+    setRecommendation(null);
+    setQuestions(null);
+    setDone(false);
+    const out = await startRun(prompt, images, plan, settings);
+    setBusy(false);
+    if (out.kind === "started") {
+      setRunId(out.runId);
+      token.current = out.token;
+      watchRun(out.runId, out.token);
+    } else {
+      setStatus("");
+      handleFailure(out);
+    }
+  }
+
+  async function answer(answers: Record<string, string>) {
+    if (!runId) return;
+    setBusy(true);
+    setNotice(null);
+    const out = await resumeRun(runId, answers);
+    setBusy(false);
+    if (out.kind === "started") {
+      setQuestions(null);
+      setStatus("Thinking");
+      token.current = out.token;
+      watchRun(runId, out.token);
+    } else {
+      handleFailure(out);
+    }
+  }
+
+  const select = "rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm dark:border-zinc-700";
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-6 py-12">
@@ -107,6 +261,63 @@ export default function Home() {
           placeholder="Describe the image you want"
           className="w-full rounded-lg border border-zinc-300 p-3 dark:border-zinc-700 dark:bg-zinc-900"
         />
+
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          <label className="flex items-center gap-2">
+            Plan
+            <select value={plan} onChange={(e) => changePlan(e.target.value as Plan)} className={select}>
+              {["basic", "pro", "ultra", "max"].map((p) => (
+                <option key={p} value={p}>
+                  {p[0].toUpperCase() + p.slice(1)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            Aspect ratio
+            <select
+              value={settings.aspect_ratio}
+              onChange={(e) => setSettings((s) => ({ ...s, aspect_ratio: e.target.value }))}
+              className={select}
+            >
+              {(plans?.aspect_ratios ?? ["1:1"]).map((r) => (
+                <option key={r} value={r} disabled={!!chosen && !chosen.aspect_ratios.includes(r)}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            Resolution
+            <select
+              value={settings.resolution}
+              onChange={(e) => setSettings((s) => ({ ...s, resolution: e.target.value as "1K" | "2K" }))}
+              className={select}
+            >
+              <option value="1K">1K</option>
+              <option value="2K" disabled>
+                2K (coming soon)
+              </option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            Variations
+            <select
+              value={settings.n}
+              onChange={(e) => setSettings((s) => ({ ...s, n: Number(e.target.value) }))}
+              className={select}
+            >
+              {Array.from({ length: maxN }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <ModelPicker models={models} value={settings.model} onChange={pickModel} />
+
         <input
           type="file"
           accept="image/jpeg,image/png,image/webp"
@@ -116,19 +327,19 @@ export default function Home() {
         />
         {images.length > 0 && (
           <p className="text-sm text-zinc-500">
-            {images.length} image{images.length > 1 ? "s" : ""} attached
+            {images.length} image{images.length > 1 ? "s" : ""} attached (photo editing is not available yet)
           </p>
         )}
         <button
           type="submit"
-          disabled={busy || coolingDown}
+          disabled={busy || coolingDown || !!questions}
           className="rounded-lg bg-zinc-900 px-4 py-2 text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
         >
           {busy
             ? "Checking your request…"
             : coolingDown
               ? `Try again in ${formatWait(secondsLeft)}`
-              : "Create"}
+              : `Create · ${creditText}`}
         </button>
       </form>
 
@@ -145,14 +356,16 @@ export default function Home() {
         </div>
       )}
 
-      {progress.length > 0 && (
-        <ul className="text-sm text-zinc-600 dark:text-zinc-400">
-          {progress.map((p, i) => (
-            <li key={i}>{p}</li>
-          ))}
-        </ul>
+      {status && !done && !questions && (
+        <p role="status" className="text-sm text-zinc-600 dark:text-zinc-400">
+          {status}…
+        </p>
       )}
-      {result && <p className="rounded-lg border p-4">{result}</p>}
+      {questions && <QuestionCard questions={questions} busy={busy} onSubmit={answer} />}
+      <ImageGrid images={shown} />
+      {done && recommendation && (
+        <p className="rounded-lg border border-emerald-400 bg-emerald-50 p-4 text-emerald-900">{recommendation}</p>
+      )}
     </main>
   );
 }
