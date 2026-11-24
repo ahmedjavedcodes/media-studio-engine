@@ -1,0 +1,21 @@
+{
+  "id": "I10",
+  "section": "image_text",
+  "verdict": "PASS",
+  "prompt": "",
+  "images": [
+    "landscape.jpg"
+  ],
+  "tests": "empty prompt: Jev skipped, vision only",
+  "known_gap": null,
+  "expected": {
+    "decision": "APPROVE"
+  },
+  "got": "APPROVE",
+  "category": null,
+  "http_status": 200,
+  "latency_ms": 1325,
+  "response_body": {
+    "run_id": "d46a229a71d041648966afcaf4fc7484"
+  }
+}

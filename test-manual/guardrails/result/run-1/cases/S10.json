@@ -1,0 +1,8 @@
+{
+  "id": "S10",
+  "section": "flows",
+  "verdict": "NOT RUN LIVE",
+  "reason": "needs a repeated request_id or injected provider failures; covered by unit tests",
+  "steps": "vision returns 'Safe.'",
+  "expected": "503 (unparsable output)"
+}

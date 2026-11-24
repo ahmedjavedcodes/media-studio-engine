@@ -1,0 +1,8 @@
+{
+  "id": "S06",
+  "section": "flows",
+  "verdict": "NOT RUN LIVE",
+  "reason": "needs a repeated request_id or injected provider failures; covered by unit tests",
+  "steps": "vision times out, Jev returns APPROVE",
+  "expected": "503, 0 credits, no strike, not counted as a reject"
+}

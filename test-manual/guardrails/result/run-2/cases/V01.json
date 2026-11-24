@@ -1,0 +1,17 @@
+{
+  "id": "V01",
+  "prompt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "images": [],
+  "error": "Prompt is longer than 4000 characters.",
+  "wall_ms": 0,
+  "usage": [],
+  "outcome": "BAD_INPUT",
+  "category": null,
+  "section": "input_checks",
+  "expected": {
+    "decision": "BAD_INPUT",
+    "http": 400
+  },
+  "tests": null,
+  "verdict": "PASS"
+}

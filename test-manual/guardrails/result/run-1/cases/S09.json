@@ -1,0 +1,8 @@
+{
+  "id": "S09",
+  "section": "flows",
+  "verdict": "NOT RUN LIVE",
+  "reason": "needs a repeated request_id or injected provider failures; covered by unit tests",
+  "steps": "vision returns 'unsafe\\nS4' with no logprobs",
+  "expected": "STANDARD_REJECT, needs_review=true, no strike"
+}

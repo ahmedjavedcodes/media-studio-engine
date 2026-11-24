@@ -1,0 +1,8 @@
+{
+  "id": "S05",
+  "section": "flows",
+  "verdict": "NOT RUN LIVE",
+  "reason": "needs a repeated request_id or injected provider failures; covered by unit tests",
+  "steps": "5 rejects of any kind within 10 min",
+  "expected": "30 min cooldown; a later 1 min cooldown does not shorten it"
+}

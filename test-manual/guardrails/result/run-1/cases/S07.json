@@ -1,0 +1,8 @@
+{
+  "id": "S07",
+  "section": "flows",
+  "verdict": "NOT RUN LIVE",
+  "reason": "needs a repeated request_id or injected provider failures; covered by unit tests",
+  "steps": "vision times out, Jev returns STANDARD_REJECT",
+  "expected": "422 STANDARD_REJECT"
+}

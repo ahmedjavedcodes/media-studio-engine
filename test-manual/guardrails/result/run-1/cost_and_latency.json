@@ -1,0 +1,36 @@
+{
+  "latency": {
+    "text_only": {
+      "n": 29,
+      "p50_ms": 420,
+      "p95_ms": 493,
+      "max_ms": 505
+    },
+    "with_images_all": {
+      "n": 7,
+      "p50_ms": 1540,
+      "p95_ms": 1724,
+      "max_ms": 1724
+    },
+    "with_images_answered": {
+      "n": 4,
+      "p50_ms": 1464,
+      "p95_ms": 1551,
+      "max_ms": 1551
+    }
+  },
+  "cost": {
+    "jev_calls": 43,
+    "jev_input_tokens": 55741,
+    "jev_output_tokens": 12943,
+    "jev_price": "unknown (TypeSafe early access), tokens only",
+    "scout_calls_with_usage": 2,
+    "scout_neurons_logged": 69.8,
+    "scout_timed_out_calls_probably_billed": 5,
+    "cloudflare_billed_usd": 0,
+    "note": "Cloudflare free tier is 10,000 neurons/day; worst case with timed-out calls is about 280 neurons."
+  },
+  "failed_checks": {
+    "vision: check timed out": 5
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "V03",
+  "section": "input_checks",
+  "verdict": "PASS",
+  "prompt": "make it brighter",
+  "images": [
+    "fake_image.jpg"
+  ],
+  "tests": "magic bytes, not extension",
+  "known_gap": null,
+  "expected": {
+    "decision": "BAD_INPUT",
+    "http": 400
+  },
+  "got": "BAD_INPUT",
+  "category": null,
+  "http_status": 400,
+  "latency_ms": 2,
+  "response_body": {
+    "code": "bad_input",
+    "message": "Image must be JPEG, PNG or WEBP."
+  }
+}
