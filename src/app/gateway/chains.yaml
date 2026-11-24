@@ -1,3 +1,18 @@
 # PROVIDER_MODE picks one chain. Agent code never knows which is on.
-build: {}   # Cloudflare only
-test: {}    # paid providers, only when Ahmed asks
+# Image providers are tried cheapest first for a model. OpenRouter and fal are NOT listed in the
+# chains: each is added in front only when its flag (OPENROUTER_IMAGES, FAL_IMAGES) is true. The
+# owner turns that on, and every paid call respects SPEND_CAP_USD.
+# `providers` marks which providers cost money. The gateway never falls back from one paid
+# provider to another after the cap, and pauses a paid provider after 3 failures in a row.
+providers:
+  cloudflare: { paid: false }
+  openrouter: { paid: true }
+  fal: { paid: true }
+build:    # Cloudflare only
+  image_providers: [cloudflare]
+  enhancer: { provider: cloudflare, model: "@cf/openai/gpt-oss-20b" }
+  critic: { provider: cloudflare, model: "@cf/meta/llama-4-scout-17b-16e-instruct" }
+test:     # paid providers, only when Ahmed asks
+  image_providers: [cloudflare]
+  enhancer: { provider: cloudflare, model: "@cf/openai/gpt-oss-20b" }
+  critic: { provider: cloudflare, model: "@cf/meta/llama-4-scout-17b-16e-instruct" }

@@ -7,6 +7,33 @@ import httpx
 from app.core.errors import ProviderCallFailed
 
 
+def _raise_for_status(resp: httpx.Response) -> None:
+    if resp.status_code == 429 or resp.status_code >= 500:
+        raise ProviderCallFailed(f"provider returned {resp.status_code}", retryable=True)
+    if resp.status_code >= 400:
+        raise ProviderCallFailed(f"provider returned {resp.status_code}", retryable=False)
+
+
+async def post_raw(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict[str, str],
+    timeout: float,
+    json: dict[str, Any] | None = None,
+    files: dict[str, tuple[None, str]] | None = None,
+) -> httpx.Response:
+    """POST JSON or multipart form fields. Status errors become ProviderCallFailed."""
+    try:
+        resp = await client.post(url, headers=headers, json=json, files=files, timeout=timeout)
+    except httpx.TimeoutException as exc:
+        raise ProviderCallFailed("provider timed out", retryable=True) from exc
+    except httpx.TransportError as exc:
+        raise ProviderCallFailed("provider connection failed", retryable=True) from exc
+    _raise_for_status(resp)
+    return resp
+
+
 async def post_json(
     client: httpx.AsyncClient,
     url: str,
@@ -15,17 +42,7 @@ async def post_json(
     json: dict[str, Any],
     timeout: float,
 ) -> dict[str, Any]:
-    try:
-        resp = await client.post(url, headers=headers, json=json, timeout=timeout)
-    except httpx.TimeoutException as exc:
-        raise ProviderCallFailed("provider timed out", retryable=True) from exc
-    except httpx.TransportError as exc:
-        raise ProviderCallFailed("provider connection failed", retryable=True) from exc
-
-    if resp.status_code == 429 or resp.status_code >= 500:
-        raise ProviderCallFailed(f"provider returned {resp.status_code}", retryable=True)
-    if resp.status_code >= 400:
-        raise ProviderCallFailed(f"provider returned {resp.status_code}", retryable=False)
+    resp = await post_raw(client, url, headers=headers, json=json, timeout=timeout)
     try:
         body = resp.json()
     except ValueError as exc:

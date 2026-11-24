@@ -1,2 +1,162 @@
-# Model cards. Filled in during phase 1.
-models: {}
+# Model cards (spec section 6). One model, many providers.
+#
+# `cost` is USD per image at 1K. These are ESTIMATES copied from each provider's pricing page.
+# The daily sync (gateway/sync.py) and the billed cost after each call correct them.
+# `tier` is computed from the cheapest provider cost. Never write it here.
+#
+# status: hidden -> testing -> live. A model goes live only after a real test:
+# size, seed and the code guard work, and the critic scores a 10-prompt run.
+# Verified live on 2026-11-25 (one real Cloudflare run each): flux-1-schnell, flux-2-klein-4b,
+# flux-2-klein-9b, phoenix-1. Not yet run: lucid-origin.
+# Per-family prompting guides (spec v1.2). The enhancer gets the chosen family's guide at the END
+# of its system prompt. `style` is used by COMPILE_MODE=code. 5-8 lines each.
+families:
+  gpt_image:
+    style: sentences
+    max_words: 40
+    prompt_guide: |
+      Write 2 or 3 plain, natural sentences.
+      Name the subject first, then the setting, then the light and the camera.
+      Put any text that must appear inside the image in "double quotes".
+      Be literal and concrete. One clear scene, no lists of keywords.
+      Avoid: stacked adjectives, vague mood words, brand or artist names.
+  gemini:
+    style: sentences
+    max_words: 50
+    prompt_guide: |
+      Write a short descriptive paragraph in natural sentences, like a photo caption.
+      Describe who or what is in the scene, what they do, and where.
+      Say the shot type and the light in words ("a close-up portrait in warm window light").
+      Good at people, faces and creative scenes. State the mood through visible things.
+      Avoid: keyword lists, tag soup, negative phrases like "no blur".
+  flux:
+    style: keywords
+    max_words: 60
+    prompt_guide: |
+      Write comma-separated visual phrases. The most important thing goes first.
+      Order: subject, action, setting, lighting, camera or lens, style.
+      Use concrete words ("shallow depth of field, 85mm", "rim light from the left").
+      Keep it under the word limit. Do not repeat the same idea twice.
+      Avoid: negative prompts and "no ..." phrases, quality spam like "masterpiece, 8k".
+  seedream:
+    style: keywords
+    max_words: 60
+    prompt_guide: |
+      Write one clear sentence or a short run of phrases, subject first.
+      Add setting, lighting and style in plain words.
+      Works well for products, food and clean commercial scenes.
+      Keep each detail concrete and visible.
+      Avoid: abstract mood words, long stories, negative phrases.
+  qwen:
+    style: keywords
+    max_words: 60
+    prompt_guide: |
+      Write short keyword phrases, subject first, then setting, light and style.
+      Put any text that must appear in "double quotes" and say where it sits.
+      Good at text in images and posters. Keep the text short.
+      Avoid: long sentences, many competing subjects, vague words.
+  recraft:
+    style: keywords
+    max_words: 30
+    prompt_guide: |
+      Write a very short subject phrase, then 2 or 4 style tags.
+      Name the look directly: "flat vector", "isometric", "brand colors navy and orange".
+      Good at design, icons and clean illustration.
+      Keep it under 30 words.
+      Avoid: camera or lens terms, long scenes.
+  ideogram:
+    style: sentences
+    max_words: 50
+    prompt_guide: |
+      Write 1 or 3 sentences, subject first.
+      Put the exact text that must appear in "double quotes" and say its style and place.
+      Name the layout (poster, sign, label) when there is text.
+      Avoid: long text blocks, many different texts in one image.
+  sd:
+    style: keywords
+    max_words: 60
+    prompt_guide: |
+      Write comma-separated keywords, most important first.
+      Order: subject, setting, light, camera, style, then a few quality words.
+      A separate negative prompt is added by the system. Do not write one.
+      Avoid: full sentences, "no ..." phrases.
+  leonardo:
+    style: sentences
+    max_words: 60
+    prompt_guide: |
+      Write 2 or 3 vivid natural sentences, subject first.
+      Describe the light and the colors in words ("warm golden light, deep teal shadows").
+      Good at creative scenes, characters and bold color. Phoenix is good at short text.
+      Put any text that must appear in "double quotes".
+      Avoid: keyword spam, "no ..." phrases, abstract mood words.
+
+models:
+  # ---- Cloudflare Workers AI (build mode, free daily neurons) -------------------------------
+  - id: flux-1-schnell
+    name: FLUX.1 schnell
+    family: flux
+    status: live
+    tag: Fastest
+    featured: true
+    best_for: [general, photo]
+    supports_seed: false    # not in the documented input schema; checked on the first real call
+    supported_aspect_ratios: ["1:1"]   # Cloudflare takes no width/height for this model
+    providers:
+      - { name: cloudflare, slug: "@cf/black-forest-labs/flux-1-schnell", cost: 0.0007 }
+
+  - id: flux-2-klein-4b
+    name: FLUX.2 klein 4B
+    family: flux
+    status: live
+    tag: Photoreal
+    featured: true
+    best_for: [photo, product, general]
+    supports_seed: false
+    size_multiple: 16
+    providers:
+      - { name: cloudflare, slug: "@cf/black-forest-labs/flux-2-klein-4b", cost: 0.0011 }
+
+  - id: flux-2-klein-9b
+    name: FLUX.2 klein 9B
+    family: flux
+    status: live
+    tag: Sharper detail
+    best_for: [photo, product]
+    supports_seed: false
+    size_multiple: 16
+    providers:
+      - { name: cloudflare, slug: "@cf/black-forest-labs/flux-2-klein-9b", cost: 0.0035 }
+
+  - id: lucid-origin
+    name: Lucid Origin
+    family: leonardo
+    status: testing    # not run for real yet: about $0.03 an image uses real free neurons
+    tag: Creative scenes
+    best_for: [people, general]
+    supports_seed: true
+    size_multiple: 8
+    providers:
+      - { name: cloudflare, slug: "@cf/leonardo/lucid-origin", cost: 0.0285 }
+
+  - id: phoenix-1
+    name: Phoenix 1.0
+    family: leonardo
+    status: live
+    tag: Best for text
+    best_for: [text_in_image, design]
+    supports_seed: true
+    supports_negative_prompt: true
+    size_multiple: 8
+    providers:
+      - { name: cloudflare, slug: "@cf/leonardo/phoenix-1.0", cost: 0.0261 }
+
+  # ---- OpenRouter (paid, off until the owner asks) ------------------------------------------
+  # Slug and price come from the spec's example. Unverified: run the registry sync first.
+  - id: nano-banana-2
+    name: Nano Banana 2
+    family: gemini
+    status: hidden
+    tag: People and creative scenes
+    supports_seed: false
+    providers:
+      - { name: openrouter, slug: google/gemini-3.1-flash-image, cost: 0.069 }

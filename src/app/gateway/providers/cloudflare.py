@@ -25,6 +25,14 @@ class CloudflareClient:
         self._account_id = account_id
         self._token = api_token
 
+    @property
+    def account_id(self) -> str:
+        return self._account_id
+
+    @property
+    def token(self) -> str:
+        return self._token
+
     async def run(self, model: str, body: dict[str, Any], timeout: float) -> dict[str, Any]:
         url = f"https://api.cloudflare.com/client/v4/accounts/{self._account_id}/ai/run/{model}"
         data = await post_json(

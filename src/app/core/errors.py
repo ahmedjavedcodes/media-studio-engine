@@ -27,10 +27,12 @@ class ContentRefused(EngineError):
 
 class OutOfCredits(EngineError):
     code = "out_of_credits"
+    http_status = 402
 
 
 class ProviderDown(EngineError):
     code = "provider_down"
+    http_status = 503
 
 
 # Guardrail errors (see execution-steps/GUARDRAIL-AGENT-SPEC.md section 11)
@@ -100,3 +102,38 @@ class InvalidModelOutput(EngineError):
     """A model answered, but not in a form we can trust. Guardrails fail closed on this."""
 
     code = "invalid_model_output"
+
+
+# Image create errors (execution-steps/Image Create Agent/TXT2IMG-AGENT-SPEC.md)
+
+
+class PlanLimit(EngineError):
+    """The request asks for more than the plan allows. Nothing is charged."""
+
+    code = "plan_limit"
+    http_status = 400
+
+
+class SpendCapReached(EngineError):
+    """SPEND_CAP_USD is used up. Stop and report. Never switch to another paid provider."""
+
+    code = "spend_cap_reached"
+    http_status = 503
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Image generation is paused right now. You were not charged. Please try again later."
+        )
+
+
+class OutputBlocked(EngineError):
+    """Every generated image failed the output safety check. Nothing is charged."""
+
+    code = "output_blocked"
+    http_status = 422
+
+    def __init__(self) -> None:
+        super().__init__(
+            "We couldn't deliver these images because they didn't pass our safety check. "
+            "You were not charged. Try changing your request."
+        )
