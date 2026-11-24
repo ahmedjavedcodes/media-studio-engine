@@ -1,6 +1,9 @@
-from app.agents.grand.graph import build_dummy_graph
+from app.agents.routing import RouteInput, route_request
 
 
-async def test_dummy_graph_runs() -> None:
-    out = await build_dummy_graph().ainvoke({"prompt": "hi", "reply": ""})
-    assert out["reply"] == "echo: hi"
+def test_text_only_goes_to_txt2img() -> None:
+    assert route_request(RouteInput(has_images=False)) == "txt2img"
+
+
+def test_uploaded_image_goes_to_img2img() -> None:
+    assert route_request(RouteInput(has_images=True)) == "img2img"

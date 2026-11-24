@@ -6,6 +6,9 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
+from app.api.deps import get_run_service, get_token_signer
+from app.contracts.request import GenerationRequest
+from app.core.tokens import TokenSigner
 from app.guardrails.agent import GuardDeps
 from app.guardrails.deps import get_guard_deps
 from app.main import app
@@ -14,10 +17,25 @@ from tests.unit.guard_helpers import FakeJev, FakeVision, jev_answers, make_deps
 client = TestClient(app)
 
 
+class StubService:
+    """The guardrail tests do not run the graph. They only check what reaches the service."""
+
+    def __init__(self) -> None:
+        self.runs: dict[str, GenerationRequest] = {}
+
+    def start(self, run_id: str, user_id: str, request: GenerationRequest) -> None:
+        self.runs[run_id] = request
+
+
+STUB = StubService()
+
+
 @pytest.fixture
 def deps() -> Iterator[GuardDeps]:
     d = make_deps()
     app.dependency_overrides[get_guard_deps] = lambda: d
+    app.dependency_overrides[get_run_service] = lambda: STUB
+    app.dependency_overrides[get_token_signer] = lambda: TokenSigner("test-secret")
     yield d
     app.dependency_overrides.clear()
 
@@ -30,26 +48,13 @@ def test_health() -> None:
     assert client.get("/health").status_code == 200
 
 
-def test_run_and_events(deps: GuardDeps) -> None:
-    run_id = client.post("/v1/runs", json={"prompt": "a red fox"}).json()["run_id"]
-    body = client.get(f"/v1/runs/{run_id}/events").text
-    assert "event: progress" in body
-    assert "echo: a red fox" in body
-
-
-def test_unknown_run_is_404() -> None:
-    assert client.get("/v1/runs/nope/events").status_code == 404
-
-
 def test_approved_run_stores_raw_prompt_and_original_images(deps: GuardDeps) -> None:
-    from app.api.runs import RUNS
-
     image = b64(png())
     run_id = client.post("/v1/runs", json={"prompt": " N u d e  FOX", "images": [image]}).json()[
         "run_id"
     ]
-    assert RUNS[run_id].prompt == " N u d e  FOX"
-    assert RUNS[run_id].images == [image]
+    assert STUB.runs[run_id].prompt == " N u d e  FOX"
+    assert STUB.runs[run_id].images == [image]
 
 
 def test_blocked_prompt_is_422_with_safe_body(deps: GuardDeps) -> None:
@@ -152,6 +157,8 @@ def test_end_to_end_through_real_providers_with_respx() -> None:
     settings.cloudflare_account_id, settings.cloudflare_api_token = "acc", "tok"
     settings.typesafe_api_key = "ts-key"
     real.cache_clear()
+    app.dependency_overrides[get_run_service] = lambda: STUB
+    app.dependency_overrides[get_token_signer] = lambda: TokenSigner("test-secret")
     try:
         with respx.mock:
             jev = respx.post("https://api.typesafe.ai/v1/systemone").mock(
@@ -169,6 +176,7 @@ def test_end_to_end_through_real_providers_with_respx() -> None:
         assert jev.called and vision.called
         assert jev.calls[0].request.headers["authorization"] == "Bearer ts-key"
     finally:
+        app.dependency_overrides.clear()
         real.cache_clear()
         settings.cloudflare_account_id, settings.cloudflare_api_token = saved[0], saved[1]
         settings.typesafe_api_key = saved[2]
