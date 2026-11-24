@@ -24,6 +24,7 @@ dependencies = [
     "pillow>=13.0.0",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
+    "pyyaml>=6.0.4",
     "sse-starlette>=3.7.1",
     "structlog>=26.1.0",
     "tenacity>=9.2.1",
@@ -42,6 +43,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "respx>=0.23.1",
     "ruff>=0.17.6",
+    "types-pyyaml>=6.0.12.20261122",
 ]
 
 [tool.ruff]
