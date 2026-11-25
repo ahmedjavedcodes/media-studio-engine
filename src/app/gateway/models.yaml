@@ -142,6 +142,10 @@ families:
       Keep the scene to one clear idea.
       Avoid: keyword lists and "no ..." phrases.
 
+# `picker: true` = shown in the model picker (the curated 14 + FLUX.2 klein 4B on Cloudflare).
+# `auto: true` = the Auto router may choose it (the 14, plus the free Cloudflare engines).
+# Every other model stays here, hidden from the picker and from Auto, and can still be picked by
+# id (internal tests, playground). Status is separate: it only says whether a real run verified it.
 models:
   # ---- Cloudflare Workers AI (build mode, free daily neurons) -------------------------------
   - id: flux-1-schnell
@@ -149,6 +153,7 @@ models:
     family: flux
     capabilities: [t2i, fast]
     status: live
+    auto: true
     tag: Fastest
     featured: true
     best_for: [general, photo]
@@ -162,7 +167,9 @@ models:
     family: flux
     capabilities: [t2i, fast]
     status: live
-    tag: Photoreal
+    picker: true
+    auto: true
+    tag: Photos, general
     featured: true
     best_for: [photo, product, general]
     supports_seed: false
@@ -176,6 +183,7 @@ models:
     family: flux
     capabilities: [t2i]
     status: live
+    auto: true
     tag: Sharper detail
     best_for: [photo, product]
     supports_seed: false
@@ -188,6 +196,7 @@ models:
     family: leonardo
     capabilities: [t2i]
     status: testing    # not run for real yet: about $0.03 an image uses real free neurons
+    auto: true
     tag: Creative scenes
     best_for: [people, general]
     supports_seed: true
@@ -200,6 +209,7 @@ models:
     family: leonardo
     capabilities: [t2i]
     status: live
+    auto: true
     tag: Best for text
     best_for: [text_in_image, design]
     supports_seed: true
@@ -265,10 +275,12 @@ models:
       - { name: openrouter, slug: openai/gpt-image-1, cost: 0.042 }
 
   - id: gpt-image-2-5-flare
-    name: GPT Image 2.5 Flare
+    name: GPT Image 2.5 Flare (low)
     family: gpt_image
     status: live   # verified 2026-11-25: one real call through the adapter (images route, quality low, $0.005975)
-    tag: Best for text, fast
+    picker: true
+    auto: true
+    tag: Text in images
     best_for: [text_in_image]
     capabilities: [t2i, i2i, transparent_bg, fast]
     credits: 2
@@ -279,9 +291,11 @@ models:
       - { name: openrouter, slug: openai/gpt-image-2.5-flare, cost: 0.006 }
 
   - id: gpt-image-2-5-sunburst
-    name: GPT Image 2.5 Sunburst
+    name: GPT Image 2.5 Sunburst (high)
     family: gpt_image
     status: testing
+    picker: true
+    auto: true
     tag: Dense text, high detail
     best_for: [text_in_image]
     capabilities: [t2i, i2i, transparent_bg, dense_text]
@@ -372,9 +386,11 @@ models:
     name: Nano Banana 2.1
     family: gemini
     status: testing
-    tag: Latest all-rounder
+    picker: true
+    auto: true
+    tag: People, creative, all-rounder
     best_for: [people, general]
-    capabilities: [t2i, i2i, multi_turn, 1k_to_4k]
+    capabilities: [multi_ref_merge, t2i, i2i, multi_turn, 1k_to_4k]
     credits: 4
     max_refs: 14
     endpoint: chat
@@ -387,7 +403,9 @@ models:
     name: Nano Banana Pro
     family: gemini
     status: testing
-    tag: Studio photoreal
+    picker: true
+    auto: true
+    tag: Studio photoreal people
     best_for: [people, photo, product]
     capabilities: [t2i, i2i, multi_turn, 4k, studio_photoreal]
     credits: 12
@@ -403,9 +421,11 @@ models:
     name: Seedream 5.0 Flash
     family: seedream
     status: live   # verified 2026-11-25: one real call through the adapter (images route, seed sent, $0.018)
-    tag: Fast, clean product shots
+    picker: true
+    auto: true
+    tag: Products
     best_for: [product, photo]
-    capabilities: [t2i, i2i, seed_lock, fast]
+    capabilities: [multi_ref_merge, t2i, i2i, seed_lock, fast]
     credits: 2
     max_refs: 14
     supports_seed: true
@@ -449,7 +469,9 @@ models:
     name: Seedream 5.0 Pro
     family: seedream
     status: testing
-    tag: Studio photography
+    picker: true
+    auto: true
+    tag: Studio product shots
     best_for: [product, photo]
     capabilities: [t2i, i2i, 2k, studio_photoreal, seed_lock]
     credits: 4
@@ -478,7 +500,9 @@ models:
     name: Recraft V4.1 Flash
     family: recraft
     status: testing
-    tag: Design, fast
+    picker: true
+    auto: true
+    tag: Design, flat graphics
     best_for: [design]
     capabilities: [t2i, fast]
     max_refs: 0
@@ -503,7 +527,9 @@ models:
     name: Recraft V4.1
     family: recraft
     status: live   # verified 2026-11-25: one real call through the adapter (images route, brand colors via provider.options, $0.035)
-    tag: Posters, ads, packaging
+    picker: true
+    auto: true
+    tag: Posters, ads, brand colors
     best_for: [design, text_in_image]
     capabilities: [t2i, i2i, rgb_colors, typography]
     credits: 4
@@ -529,7 +555,9 @@ models:
     name: Recraft V4.1 Vector
     family: recraft
     status: testing
-    tag: True SVG logos and icons
+    picker: true
+    auto: true
+    tag: Real SVG logos and icons
     best_for: [design]
     capabilities: [t2i, svg_vector, rgb_colors]
     credits: 7
@@ -556,7 +584,9 @@ models:
     name: Recraft V4.1 Pro
     family: recraft
     status: testing
-    tag: Best for design
+    picker: true
+    auto: true
+    tag: Premium design
     best_for: [design]
     capabilities: [t2i, i2i, typography]
     max_refs: 1
@@ -581,7 +611,9 @@ models:
     name: FLUX 3 Klein
     family: flux
     status: testing
-    tag: Photoreal, fast
+    picker: true
+    auto: true
+    tag: Sharper photoreal
     best_for: [photo, product, general]
     capabilities: [t2i, fast]
     max_refs: 10
@@ -594,7 +626,9 @@ models:
     name: FLUX.3
     family: flux
     status: testing
-    tag: Photoreal
+    picker: true
+    auto: true
+    tag: Top photoreal
     best_for: [photo, product, general]
     capabilities: [t2i]
     max_refs: 10
@@ -607,7 +641,9 @@ models:
     name: FLUX.2 Pro
     family: flux
     status: testing
-    tag: Sharp detail
+    picker: true
+    auto: true
+    tag: Sharp photo detail
     best_for: [photo, product]
     capabilities: [t2i, i2i]
     max_refs: 8

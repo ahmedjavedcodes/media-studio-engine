@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ImageGrid from "@/components/ImageGrid";
+import TracePanel from "@/components/TracePanel";
 import { creditEstimate, takesImages } from "@/lib/credits";
 import ModelPicker from "@/components/ModelPicker";
 import QuestionCard from "@/components/QuestionCard";
@@ -13,6 +14,7 @@ import {
   startRun,
   type Blocked,
   type ImageOut,
+  type AutoPoolEntry,
   type ModelInfo,
   type Plan,
   type PlansResponse,
@@ -54,6 +56,7 @@ export default function Home() {
   const [plan, setPlan] = useState<Plan>("basic");
   const [plans, setPlans] = useState<PlansResponse | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [autoPool, setAutoPool] = useState<AutoPoolEntry[]>([]);
   const [settings, setSettings] = useState<Settings>({
     model: "auto",
     aspect_ratio: "1:1",
@@ -65,6 +68,7 @@ export default function Home() {
   const [status, setStatus] = useState<string>("");
   const [runId, setRunId] = useState<string | null>(null);
   const token = useRef(""); // signed by the server for this run. It goes in the stream URL
+  const [traceToken, setTraceToken] = useState(""); // the same token, for the dev trace panel
   const [questions, setQuestions] = useState<Question[] | null>(null);
   const [shown, setShown] = useState<ImageOut[]>([]);
   const [recommendation, setRecommendation] = useState<string | null>(null);
@@ -83,12 +87,16 @@ export default function Home() {
   // The plan decides which models are locked.
   useEffect(() => {
     fetchModels(plan)
-      .then((list) => {
+      .then(({ models: list, autoPool: pool }) => {
         setModels(list);
+        setAutoPool(pool);
         // A model the new plan does not allow goes back to Auto.
         setSettings((s) => (list.some((m) => m.id === s.model && m.locked) ? { ...s, model: "auto" } : s));
       })
-      .catch(() => setModels([]));
+      .catch(() => {
+        setModels([]);
+        setAutoPool([]);
+      });
   }, [plan]);
 
   // ...and the variation limit.
@@ -116,7 +124,14 @@ export default function Home() {
   const coolingDown = secondsLeft > 0;
   const maxN = plans?.plans.find((p) => p.id === plan)?.max_n ?? 1;
   const chosen = models.find((m) => m.id === settings.model);
-  const estimate = creditEstimate(models, settings.model, settings.n, images.length, settings.resolution);
+  const estimate = creditEstimate(
+    models,
+    settings.model,
+    settings.n,
+    images.length,
+    settings.resolution,
+    autoPool,
+  );
   const creditText = `${estimate.upTo ? "up to " : ""}${estimate.credits} credit${estimate.credits === 1 ? "" : "s"}`;
 
   function startCooldown(seconds: number) {
@@ -225,6 +240,7 @@ export default function Home() {
     if (out.kind === "started") {
       setRunId(out.runId);
       token.current = out.token;
+      setTraceToken(out.token);
       watchRun(out.runId, out.token);
     } else {
       setStatus("");
@@ -242,6 +258,7 @@ export default function Home() {
       setQuestions(null);
       setStatus("Thinking");
       token.current = out.token;
+      setTraceToken(out.token);
       watchRun(runId, out.token);
     } else {
       handleFailure(out);
@@ -372,6 +389,9 @@ export default function Home() {
       )}
       {questions && <QuestionCard questions={questions} busy={busy} onSubmit={answer} />}
       <ImageGrid images={shown} />
+      {plans?.trace_ui && runId && traceToken && (
+        <TracePanel key={runId} runId={runId} token={traceToken} />
+      )}
       {done && recommendation && (
         <p className="rounded-lg border border-emerald-400 bg-emerald-50 p-4 text-emerald-900">{recommendation}</p>
       )}

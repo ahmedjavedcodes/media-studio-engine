@@ -6,6 +6,7 @@ The guardrail runs first. A request that is not approved never gets a run_id.
 import base64
 import binascii
 import re
+import time
 import uuid
 from typing import Annotated, Any
 
@@ -17,7 +18,7 @@ from app.api.run_service import RunNotWaiting, RunService
 from app.contracts.request import GenerationRequest, ResumeRequest
 from app.core.errors import BadInput
 from app.core.tokens import TokenSigner
-from app.guardrails.agent import GuardDeps, guard
+from app.guardrails.agent import GuardDeps, guard, guard_detailed
 from app.guardrails.deps import get_guard_deps
 from app.guardrails.schemas import GuardInput
 
@@ -54,11 +55,34 @@ async def create_run(
     images = decode_images(req.images)
     service.preflight(req)  # 400 if the picked model cannot take these images. No cost yet
     # Raises 400 / 403 / 422 / 429 / 503. Nothing below runs unless every check approved.
-    await guard(
+    guard_started = time.time()
+    _, decision = await guard_detailed(
         GuardInput(request_id=run_id, user_id=x_user_id, prompt=req.prompt, images=images),
         deps,
     )
-    service.start(run_id, x_user_id, req)  # the generator gets the raw prompt and the images
+    guard_info = {
+        "started_at": guard_started,
+        "ended_at": time.time(),
+        "outputs": {
+            "decision": decision.decision.value,
+            "category": decision.category.value,
+            "confidence": decision.confidence,
+            "timings_ms": decision.timings_ms,
+            "checks": [  # one per model that looked at the request
+                {
+                    "source": v.source,
+                    "model": v.model,
+                    "decision": v.decision.value,
+                    "category": v.category.value,
+                    "latency_ms": v.latency_ms,
+                    "confidence": v.confidence,
+                }
+                for v in decision.verdicts
+            ],
+            "model": ", ".join(v.model for v in decision.verdicts) or None,
+        },
+    }
+    service.start(run_id, x_user_id, req, guard=guard_info)  # raw prompt and the images
     # The token goes in the URL of /events and of every image: they send no header.
     return {"run_id": run_id, "token": signer.sign(run_id, x_user_id)}
 

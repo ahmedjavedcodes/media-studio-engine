@@ -139,11 +139,13 @@ def pick_model(
     if not pool:
         raise PlanLimit("No model is available for this plan and aspect ratio.")
     prefs = _PREFS.get(category, _PREFS["general"])
-    plan_tier = PLAN_LIMITS[plan].tier
+    plan_tier = PLAN_LIMITS[plan].prefer_tier  # Auto leans toward this tier. All allowed count
 
     def rank(card: ModelCard) -> tuple[int, int, int, int, float]:
-        # The plan's own tier first, then lower tiers (the highest of those first).
-        tier_gap = TIER_ORDER.index(plan_tier) - TIER_ORDER.index(card.tier)
+        # The preferred tier first, then lower tiers (the highest of those first), then higher
+        # tiers (the lowest of those first). A higher tier is allowed but never the first choice.
+        gap = TIER_ORDER.index(plan_tier) - TIER_ORDER.index(card.tier)
+        tier_gap = gap if gap >= 0 else 100 - gap
         suited = 0 if category in card.best_for else 1
         family = prefs.index(card.family) if card.family in prefs else len(prefs)
         return (tier_gap, suited, family, 0 if card.featured else 1, card.cost_per_image)
@@ -162,7 +164,8 @@ def _usable_pool(
     return [
         c
         for c in registry.allowed(plan, enabled_providers)
-        if aspect_ratio in c.supported_aspect_ratios
+        if c.auto  # Auto only chooses curated models. The rest are picked by hand
+        and aspect_ratio in c.supported_aspect_ratios
         and c.max_refs >= n_refs
         and (not transparent or "transparent_bg" in c.capabilities)
     ]
@@ -186,16 +189,14 @@ _DENSE_TEXT = re.compile(
     r"\b(text overlay|headline|paragraph|caption|menu|infographic|slide)\b",
     re.I,
 )
-MERGE_MAX_SEEDREAM_REFS = 10  # above this, Seedream 5.5 cannot take every image
-
+# Every candidate is in the curated list (picker + auto). A model outside it is never chosen here.
 RULE_VECTOR = ["recraft-v4-1-vector"]
-RULE_BRAND = ["recraft-v4-1", "recraft-v4"]
-RULE_BRAND_WITH_STYLE = ["recraft-v4-styles", "recraft-v4-1"]
-RULE_MERGE = ["seedream-5-5", "nano-banana-2"]
-RULE_MERGE_MANY = ["nano-banana-2"]
-RULE_PRECISION = ["gpt-image-2-6-sunburst", "nano-banana-2-1", "gpt-image-2-5-sunburst"]
-RULE_DRAFT_TEXT = ["recraft-v4-1-flash-free", "muse-image", "gpt-image-2"]
-RULE_DRAFT_REFS = ["muse-image", "gpt-image-2", "seedream-5-flash"]
+RULE_BRAND = ["recraft-v4-1"]
+RULE_BRAND_WITH_STYLE = ["recraft-v4-1"]  # Recraft Styles is not on the list
+RULE_MERGE = ["seedream-5-flash", "nano-banana-2-1"]  # both take up to 14 references
+RULE_PRECISION = ["gpt-image-2-5-sunburst", "nano-banana-2-1"]
+RULE_DRAFT_TEXT = ["flux-2-klein-4b", "recraft-v4-1-flash", "gpt-image-2-5-flare"]  # cheapest first
+RULE_DRAFT_REFS = ["gpt-image-2-5-flare", "seedream-5-flash"]  # the cheap models that take images
 RULE_DEFAULT = ["nano-banana-2-1", "seedream-5-pro"]
 
 
@@ -228,7 +229,7 @@ def _rule_for(req: RouteRequest) -> tuple[str, list[str]]:
     if req.brand_colors or _POSTER.search(req.prompt):
         return "brand", RULE_BRAND_WITH_STYLE if req.has_style_ref else RULE_BRAND
     if req.n_refs >= 2:
-        return "merge", RULE_MERGE_MANY if req.n_refs > MERGE_MAX_SEEDREAM_REFS else RULE_MERGE
+        return "merge", RULE_MERGE
     if req.n_refs == 1 or _DENSE_TEXT.search(req.prompt):
         return "precision", RULE_PRECISION
     return "default", RULE_DEFAULT

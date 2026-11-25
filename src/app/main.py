@@ -10,7 +10,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.agents.grand.graph import build_grand_graph
 from app.agents.image_grand.generation.create.factory import build_create_deps
-from app.api import catalog, events, health, run_service, runs
+from app.api import catalog, events, health, run_service, runs, trace
 from app.api.checkpoint_cleanup import sweep_old_threads
 from app.core.config import get_settings
 from app.core.errors import EngineError
@@ -59,4 +59,5 @@ async def engine_error_handler(_: Request, exc: EngineError) -> JSONResponse:
 app.include_router(health.router)
 app.include_router(runs.router)
 app.include_router(catalog.router)
+app.include_router(trace.router)
 app.include_router(events.router)

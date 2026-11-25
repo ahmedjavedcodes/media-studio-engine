@@ -21,6 +21,7 @@ export default defineConfig({
       env: {
         PYTHONPATH: "src",
         DRAFT_TIMEOUT_S: "3",
+        TRACE_UI: "true", // the dev trace panel
         CORS_ORIGINS: "http://localhost:3100",
         // the smoke test must never post traces to LangSmith
         LANGSMITH_TRACING: "false",

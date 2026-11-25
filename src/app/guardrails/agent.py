@@ -306,15 +306,20 @@ async def _apply_strikes(deps: GuardDeps, inp: GuardInput, decision: Decision) -
         return StrikeOutcome()
 
 
+async def guard_detailed(inp: GuardInput, deps: GuardDeps) -> tuple[GuardInput, GuardDecision]:
+    """`guard`, and the decision too (for the dev trace). Raises exactly as `guard` does."""
+    decision = await check(inp, deps)
+    if decision.decision is not Decision.APPROVE:
+        raise ContentBlocked(
+            build_reject_body(decision, strike_limit=deps.settings.instant_strike_limit)
+        )
+    return inp, decision
+
+
 async def guard(inp: GuardInput, deps: GuardDeps) -> GuardInput:
     """The door in front of the generator.
 
     Returns `inp` itself, untouched (raw prompt, original image bytes), only when every check
     approved. Any other outcome raises, so no code path can reach the generator without APPROVE.
     """
-    decision = await check(inp, deps)
-    if decision.decision is not Decision.APPROVE:
-        raise ContentBlocked(
-            build_reject_body(decision, strike_limit=deps.settings.instant_strike_limit)
-        )
-    return inp
+    return (await guard_detailed(inp, deps))[0]

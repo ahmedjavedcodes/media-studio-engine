@@ -1,6 +1,7 @@
 """Small pure pieces: plans, sizes, imaging, registry, critic ranking, credits, checks."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -16,7 +17,7 @@ from app.agents.image_grand.workers.critic import (
 from app.contracts.request import GenerationRequest, ImageSettings
 from app.core.errors import InvalidModelOutput, OutOfCredits
 from app.core.plans import PLAN_LIMITS, Plan, Tier, credits_for, tier_allowed, tier_for_cost
-from app.gateway.registry import ModelCard, ProviderEntry, load_registry
+from app.gateway.registry import ModelCard, ProviderEntry, Registry, load_registry
 from app.local.fake_credits import FakeCredits
 from app.local.output_store import OutputStore
 from app.tools.imaging import make_thumbnail, sniff
@@ -46,9 +47,10 @@ def test_tier_comes_from_the_cost(cost: float, tier: Tier) -> None:
 
 
 def test_a_plan_uses_its_own_tier_and_everything_below() -> None:
-    assert tier_allowed(Plan.PRO, Tier.BASIC) and tier_allowed(Plan.PRO, Tier.PRO)
-    assert not tier_allowed(Plan.PRO, Tier.ULTRA)
-    assert all(tier_allowed(Plan.MAX, t) for t in Tier)
+    # Free (Basic) users get models up to the Pro tier. Pro and above can use any model
+    assert tier_allowed(Plan.BASIC, Tier.BASIC) and tier_allowed(Plan.BASIC, Tier.PRO)
+    assert not tier_allowed(Plan.BASIC, Tier.ULTRA) and not tier_allowed(Plan.BASIC, Tier.MAX)
+    assert all(tier_allowed(p, t) for p in (Plan.PRO, Plan.ULTRA, Plan.MAX) for t in Tier)
     assert credits_for(Tier.PRO, 4) == 12
 
 
@@ -74,7 +76,7 @@ def test_registry_loads_with_live_cloudflare_models_and_testing_openrouter_ones(
     assert "nano-banana-2" not in live
     assert reg.live([]) == []  # no provider, no model
     assert {c.id for c in reg.allowed(Plan.BASIC, ["cloudflare"])} <= live
-    assert all(c.tier == Tier.BASIC for c in reg.allowed(Plan.BASIC, ["cloudflare"]))
+    assert all(c.tier in (Tier.BASIC, Tier.PRO) for c in reg.allowed(Plan.BASIC, ["cloudflare"]))
 
 
 @pytest.mark.parametrize("ratio", ["1:1", "4:5", "5:4", "9:16", "16:9", "21:9"])
@@ -171,7 +173,7 @@ async def test_credits_hold_settle_refund_and_release() -> None:
 
 async def test_a_manual_pick_is_strict(tmp_path: Path) -> None:
     for model, plan, n, ratio, code in [
-        ("phoenix-1", Plan.BASIC, 1, "1:1", "plan_limit"),  # tier too high for the plan
+        ("recraft-v4-1-vector", Plan.BASIC, 1, "1:1", "plan_limit"),  # Ultra model, Basic plan
         ("flux-1-schnell", Plan.BASIC, 1, "16:9", "bad_input"),  # ratio not supported
         ("does-not-exist", Plan.MAX, 1, "1:1", "plan_limit"),
         ("nano-banana-2", Plan.MAX, 1, "1:1", "plan_limit"),  # not live, provider off
@@ -212,7 +214,7 @@ def test_the_registry_has_every_model_the_spec_decided_in_its_tier() -> None:
     spec = {
         "basic": [
             "Recraft V4.1 Flash",
-            "GPT Image 2.5 Flare",
+            "GPT Image 2.5 Flare (low)",
             "FLUX 3 Klein",
             "FLUX.2 klein 4B",
             "Muse Image",
@@ -237,14 +239,14 @@ def test_the_registry_has_every_model_the_spec_decided_in_its_tier() -> None:
         ],
         "max": [
             "Nano Banana Pro",
-            "GPT Image 2.5 Sunburst",
+            "GPT Image 2.5 Sunburst (high)",
             "Recraft V4.1 Pro",
             "MAI-Image 2.5 Pro",
             "Riverflow 2.5 Pro",
         ],
     }
     reg = load_registry()
-    by_name = {c.name: c for c in reg.listed()}
+    by_name = {c.name: c for c in reg.all()}
     for tier, names in spec.items():
         for name in names:
             assert name in by_name, name
@@ -270,3 +272,87 @@ def test_openrouter_models_cannot_run_while_openrouter_is_off() -> None:
 def test_every_family_has_a_label_and_a_guide() -> None:
     for c in load_registry().all():
         assert c.family_label and c.prompt_guide, c.id
+
+
+SHOW = {
+    "basic": ["flux-2-klein-4b", "gpt-image-2-5-flare", "recraft-v4-1-flash", "flux-3-klein"],
+    "pro": ["seedream-5-flash", "flux-2-pro", "nano-banana-2-1", "recraft-v4-1"],
+    "ultra": ["seedream-5-pro", "flux-3", "recraft-v4-1-vector"],
+    "max": ["gpt-image-2-5-sunburst", "nano-banana-pro", "recraft-v4-1-pro"],
+}
+FREE_ENGINES = ["flux-1-schnell", "flux-2-klein-9b", "phoenix-1", "lucid-origin"]
+
+
+def test_the_picker_list_is_the_curated_14_in_their_tiers() -> None:
+    reg = load_registry()
+    assert sorted(c.id for c in reg.all() if c.picker) == sorted(
+        m for ids in SHOW.values() for m in ids
+    )
+    for tier, ids in SHOW.items():
+        for model_id in ids:  # the tier comes from the real price, and matches the plan list
+            assert reg.get(model_id).tier.value == tier, model_id  # type: ignore[union-attr]
+    assert [c.id for c in reg.listed()].__len__() == 14
+
+
+def test_a_plan_gets_its_own_models_and_every_model_below_it() -> None:
+    reg = load_registry()
+    order = list(SHOW)
+    both = ["cloudflare", "openrouter"]
+    live = Registry([c.model_copy(update={"status": "live"}) for c in reg.all()])
+    for plan in Plan:  # Basic gets up to the Pro tier. Pro and above can use any model
+        allowed = {c.id for c in live.allowed(plan, both) if c.picker}
+        tiers = order[:2] if plan == Plan.BASIC else order
+        assert allowed == {m for t in tiers for m in SHOW[t]}, plan
+
+
+def test_auto_picks_only_the_curated_models_and_the_free_engines() -> None:
+    reg = load_registry()
+    assert sorted(c.id for c in reg.all() if c.auto) == sorted(
+        [m for ids in SHOW.values() for m in ids] + FREE_ENGINES
+    )
+    # the older and overlapping models are not Auto's to pick
+    for model_id in (
+        "nano-banana-2",
+        "gpt-image-2",
+        "gpt-image-2-6-flare",
+        "seedream-5-5",
+        "recraft-v4",
+        "flux-2-flex",
+        "muse-image",
+        "recraft-v4-1-flash-free",
+    ):
+        assert not reg.get(model_id).auto, model_id  # type: ignore[union-attr]
+
+
+def test_only_the_cloudflare_model_is_in_the_picker_of_the_free_engines() -> None:
+    reg = load_registry()
+    in_picker = {
+        c.id for c in reg.all() if c.picker and "cloudflare" in {p.name for p in c.providers}
+    }
+    assert in_picker == {"flux-2-klein-4b"}
+
+
+def test_hidden_models_can_still_be_picked_by_id_when_live() -> None:
+    """Hidden = not in the picker. It does not mean unusable: internal tests pick by id."""
+    reg = load_registry()
+    live = Registry([c.model_copy(update={"status": "live"}) for c in reg.all()])
+    hidden = live.get("gpt-image-2")
+    assert hidden is not None and not hidden.picker
+    assert hidden in live.live(["cloudflare", "openrouter"])
+    assert hidden not in live.listed()
+
+
+async def test_a_manual_pick_of_a_hidden_model_passes_the_checks(tmp_path: Path) -> None:
+    from app.agents.image_grand.generation.create.checks import run_code_checks
+
+    deps = make_deps(tmp_path)
+    deps.registry = Registry(
+        [c.model_copy(update={"status": "live"}) for c in load_registry().all()]
+    )
+    deps.enabled_providers = ["cloudflare", "openrouter"]
+    state: dict[str, Any] = {
+        "plan": "max",
+        "n_refs": 0,
+        "settings": {"model": "gpt-image-2", "aspect_ratio": "1:1", "resolution": "1K", "n": 1},
+    }
+    await run_code_checks(deps, state)  # type: ignore[arg-type]  # no error: a hidden model is allowed

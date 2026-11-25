@@ -651,24 +651,30 @@ def route(prompt: str = "a fox in the snow", plan: Plan = Plan.MAX, **kw: Any) -
         ("a summer sale poster", {}, "recraft-v4-1", "brand"),
         ("a flyer for a concert", {}, "recraft-v4-1", "brand"),
         ("packaging for a tea box", {}, "recraft-v4-1", "brand"),
-        ("a poster in this style", {"has_style_ref": True}, "recraft-v4-styles", "brand"),
-        ("put these together", {"n_refs": 2}, "seedream-5-5", "merge"),
-        ("put these together", {"n_refs": 10}, "seedream-5-5", "merge"),
-        ("put these together", {"n_refs": 12}, "nano-banana-2", "merge"),
-        ("change the jacket to leather", {"n_refs": 1}, "gpt-image-2-6-sunburst", "precision"),
+        (
+            "a poster in this style",
+            {"has_style_ref": True},
+            "recraft-v4-1",
+            "brand",
+        ),  # Styles is not listed
+        ("put these together", {"n_refs": 2}, "seedream-5-flash", "merge"),
+        ("put these together", {"n_refs": 14}, "seedream-5-flash", "merge"),  # it takes 14
+        # nothing listed takes 15 images, so the plan's own tier decides (Max: Sunburst)
+        ("put these together", {"n_refs": 15}, "gpt-image-2-5-sunburst", "merge->category"),
+        ("change the jacket to leather", {"n_refs": 1}, "gpt-image-2-5-sunburst", "precision"),
         (
             'a sign that says "Open every day from nine to five"',
             {},
-            "gpt-image-2-6-sunburst",
+            "gpt-image-2-5-sunburst",
             "precision",
         ),
-        ("a slide with a headline", {}, "gpt-image-2-6-sunburst", "precision"),
-        ("a fox", {"draft": True}, "recraft-v4-1-flash-free", "draft"),
-        ("a fox", {"draft": True, "n_refs": 1}, "muse-image", "draft"),
+        ("a slide with a headline", {}, "gpt-image-2-5-sunburst", "precision"),
+        ("a fox", {"draft": True}, "flux-2-klein-4b", "draft"),
+        ("a fox", {"draft": True, "n_refs": 1}, "gpt-image-2-5-flare", "draft"),
         (
             "a logo",
             {"draft": True},
-            "recraft-v4-1-flash-free",
+            "flux-2-klein-4b",
             "draft",
         ),  # a draft is the cheap choice
         ("a fox in the snow", {}, "nano-banana-2-1", "default"),
@@ -680,10 +686,32 @@ def test_auto_routing_rules(prompt: str, kw: dict[str, Any], model_id: str, rule
 
 
 def test_a_candidate_that_cannot_run_is_skipped_for_the_next() -> None:
-    no_seedream = Registry([c for c in LIVE.all() if c.id != "seedream-5-5"])
-    assert route("merge", registry=no_seedream, n_refs=3).card.id == "nano-banana-2"
-    no_muse = Registry([c for c in LIVE.all() if c.id != "muse-image"])
-    assert route("a fox", registry=no_muse, draft=True, n_refs=1).card.id == "gpt-image-2"
+    no_seedream = Registry([c for c in LIVE.all() if c.id != "seedream-5-flash"])
+    assert route("merge", registry=no_seedream, n_refs=3).card.id == "nano-banana-2-1"
+    no_klein = Registry([c for c in LIVE.all() if c.id != "flux-2-klein-4b"])
+    assert route("a fox", registry=no_klein, draft=True).card.id == "recraft-v4-1-flash"
+
+
+def test_auto_never_picks_a_model_outside_the_curated_list() -> None:
+    prompts = [
+        "a fox",
+        "a logo",
+        "a poster",
+        'a sign that says "Open every day from nine to five"',
+        "merge these",
+        "edit this",
+    ]
+    for prompt in prompts:
+        for refs in (0, 1, 3, 12, 15):
+            for draft in (False, True):
+                try:
+                    card = route(prompt, n_refs=refs, draft=draft).card
+                except PlanLimit:
+                    continue
+                assert card.auto, (prompt, refs, draft, card.id)
+    # even with every model live, the hidden ones (GPT Image 2, Nano Banana 2 ...) are not chosen
+    hidden = {c.id for c in LIVE.all() if not c.auto}
+    assert {"gpt-image-2", "nano-banana-2", "seedream-5-5", "muse-image"} <= hidden
 
 
 def test_the_plan_limits_the_rules() -> None:
@@ -701,12 +729,8 @@ def test_with_openrouter_off_the_cloudflare_models_are_used() -> None:
 
 
 def test_only_models_that_take_the_references_can_be_picked() -> None:
-    assert (
-        route(
-            "x", n_refs=14, registry=Registry([c for c in LIVE.all() if c.id == "nano-banana-2"])
-        ).card.id
-        == "nano-banana-2"
-    )
+    only = Registry([c for c in LIVE.all() if c.id == "nano-banana-2-1"])
+    assert route("x", n_refs=14, registry=only).card.id == "nano-banana-2-1"
     with pytest.raises(PlanLimit):
         route("x", n_refs=30)  # no model takes 30 images
 
@@ -971,20 +995,19 @@ async def test_the_catalog_sends_credits_refs_capabilities_and_surcharges(tmp_pa
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://t"
         ) as c:
-            models = {
-                m["id"]: m
-                for m in (await c.get("/v1/models", params={"plan": "max"})).json()["models"]
-            }
+            res = (await c.get("/v1/models", params={"plan": "max"})).json()
+            models = {m["id"]: m for m in res["models"]}
     finally:
         app.dependency_overrides.clear()
-    assert models["gpt-image-2"]["credits_per_image"] == 1
+    assert models["gpt-image-2-5-flare"]["credits_per_image"] == 2
     assert models["nano-banana-pro"]["credits_per_image"] == 12
     assert models["nano-banana-pro"]["resolution_multipliers"] == {"4K": 2.0}
-    assert models["seedream-5-5"]["ref_surcharge"] == 1 and models["seedream-5-5"]["max_refs"] == 10
-    assert (
-        models["recraft-v4-1-vector"]["capabilities"]
-        and "svg_vector" in models["recraft-v4-1-vector"]["capabilities"]
-    )
-    assert models["recraft-v4-1-flash-free"]["max_refs"] == 0
-    assert models["flux-1-schnell"]["credits_per_image"] == 1
-    assert "openrouter" not in json.dumps(models).lower()  # no provider names go out
+    assert models["seedream-5-flash"]["max_refs"] == 14
+    assert "multi_ref_merge" in models["seedream-5-flash"]["capabilities"]
+    assert "multi_ref_merge" in models["nano-banana-2-1"]["capabilities"]
+    assert "svg_vector" in models["recraft-v4-1-vector"]["capabilities"]
+    assert models["recraft-v4-1-vector"]["credits_per_image"] == 7
+    assert models["flux-2-klein-4b"]["credits_per_image"] == 1
+    assert models["flux-2-klein-4b"]["max_refs"] == 0
+    assert "flux-1-schnell" not in models and "seedream-5-5" not in models  # not in the picker
+    assert "openrouter" not in json.dumps(res).lower()  # no provider names go out

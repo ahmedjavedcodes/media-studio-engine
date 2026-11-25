@@ -22,14 +22,14 @@ from app.agents.image_grand.workers import critic as critic_worker
 from app.agents.image_grand.workers import prompt_enhancer as enhancer_worker
 from app.agents.image_grand.workers.brief import Brief
 from app.agents.image_grand.workers.image_gen import generate_one
-from app.agents.image_grand.workers.safety import Safety, check_image
+from app.agents.image_grand.workers.safety import Safety, check_image_detail
 from app.contracts.events import RunEvent, status_event
 from app.core.errors import InvalidModelOutput, OutputBlocked, ProviderCallFailed, ProviderDown
 from app.core.plans import Plan
 from app.core.user_errors import to_user_error
 from app.gateway.compiler import CompiledPrompt, build_prompt
 from app.gateway.options import RequestExtras, options_for
-from app.gateway.pricing import credits_for_run
+from app.gateway.pricing import credits_for_run, credits_per_image
 from app.gateway.registry import ModelCard
 from app.gateway.router import RouteRequest, route_auto
 
@@ -108,11 +108,14 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
             try:  # `safe()` drops this node's return value on an error, so `fail` would never
                 # learn the hold id. Anything that can raise after the hold must release it.
                 span.log(
-                    category=category,
+                    category=category,  # "manual", or the rule that chose (vector, brand ...)
                     model=card.id,
+                    model_name=card.name,
                     tier=card.tier.value,
                     provider=provider,
+                    credits_per_image=credits_per_image(card, n_refs=state.get("n_refs", 0)),
                     held=amount,
+                    n_refs=state.get("n_refs", 0),
                 )
                 return {"category": category, "model_id": card.id, "hold_id": hold_id}
             except BaseException:
@@ -134,7 +137,8 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
             inputs={"prompt": prompt, "answers": answers, "asked_before": asked},
             run_type="llm",
         ) as span:
-            span.meta(prompt_version=base.version, model=deps.enhancer.model)
+            span.meta(prompt_version=base.version, model=deps.enhancer.model, provider="cloudflare")
+            usage: dict[str, Any] = {}
             refs = state.get("n_refs", 0) > 0  # an edit needs the enhancer to write the delta
             if not asked and not refs and enhancer_worker.should_skip(prompt):
                 out = enhancer_worker.skipped_output(prompt)
@@ -152,8 +156,10 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
                     has_references=refs,
                     max_tokens=s.enhancer_max_tokens,
                     timeout=s.llm_timeout_s,
+                    usage=usage,
                 )
             span.log(status=out.status, brief=out.brief.model_dump(), final_prompt=out.final_prompt)
+            span.log(**usage)  # prompt_tokens, completion_tokens, neurons
         if out.status == "missing":
             emit(status_event(state["run_id"], "need_detail"))
         return {
@@ -183,17 +189,24 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
                 resolution=GENERATE_RESOLUTION,
                 user_prompt=state["prompt"],  # weak words the user typed are kept
             )
+            llm_prompt = state.get("final_prompt") or ""
             span.log(
-                final_prompt=compiled.prompt,
+                llm_prompt=llm_prompt,  # what the enhancer wrote
+                final_prompt=compiled.prompt,  # what the guard sends
+                prompt_changed=compiled.prompt != llm_prompt.strip(),
+                negative_prompt=compiled.negative_prompt,
                 words=len(compiled.prompt.split()),
+                max_words=card.prompt_max_words,
                 size=f"{compiled.width}x{compiled.height}",
+                model=card.id,
             )
         # The parent span of every variation. The critic step closes it.
-        trace.start(
+        generate = trace.start(
             "generate",
             inputs={"n": state["settings"]["n"], "model": card.id},
             run_type="chain",
         )
+        generate.meta(model=card.id, provider=card.providers_in(deps.enabled_providers)[0].name)
         emit(status_event(state["run_id"], "creating", progress=f"0/{state['settings']['n']}"))
         return {"compiled": asdict(compiled)}
 
@@ -248,11 +261,28 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
         # Safety first, on the 256 px thumbnail. Unsafe or unchecked images are deleted and never
         # shown or charged (fail closed, per image).
         thumb = deps.store.read_bytes(run_id, saved.thumb)
-        verdict = (
-            await check_image(deps.vision, thumb, compiled.prompt, timeout=s.llm_timeout_s)
-            if thumb is not None
-            else Safety.FAILED
-        )
+        verdict = Safety.FAILED
+        if thumb is not None:
+            checked = await check_image_detail(
+                deps.vision, thumb, compiled.prompt, timeout=s.llm_timeout_s
+            )
+            verdict = checked.verdict
+            trace.record(  # timed inside the helper, so the latency is the real one
+                "safety",
+                parent=f"generate_image_{index}",
+                key=f"safety_{index}",
+                started_at=checked.started_at,
+                ended_at=checked.ended_at,
+                inputs={"thumb": saved.thumb, "prompt": compiled.prompt},
+                outputs={
+                    "verdict": verdict.value,
+                    "model": checked.model,
+                    "provider": "cloudflare",
+                    "p_unsafe": checked.p_unsafe,
+                    "neurons": checked.neurons,
+                    "error": checked.error,
+                },
+            )
         span.log(safety=verdict.value)
         if verdict is not Safety.SAFE:
             deps.store.delete(run_id, saved.file)
@@ -305,12 +335,14 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
             },
             run_type="llm",
         ) as span:
-            span.meta(prompt_version=base.version, model=deps.critic.model)
-            review = await _review_with_retry(deps, base.text, state, thumbs)
+            span.meta(prompt_version=base.version, model=deps.critic.model, provider="cloudflare")
+            usage: dict[str, Any] = {}
+            review = await _review_with_retry(deps, base.text, state, thumbs, usage)
             span.log(  # scores stay in the backend. They are traced, never streamed
                 verdicts={k: asdict(v) for k, v in review.verdicts.items()},
                 best=review.best,
                 critic_failed=review.failed,
+                **usage,  # prompt_tokens, completion_tokens, neurons
             )
         return {
             "review": {
@@ -370,7 +402,11 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
 
 
 async def _review_with_retry(
-    deps: CreateDeps, system: str, state: CreateState, thumbs: list[tuple[str, bytes]]
+    deps: CreateDeps,
+    system: str,
+    state: CreateState,
+    thumbs: list[tuple[str, bytes]],
+    usage: dict[str, Any] | None = None,
 ) -> critic_worker.Review:
     """One retry. If the critic still fails it falls OPEN: the images already passed the safety
     check, so they go out in generation order with no recommendation."""
@@ -383,6 +419,7 @@ async def _review_with_retry(
                 thumbs=thumbs,
                 timeout=deps.settings.llm_timeout_s,
                 user_prompt=state["prompt"],
+                usage=usage,
             )
         except (InvalidModelOutput, ProviderCallFailed) as exc:
             log.warning("critic_failed", attempt=attempt, error=type(exc).__name__)

@@ -54,6 +54,17 @@ def parse_schema[T: BaseModel](answer: str | dict[str, Any], schema: type[T]) ->
         raise InvalidModelOutput("the model answered in the wrong format") from exc
 
 
+def add_usage(sink: dict[str, Any] | None, result: dict[str, Any]) -> None:
+    """Add a call's tokens and neurons to `sink`. Adds up, so a retried call counts both."""
+    raw = result.get("usage")
+    if sink is None or not isinstance(raw, dict):
+        return
+    for key in ("prompt_tokens", "completion_tokens", "neurons"):
+        value = raw.get(key)
+        if isinstance(value, int | float):
+            sink[key] = sink.get(key, 0) + value
+
+
 class CloudflareLLM:
     """A text or vision model that answers in a Pydantic schema (LLMPort)."""
 
@@ -72,6 +83,7 @@ class CloudflareLLM:
         temperature: float,
         timeout: float,
         reasoning_effort: str | None = None,
+        usage: dict[str, Any] | None = None,
     ) -> T:
         content: str | list[dict[str, Any]] = user
         if images:
@@ -93,6 +105,7 @@ class CloudflareLLM:
         if reasoning_effort and "gpt-oss" in self.model:  # reasoning models only
             body["reasoning_effort"] = reasoning_effort
         result = await self._cf.run(self.model, body, timeout)
+        add_usage(usage, result)
         return parse_schema(extract_text(result), schema)
 
 

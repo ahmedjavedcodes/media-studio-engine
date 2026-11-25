@@ -46,10 +46,20 @@ from tests.unit.guard_helpers import make_deps as make_guard_deps
 COLORS = ["#e67e22", "#2980b9", "#27ae60", "#8e44ad", "#c0392b"]
 
 
+def report_usage(kw: dict[str, Any], neurons: float) -> None:
+    """What a real model reports. The dev trace panel shows it."""
+    usage = kw.get("usage")
+    if usage is not None:
+        usage["prompt_tokens"] = usage.get("prompt_tokens", 0) + 120
+        usage["completion_tokens"] = usage.get("completion_tokens", 0) + 60
+        usage["neurons"] = usage.get("neurons", 0) + neurons
+
+
 class FakeEnhancer:
     model = "fake-enhancer"
 
     async def complete_json(self, **kw: Any) -> Any:
+        report_usage(kw, 12.0)
         payload = json.loads(kw["user"].split("<user_prompt>")[1].split("</user_prompt>")[0])
         prompt: str = payload["prompt"]
         if "make it nice" in prompt.lower() and not payload["answers"]:
@@ -80,6 +90,7 @@ class FakeCritic:
     model = "fake-critic"
 
     async def complete_json(self, **kw: Any) -> Any:
+        report_usage(kw, 8.0)
         ids = json.loads(kw["user"].split("<request>")[1].split("</request>")[0])["images"]
         images = [
             CriticImage(id=i, scores=Scores(match=9 - n, craft=8, interest=7, technical=8))
@@ -92,7 +103,7 @@ class FakeSafety:
     model = "fake-safety"
 
     async def classify(self, **_: Any) -> VisionRaw:
-        return VisionRaw("safe", [("safe", -0.01), ("unsafe", -5.0)])
+        return VisionRaw("safe", [("safe", -0.01), ("unsafe", -5.0)], {"neurons": 2.0})
 
 
 class FakeImages:
@@ -107,7 +118,7 @@ class FakeImages:
         buf = io.BytesIO()
         size = (kw["width"], kw["height"])
         Image.new("RGB", size, COLORS[FakeImages.count % len(COLORS)]).save(buf, format="JPEG")
-        return GeneratedImage(data=buf.getvalue(), cost_usd=0.0)
+        return GeneratedImage(data=buf.getvalue(), cost_usd=0.0011)
 
 
 def build_fake_deps() -> CreateDeps:
@@ -116,6 +127,7 @@ def build_fake_deps() -> CreateDeps:
         draft_timeout_s=int(os.environ.get("DRAFT_TIMEOUT_S", "3")),
         local_output_dir=tempfile.mkdtemp(prefix="e2e-outputs-"),
         langsmith_tracing=False,
+        trace_ui=os.environ.get("TRACE_UI", "true") == "true",
     )
     return CreateDeps(
         registry=load_registry(),

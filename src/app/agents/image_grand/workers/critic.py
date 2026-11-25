@@ -7,6 +7,7 @@ backend: they rank the images and feed tests, and are never sent to the frontend
 import base64
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -94,6 +95,7 @@ async def review(
     thumbs: list[tuple[str, bytes]],
     timeout: float,
     user_prompt: str = "",
+    usage: dict[str, Any] | None = None,
 ) -> Review:
     """`thumbs` is [(image id, 256 px jpeg)] in generation order."""
     request = {"brief": brief, "images": [i for i, _ in thumbs]}
@@ -105,6 +107,7 @@ async def review(
         max_tokens=MAX_TOKENS,
         temperature=TEMPERATURE,
         timeout=timeout,
+        usage=usage,
     )
     return rank_images(out, [i for i, _ in thumbs], user_prompt)
 

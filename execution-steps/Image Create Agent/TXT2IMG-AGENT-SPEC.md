@@ -63,12 +63,14 @@ The prompt and the settings stay **separate**. Settings never go inside the prom
 
 ### Plan limits
 
-| Plan | Who | Max variations | Max resolution | Models allowed |
-|---|---|---|---|---|
-| Basic | free users | 2 | 1K | Basic |
-| Pro | paid | 4 | 2K | Basic, Pro |
-| Ultra | paid | 4 | 2K | Basic, Pro, Ultra |
-| Max | paid | 4 | 2K | all |
+| Plan | Who | Max variations | Max resolution | Models allowed | Auto prefers |
+|---|---|---|---|---|---|
+| Basic | free users | 2 | 1K | up to Pro tier (Basic and Pro models) | Basic tier |
+| Pro | paid | 4 | 2K | any model | Pro tier |
+| Ultra | paid | 4 | 2K | any model | Ultra tier |
+| Max | paid | 4 | 2K | any model | Max tier |
+
+**Plan rule (v1.3.4):** free users can use models **up to the Pro tier**. Pro and every plan above it can use **any model**. The plan's own tier only sets what Auto prefers: Auto first looks for a model in the plan's tier, then the tiers below it, then the tiers above (if the plan allows them).
 
 **For now, every image is generated at 1K.** 2K on paid plans will come from the **upscale** tool when it's added, and upscaling uses its own credits. Until then:
 - the UI shows 2K as "coming soon" on paid plans
@@ -325,6 +327,16 @@ Guardrail rejections still show the reason.
 
 ---
 
+### Dev trace panel (v1.3.3)
+
+The rule above still holds for users: no model names, prompts, costs or scores in any SSE event. For **development**, the page can show a trace of every run.
+- **Off by default.** It needs `TRACE_UI=true` on the server, and it is never on when `APP_ENV=prod`. When off, `GET /v1/runs/{id}/trace` is a 404, and `/v1/plans` says `trace_ui: false`, so the page shows nothing.
+- **Its own endpoint, not SSE.** `GET /v1/runs/{id}/trace?t=` uses the same signed token as `/events`. The page polls it while the run is going (every 0.7 s, every 2 s while a question waits) and stops at the end. The SSE stream carries none of it (a test checks this).
+- **What it shows**, from the input to the last step: the request; the guardrail (decision, models, latency per check); `code_checks`; `router` (the rule or "manual", the model, credits held); `enhancer` (model, prompt version, tokens, neurons, brief, final prompt); `interrupt` (time spent waiting for the answer); `code_guard` (what the LLM wrote against what was sent); `generate` and one `generate_image` per variation (provider, model, slug, seed, size, bytes, billed cost against the estimate, options, fallback); a `safety` span per image (verdict, model, neurons); `critic` (scores, tokens); `settle` (delivered, credits charged). Each span has its start, duration, status, and its inputs and outputs.
+- **Totals:** time, image cost in USD (marked "≈" when a provider billed nothing we could read), LLM cost estimated from neurons at Cloudflare's price, credits, neurons, tokens, images delivered.
+- **Kept after the run.** The trace is saved to `outputs/traces/{run_id}.json`, apart from the run's files, so a failed run (whose images are deleted) still has its trace. Everything is scrubbed: ids and numbers, never image bytes.
+- LangSmith is separate. A span goes to both when LangSmith is on, and is always kept locally.
+
 ### Access: signed token (v1.3)
 
 `EventSource` and `<img>` cannot send headers, so access to a run's stream and images is a **signed token in the URL**.
@@ -361,7 +373,7 @@ Route to the cheaper live provider, and fall back to the other.
 
 ### Tiers (auto from normalized cost per image at 1K)
 
-Each model tier matches a plan. A plan can use its own tier and every tier below it.
+Each model tier matches a plan, and that plan is where Auto starts looking. What a plan **may use** follows the plan rule in section 3: Basic up to the Pro tier, Pro and above any model.
 
 | Tier | Plan | Cost per image | Example models |
 |---|---|---|---|
@@ -373,6 +385,19 @@ Each model tier matches a plan. A plan can use its own tier and every tier below
 Example models use OpenRouter prices measured in November 2026. The sync re-checks them daily.
 
 **In the registry (v1.3.1).** Every model in the table above is in `models.yaml` with its real OpenRouter slug (checked against the live catalogue on 2026-11-25), in the tier the table gives it. All except the four verified Cloudflare models have `status: testing`: the picker lists them as **Soon** and they cannot run. **Their costs are placeholders** inside the tier band, because OpenRouter's catalogue has no per-output-image price. The real cost is `usage.cost` after the first call. "GPT Image 2.5 High" is `openai/gpt-image-2.5-sunburst`. `FLUX.2 klein 4B` is on both providers: Cloudflare first, OpenRouter only as a fallback.
+
+### The curated list (v1.3.4)
+
+The picker shows only these 14 models. Each is `picker: true, auto: true` in `models.yaml`. Every other OpenRouter model stays in the registry for tests but is `picker: false, auto: false`. This is not `status: hidden`: the status still says whether the model has had a real run. The four free Cloudflare engines (FLUX.1 schnell, FLUX.2 klein 9B, Phoenix 1, Lucid Origin) are `auto: true` only, so they stay out of the picker but Auto can pick them.
+
+| Tier | Models |
+|---|---|
+| Basic | FLUX.2 klein 4B, GPT Image 2.5 Flare, Recraft V4.1 Flash, FLUX 3 Klein |
+| Pro | Seedream 5.0 Flash, FLUX.2 Pro, Nano Banana 2.1, Recraft V4.1 |
+| Ultra | Seedream 5.0 Pro, FLUX 3, Recraft V4.1 Vector |
+| Max | GPT Image 2.5 Sunburst, Nano Banana Pro, Recraft V4.1 Pro |
+
+A free user sees the Basic and Pro rows open and the Ultra and Max rows locked. Several models are still `testing`: each needs one real run before it goes `live`, and until then it shows "Soon".
 
 ### Turning OpenRouter on
 

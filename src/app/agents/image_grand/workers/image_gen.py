@@ -82,7 +82,25 @@ async def generate_one(
         seed_sent=result.seed_sent,
     )
     if span is not None:  # ids and numbers only. Never the image bytes
+        entry = next((e for e in card.providers if e.name == provider), None)
+        opts = options or ImageOptions()
         span.log(
+            model=card.id,
+            model_name=card.name,
+            slug=entry.slug if entry else None,
+            cost_usd=image.cost_usd,  # what the provider billed (None if it did not say)
+            cost_estimate_usd=entry.cost if entry else card.cost_per_image,
+            bytes=len(image.data),
+            media_type=info.mime,
+            options={
+                "quality": opts.quality,
+                "resolution": opts.resolution,
+                "output_format": opts.output_format,
+                "endpoint": opts.endpoint,
+                "references": len(opts.references),
+                "brand_colors": len(opts.brand_colors),
+            },
+            prompt_words=len(compiled.prompt.split()),
             image_id=f"img_{index + 1}",
             thumb_url=f"thumb_{index + 1}.jpg",
             seed_sent=result.seed_sent,

@@ -5,6 +5,7 @@ One LLM call, no separate compile call. Spec section 4 [3].
 
 import json
 import re
+from typing import Any
 
 from app.agents.image_grand.workers.brief import Brief, EnhancerOutput, Option, Question
 from app.contracts.ports import LLMPort
@@ -133,6 +134,7 @@ async def enhance(
     max_tokens: int,
     timeout: float,
     has_references: bool = False,
+    usage: dict[str, Any] | None = None,
 ) -> EnhancerOutput:
     payload = {
         "prompt": prompt,
@@ -153,6 +155,7 @@ async def enhance(
                 temperature=TEMPERATURE,
                 timeout=timeout,
                 reasoning_effort=REASONING_EFFORT,
+                usage=usage,
             )
             break
         except InvalidModelOutput:

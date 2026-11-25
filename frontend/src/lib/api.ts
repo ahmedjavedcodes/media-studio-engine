@@ -32,6 +32,7 @@ export type Settings = {
 
 export type PlanInfo = { id: Plan; max_n: number; max_resolution: string; tier: Tier };
 export type PlansResponse = {
+  trace_ui?: boolean; // the dev trace panel is on (TRACE_UI=true on the server, never in prod)
   plans: PlanInfo[];
   aspect_ratios: string[];
   resolutions: { id: string; available: boolean }[];
@@ -178,11 +179,23 @@ function withDefaults(m: Partial<ModelInfo> & { id: string; name: string }): Mod
   } as ModelInfo;
 }
 
-export async function fetchModels(plan: Plan): Promise<ModelInfo[]> {
+// What Auto may cost on this plan: prices of every model it can pick, shown in the picker or not.
+export type AutoPoolEntry = {
+  max_refs: number;
+  credits_per_image: number;
+  ref_surcharge: number;
+  resolution_multipliers: Record<string, number>;
+};
+
+export async function fetchModels(
+  plan: Plan,
+): Promise<{ models: ModelInfo[]; autoPool: AutoPoolEntry[] }> {
   const res = await fetch(`${API_URL}/v1/models?plan=${plan}`);
-  return ((await res.json()).models as (Partial<ModelInfo> & { id: string; name: string })[]).map(
-    withDefaults,
-  );
+  const body = await res.json();
+  return {
+    models: (body.models as (Partial<ModelInfo> & { id: string; name: string })[]).map(withDefaults),
+    autoPool: (body.auto_pool ?? []) as AutoPoolEntry[], // an older backend sends none
+  };
 }
 
 export async function fetchRun(
@@ -190,4 +203,52 @@ export async function fetchRun(
 ): Promise<{ status: string; result?: { images: ImageOut[]; recommendation?: string }; draft?: Draft } | null> {
   const res = await fetch(`${API_URL}/v1/runs/${runId}`).catch(() => null);
   return res && res.ok ? res.json() : null;
+}
+
+// ---- the dev trace panel (GET /v1/runs/{id}/trace). Dev only: the server must have TRACE_UI on.
+
+export type TraceSpan = {
+  id: number;
+  parent: number | null;
+  name: string;
+  kind: string;
+  status: "ok" | "error" | "running";
+  start_ms: number; // relative to the first span. The guardrail starts before the run: negative
+  duration_ms: number;
+  model: string | null;
+  provider: string | null;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  error: string | null;
+};
+
+export type TraceTotals = {
+  duration_ms: number;
+  images_usd: number;
+  images_cost_estimated: boolean; // true when a provider billed nothing we could read
+  llm_usd_estimate: number;
+  total_usd: number;
+  neurons: number;
+  tokens: { prompt: number; completion: number };
+  credits_held: number;
+  credits_charged: number;
+  images_requested: number;
+  images_delivered: number;
+};
+
+export type Trace = {
+  run_id: string;
+  status: string; // running | waiting | resuming | done | failed | expired
+  input: { prompt?: string; plan?: string; settings?: Record<string, unknown>; n_refs?: number };
+  metadata: Record<string, unknown>;
+  totals: TraceTotals;
+  spans: TraceSpan[];
+};
+
+export async function fetchTrace(runId: string, token: string): Promise<Trace | null> {
+  const res = await fetch(`${API_URL}/v1/runs/${runId}/trace?t=${encodeURIComponent(token)}`, {
+    cache: "no-store",
+  }).catch(() => null);
+  return res && res.ok ? ((await res.json()) as Trace) : null;
 }

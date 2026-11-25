@@ -100,4 +100,14 @@ class CloudflareVisionStandIn:
             timeout,
         )
         text_out, logprobs = parse_chat_completion(result)
-        return VisionRaw(text_out, logprobs)
+        raw_usage = result.get("usage")
+        usage = (
+            {
+                k: raw_usage[k]
+                for k in ("prompt_tokens", "completion_tokens", "neurons")
+                if isinstance(raw_usage.get(k), int | float)
+            }
+            if isinstance(raw_usage, dict)
+            else None
+        )
+        return VisionRaw(text_out, logprobs, usage)

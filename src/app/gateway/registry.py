@@ -53,6 +53,8 @@ class ModelCard(BaseModel):
     forbidden_qualities: list[str] = Field(default_factory=list)  # never sent (cost guardrail)
     output_format: str | None = None  # `svg` for vector models
     notes: str = ""
+    picker: bool = False  # shown in the model picker. A hidden model can still be picked by id
+    auto: bool = False  # the Auto router may choose it. False = only picked by hand (tests)
     supported_aspect_ratios: list[str] = Field(default_factory=lambda: list(ALL_RATIOS))
     max_resolution: str = "1K"
     prompt_max_words: int = 0
@@ -98,9 +100,10 @@ class Registry:
         ]
 
     def listed(self) -> list[ModelCard]:
-        """Models the picker shows: live ones, and `testing` ones as "coming soon". A `testing`
-        model cannot be run (the checks and the router only accept `live`)."""
-        return [c for c in self._cards.values() if c.status in ("live", "testing")]
+        """Models the picker shows: the curated list (`picker: true`) that is live, or `testing`
+        as "coming soon". A `testing` model cannot be run (the checks and the router only accept
+        `live`). Everything else stays in the registry but is not shown."""
+        return [c for c in self._cards.values() if c.picker and c.status in ("live", "testing")]
 
     def allowed(self, plan: Plan, enabled_providers: list[str]) -> list[ModelCard]:
         return [c for c in self.live(enabled_providers) if tier_allowed(plan, c.tier)]

@@ -95,7 +95,15 @@ class RunService:
             ),
         )
 
-    def start(self, run_id: str, user_id: str, request: GenerationRequest) -> RunRecord:
+    def start(
+        self,
+        run_id: str,
+        user_id: str,
+        request: GenerationRequest,
+        guard: dict[str, Any] | None = None,
+    ) -> RunRecord:
+        """`guard` is the guardrail's timing and decision (it ran before the run began). It
+        becomes the first span of the trace."""
         self._prune()
         meta = {
             "run_id": run_id,
@@ -105,11 +113,24 @@ class RunService:
             "provider": None,
             "compile_mode": self._deps.settings.compile_mode,
         }
-        self._deps.tracer.start_run(
+        trace = self._deps.tracer.start_run(
             run_id,
             metadata=meta,
-            inputs={"prompt": request.prompt, "settings": request.settings.model_dump()},
+            inputs={
+                "prompt": request.prompt,
+                "plan": request.plan.value,
+                "settings": request.settings.model_dump(),
+                "n_refs": len(request.images),
+            },
         )
+        if guard:
+            trace.record(
+                "guardrail",
+                started_at=guard["started_at"],
+                ended_at=guard["ended_at"],
+                inputs={"prompt_chars": len(request.prompt), "images": len(request.images)},
+                outputs=guard["outputs"],
+            )
         record = RunRecord(run_id=run_id, user_id=user_id, request=request)
         self.runs[run_id] = record
         graph_input: dict[str, Any] = {
@@ -151,6 +172,7 @@ class RunService:
                 record.status = "failed"
                 record.cond.notify_all()
             self._deps.tracer.get(run_id).finish(error="crashed")
+            self._save_trace(record)
             self._deps.tracer.drop(run_id)
             await self._forget(record)
             raise RunNotWaiting("failed")
@@ -259,6 +281,7 @@ class RunService:
             )
             record.cond.notify_all()
         self._deps.tracer.get(record.run_id).finish(error="draft timeout")
+        self._save_trace(record)
         self._deps.tracer.drop(record.run_id)
         await self._forget(record)
 
@@ -287,10 +310,26 @@ class RunService:
             outputs={"status": record.status, "images": record.images_seen},
             error=(last.code if failed and last else None),
         )
+        self._save_trace(record)
         self._deps.tracer.drop(record.run_id)
         await self._forget(record)  # done or failed: the saved graph state is not needed any more
         async with record.cond:
             record.cond.notify_all()
+
+    def _save_trace(self, record: RunRecord) -> None:
+        """Keep the trace on disk, apart from the run's files (a failed run deletes those, and its
+        trace is the thing you want most). Only the dev panel reads it."""
+        if not self._deps.settings.trace_ui_on:
+            return
+        trace = self._deps.tracer.trace_for(record.run_id)
+        if trace is None:
+            return
+        try:
+            self._deps.store.write_json(
+                "traces", f"{record.run_id}.json", trace.snapshot(record.status)
+            )
+        except Exception as exc:  # noqa: BLE001 - a trace must never break a run
+            log.warning("trace_save_failed", run_id=record.run_id, error=type(exc).__name__)
 
     async def _forget(self, record: RunRecord) -> None:
         """The run is over. Its saved graph state is no longer needed."""
@@ -304,6 +343,7 @@ class RunService:
             record.status = "failed"
             record.cond.notify_all()
         self._deps.tracer.get(record.run_id).finish(error=error)
+        self._save_trace(record)
         self._deps.tracer.drop(record.run_id)
         await self._forget(record)
 

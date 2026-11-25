@@ -133,26 +133,59 @@ async def test_expired_draft_cannot_resume_and_returns_the_draft(api) -> None:  
     assert got["status"] == "expired" and got["draft"]["prompt"] == "make it nice"
 
 
-async def test_models_catalog_locks_by_plan(api) -> None:  # type: ignore[no-untyped-def]
+SHORTLIST = {
+    "basic": ["flux-2-klein-4b", "gpt-image-2-5-flare", "recraft-v4-1-flash", "flux-3-klein"],
+    "pro": ["seedream-5-flash", "flux-2-pro", "nano-banana-2-1", "recraft-v4-1"],
+    "ultra": ["seedream-5-pro", "flux-3", "recraft-v4-1-vector"],
+    "max": ["gpt-image-2-5-sunburst", "nano-banana-pro", "recraft-v4-1-pro"],
+}
+
+
+async def test_the_picker_shows_only_the_curated_14_and_locks_by_plan(api) -> None:  # type: ignore[no-untyped-def]
     client, _, _ = api
-    basic = (await client.get("/v1/models", params={"plan": "basic"})).json()["models"]
-    by_id = {m["id"]: m for m in basic}
-    assert by_id["flux-1-schnell"]["locked"] is False
-    assert by_id["phoenix-1"]["locked"] is True
-    # The OpenRouter models the spec decided are listed, but as "coming soon" (OpenRouter is off)
-    for model_id in ("nano-banana-2", "gpt-image-2-5-flare", "seedream-5-flash", "qwen-image-3"):
-        assert by_id[model_id]["available"] is False
-    assert by_id["flux-1-schnell"]["available"] is True
-    assert by_id["nano-banana-2"]["family_label"] == "Google Nano Banana & Gemini"
-    avail = [m["available"] for m in basic]
+    everything = [m for ids in SHORTLIST.values() for m in ids]
+    assert len(everything) == 14
+    # Free (Basic) users get models up to the Pro tier. Pro and above can use any model
+    unlocked_by_plan = {"basic": 8, "pro": 14, "ultra": 14, "max": 14}
+    for plan, expected_open in unlocked_by_plan.items():
+        res = (await client.get("/v1/models", params={"plan": plan})).json()
+        by_id = {m["id"]: m for m in res["models"]}
+        assert set(by_id) == set(everything)  # the same 14 on every plan. Nothing else is shown
+        assert sum(not m["locked"] for m in res["models"]) == expected_open
+        open_tiers = list(SHORTLIST)[:2] if plan == "basic" else list(SHORTLIST)
+        want_open = [m for t in open_tiers for m in SHORTLIST[t]]
+        assert {m for m, v in by_id.items() if not v["locked"]} == set(want_open)
+    basic = (await client.get("/v1/models", params={"plan": "basic"})).json()
+    by_id = {m["id"]: m for m in basic["models"]}
+    # the old and overlapping models, and the free Cloudflare engines, are not in the picker
+    for hidden in (
+        "flux-1-schnell",
+        "flux-2-klein-9b",
+        "phoenix-1",
+        "lucid-origin",
+        "nano-banana-2",
+        "gpt-image-1",
+        "gpt-image-2",
+        "gpt-image-2-6-flare",
+        "recraft-v4",
+        "recraft-v4-pro",
+        "flux-2-flex",
+        "flux-2-max",
+        "krea-2-large",
+        "muse-image",
+        "recraft-v4-1-flash-free",
+    ):
+        assert hidden not in by_id, hidden
+    # only the Cloudflare model is usable today. The rest are "coming soon" (OpenRouter is off)
+    assert by_id["flux-2-klein-4b"]["available"] is True
+    assert [m["id"] for m in basic["models"] if m["available"]] == ["flux-2-klein-4b"]
+    assert all(by_id[m]["available"] is False for m in everything if m != "flux-2-klein-4b")
+    avail = [m["available"] for m in basic["models"]]
     assert avail == sorted(avail, reverse=True)  # usable models first, "coming soon" after
+    assert by_id["nano-banana-2-1"]["family_label"] == "Google Nano Banana & Gemini"
+    assert by_id["recraft-v4-1"]["tag"] == "Posters, ads, brand colors"
     assert "openrouter" not in json.dumps(basic).lower()  # no provider names go out
-    pro = {
-        m["id"]: m
-        for m in (await client.get("/v1/models", params={"plan": "pro"})).json()["models"]
-    }
-    assert pro["phoenix-1"]["locked"] is False
-    assert "cost" not in json.dumps(basic) and "slug" not in json.dumps(basic)
+    assert "cost" not in json.dumps(basic["models"]) and "slug" not in json.dumps(basic["models"])
     plans = (await client.get("/v1/plans")).json()
     assert {p["id"]: p["max_n"] for p in plans["plans"]} == {
         "basic": 2,
@@ -161,6 +194,21 @@ async def test_models_catalog_locks_by_plan(api) -> None:  # type: ignore[no-unt
         "max": 4,
     }
     assert {"id": "2K", "available": False} in plans["resolutions"]
+
+
+async def test_the_auto_pool_prices_every_model_auto_can_pick_even_hidden_ones(api) -> None:  # type: ignore[no-untyped-def]
+    client, _, _ = api
+    basic = (await client.get("/v1/models", params={"plan": "basic"})).json()["auto_pool"]
+    pro = (await client.get("/v1/models", params={"plan": "pro"})).json()["auto_pool"]
+    assert all(
+        set(e) == {"max_refs", "credits_per_image", "ref_surcharge", "resolution_multipliers"}
+        for e in basic
+    )  # prices only. No names
+    # OpenRouter is off, so Auto uses the free Cloudflare engines. Free users get models up to
+    # the Pro tier, so that includes Phoenix (3 credits), which is not in the picker. The
+    # estimate must still count it
+    assert max(e["credits_per_image"] for e in basic) == 3
+    assert max(e["credits_per_image"] for e in pro) == 3
 
 
 async def test_files_endpoint_rejects_json_and_unknown(api) -> None:  # type: ignore[no-untyped-def]

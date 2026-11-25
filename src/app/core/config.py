@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # Image create (spec TXT2IMG-AGENT-SPEC.md)
     compile_mode: Literal["llm", "code"] = "llm"  # code = the prompt from the brief, for benchmarks
     openrouter_images: bool = False  # the owner turns this on. Paid. Respects SPEND_CAP_USD
+    # Dev trace panel: GET /v1/runs/{id}/trace and the panel on the page. OFF by default, and
+    # never on in prod. It shows prompts, models, costs and latency for every step.
+    trace_ui: bool = False
     stream_token_secret: str = ""  # signs ?t= tokens. Empty = a temporary key (dev only)
     stream_token_ttl_s: int = 7200
     fal_images: bool = False  # the owner turns this on. Paid. Respects SPEND_CAP_USD
@@ -78,6 +81,10 @@ class Settings(BaseSettings):
     def trace_project(self) -> str:
         """LangSmith project per environment (dev / prod)."""
         return self.langsmith_project or ("app-prod" if self.is_prod else "app-dev")
+
+    @property
+    def trace_ui_on(self) -> bool:
+        return self.trace_ui and not self.is_prod
 
     @property
     def hub_tag(self) -> str:

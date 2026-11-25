@@ -127,7 +127,9 @@ function Row(props: {
   const { name, badge, tag, credits, refs, pills, locked, soon, tooMany, selected, onPick } = props;
   const disabled = !!locked || !!soon || !!tooMany;
   const why = soon
-    ? "Coming soon"
+    ? locked
+      ? "Coming soon. It also needs a higher plan."
+      : "Coming soon"
     : locked
       ? "Upgrade your plan to use this model"
       : tooMany
@@ -149,7 +151,7 @@ function Row(props: {
       >
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate">
-            {locked && !soon && "🔒 "}
+            {locked && "🔒 "}
             {name}
           </span>
           {tag && <span className="truncate text-xs text-zinc-500">{tag}</span>}

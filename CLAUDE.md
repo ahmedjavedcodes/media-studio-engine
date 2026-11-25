@@ -237,6 +237,7 @@ Spec: `execution-steps/Image Create Agent/TXT2IMG-AGENT-SPEC.md` (**v1.3**). It 
 - OpenRouter and fal are OFF. `OPENROUTER_IMAGES=true` / `FAL_IMAGES=true` turn them on, only when Ahmed asks. Both share one `SPEND_CAP_USD` budget. Never fall back from one paid provider to another after the cap.
 - Every image is safety-checked on its own right after it is made (fail closed per image). Images reach the user only in `ready`.
 - `/events` and image URLs are protected by a signed token (`?t=`, `STREAM_TOKEN_SECRET`). Tests never call real providers or LangSmith (`tests/conftest.py` switches tracing off).
+- Dev trace panel (`TRACE_UI=true`, never in prod): every step of a run with time, model, cost and inputs/outputs, from `GET /v1/runs/{id}/trace?t=`. It is its own endpoint. Traces still never go to SSE.
 - Tracing: one LangSmith trace per run, one span per step (`core/tracing.py`). Never log image bytes. Traces never go to SSE.
 - System prompts for the enhancer and critic come from LangSmith Hub (`PROMPT_SOURCE=hub`), with `prompts/create/txt2img/` as the fallback.
 - A model goes `live` in `gateway/models.yaml` only after a real run. Real runs: `playground/create.py`.

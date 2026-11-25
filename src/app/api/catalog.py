@@ -14,8 +14,9 @@ router = APIRouter(prefix="/v1")
 
 
 @router.get("/plans")
-async def list_plans() -> dict[str, Any]:
+async def list_plans(deps: Annotated[CreateDeps, Depends(get_create_deps)]) -> dict[str, Any]:
     return {
+        "trace_ui": deps.settings.trace_ui_on,  # the dev trace panel. Off unless TRACE_UI=true
         "plans": [
             {
                 "id": p.value,
@@ -69,4 +70,16 @@ async def list_models(
             m["name"],
         )
     )
-    return {"models": models, "plan": plan.value}
+    # What Auto may cost: every model it can pick on this plan, shown in the picker or not. Prices
+    # only (no names), so the page can estimate "up to N credits" for Auto honestly.
+    auto_pool = [
+        {
+            "max_refs": c.max_refs,
+            "credits_per_image": credits_per_image(c),
+            "ref_surcharge": c.ref_surcharge,
+            "resolution_multipliers": c.resolution_multipliers,
+        }
+        for c in deps.registry.allowed(plan, deps.enabled_providers)
+        if c.auto
+    ]
+    return {"models": models, "plan": plan.value, "auto_pool": auto_pool}

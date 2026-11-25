@@ -82,6 +82,11 @@ class FakeLLM:
 
     async def complete_json(self, **kw: Any) -> Any:
         self.calls.append(kw)
+        if kw.get("usage") is not None:  # what a real model reports. Adds up over retries
+            u = kw["usage"]
+            u["prompt_tokens"] = u.get("prompt_tokens", 0) + 100
+            u["completion_tokens"] = u.get("completion_tokens", 0) + 50
+            u["neurons"] = u.get("neurons", 0) + 10.0
         out = self.outputs.pop(0) if len(self.outputs) > 1 else self.outputs[0]
         if isinstance(out, Exception):
             raise out
@@ -119,6 +124,7 @@ class SeqVision:
             [("unsafe", -0.01), ("safe", -5.0)]
             if out != "safe"
             else [("safe", -0.01), ("unsafe", -5.0)],
+            {"neurons": 2.0},  # what a real model reports, for the dev trace
         )
 
 
@@ -162,6 +168,8 @@ def make_deps(
     compile_mode: str = "llm",
     trace: RecordingClient | None = None,
     vision: SeqVision | None = None,
+    trace_ui: bool = False,
+    app_env: str = "local",
 ) -> CreateDeps:
     settings = Settings(
         _env_file=None,  # type: ignore[call-arg]
@@ -169,6 +177,8 @@ def make_deps(
         compile_mode=compile_mode,  # type: ignore[arg-type]
         langsmith_tracing=trace is not None,
         draft_timeout_s=300,
+        trace_ui=trace_ui,
+        app_env=app_env,
     )
     prov = provider or FakeProvider()
     return CreateDeps(

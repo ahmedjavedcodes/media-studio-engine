@@ -25,6 +25,7 @@ class VisionRaw:
     # (token, logprob) pairs for the first generated token and its top alternatives.
     # None when the provider gave no logprobs.
     first_token_logprobs: list[tuple[str, float]] | None
+    usage: dict[str, Any] | None = None  # tokens and neurons, for the dev trace
 
 
 class VisionPort(Protocol):
@@ -94,6 +95,8 @@ class LLMPort(Protocol):
         temperature: float,
         timeout: float,
         reasoning_effort: str | None = None,
+        usage: dict[str, Any]
+        | None = None,  # filled with prompt_tokens, completion_tokens, neurons
     ) -> T: ...
 
 

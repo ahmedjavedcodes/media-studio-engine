@@ -42,13 +42,24 @@ class PlanLimits(BaseModel):
     max_n: int
     max_resolution: str  # what the plan is allowed to ask for
     tier: Tier  # highest model tier the plan may use
+    prefer_tier: Tier  # the tier Auto leans toward (cheaper than `tier` for a free user)
 
 
+# Which models a plan may use: a free (Basic) user can use models up to the Pro tier. Pro and every
+# plan above it can use any model. (`prefer_tier` is only Auto's taste, not a permission.)
 PLAN_LIMITS: Final[dict[Plan, PlanLimits]] = {
-    Plan.BASIC: PlanLimits(plan=Plan.BASIC, max_n=2, max_resolution="1K", tier=Tier.BASIC),
-    Plan.PRO: PlanLimits(plan=Plan.PRO, max_n=4, max_resolution="2K", tier=Tier.PRO),
-    Plan.ULTRA: PlanLimits(plan=Plan.ULTRA, max_n=4, max_resolution="2K", tier=Tier.ULTRA),
-    Plan.MAX: PlanLimits(plan=Plan.MAX, max_n=4, max_resolution="2K", tier=Tier.MAX),
+    Plan.BASIC: PlanLimits(
+        plan=Plan.BASIC, max_n=2, max_resolution="1K", tier=Tier.PRO, prefer_tier=Tier.BASIC
+    ),
+    Plan.PRO: PlanLimits(
+        plan=Plan.PRO, max_n=4, max_resolution="2K", tier=Tier.MAX, prefer_tier=Tier.PRO
+    ),
+    Plan.ULTRA: PlanLimits(
+        plan=Plan.ULTRA, max_n=4, max_resolution="2K", tier=Tier.MAX, prefer_tier=Tier.ULTRA
+    ),
+    Plan.MAX: PlanLimits(
+        plan=Plan.MAX, max_n=4, max_resolution="2K", tier=Tier.MAX, prefer_tier=Tier.MAX
+    ),
 }
 
 RESOLUTIONS: Final[tuple[str, ...]] = ("1K", "2K")

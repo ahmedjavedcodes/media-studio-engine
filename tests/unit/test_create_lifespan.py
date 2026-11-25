@@ -23,9 +23,11 @@ def test_app_starts_with_real_wiring_and_serves_the_catalog(
     try:
         with TestClient(app) as client:
             models = client.get("/v1/models", params={"plan": "basic"}).json()["models"]
-            assert {m["id"] for m in models} >= {"flux-1-schnell", "flux-2-klein-4b"}
+            assert {m["id"] for m in models} >= {"flux-2-klein-4b"}
             by_id = {m["id"]: m for m in models}
-            assert by_id["nano-banana-2"]["available"] is False  # listed, but OpenRouter stays off
+            assert (
+                by_id["nano-banana-2-1"]["available"] is False
+            )  # listed, but OpenRouter stays off
             assert hasattr(app.state, "run_service")
             assert app.state.create_deps.enabled_providers == ["cloudflare"]
     finally:

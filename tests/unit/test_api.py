@@ -23,7 +23,13 @@ class StubService:
     def __init__(self) -> None:
         self.runs: dict[str, GenerationRequest] = {}
 
-    def start(self, run_id: str, user_id: str, request: GenerationRequest) -> None:
+    def start(
+        self,
+        run_id: str,
+        user_id: str,
+        request: GenerationRequest,
+        guard: dict[str, object] | None = None,
+    ) -> None:
         self.runs[run_id] = request
 
     def preflight(self, request: GenerationRequest) -> None:
