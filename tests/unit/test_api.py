@@ -26,6 +26,9 @@ class StubService:
     def start(self, run_id: str, user_id: str, request: GenerationRequest) -> None:
         self.runs[run_id] = request
 
+    def preflight(self, request: GenerationRequest) -> None:
+        return None
+
 
 STUB = StubService()
 

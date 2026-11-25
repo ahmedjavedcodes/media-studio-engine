@@ -24,7 +24,7 @@ from app.main import app
 from tests.unit.create_helpers import critic_ok, make_deps, make_service, missing, ready
 from tests.unit.test_create_review_fixes import or_args, or_reply
 
-OR = "https://openrouter.ai/api/v1/chat/completions"
+OR = "https://openrouter.ai/api/v1/images"
 
 
 def req(prompt: str = "iced coffee ad", **kw: Any) -> GenerationRequest:

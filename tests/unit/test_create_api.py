@@ -139,7 +139,14 @@ async def test_models_catalog_locks_by_plan(api) -> None:  # type: ignore[no-unt
     by_id = {m["id"]: m for m in basic}
     assert by_id["flux-1-schnell"]["locked"] is False
     assert by_id["phoenix-1"]["locked"] is True
-    assert "nano-banana-2" not in by_id  # hidden and OpenRouter is off
+    # The OpenRouter models the spec decided are listed, but as "coming soon" (OpenRouter is off)
+    for model_id in ("nano-banana-2", "gpt-image-2-5-flare", "seedream-5-flash", "qwen-image-3"):
+        assert by_id[model_id]["available"] is False
+    assert by_id["flux-1-schnell"]["available"] is True
+    assert by_id["nano-banana-2"]["family_label"] == "Google Nano Banana & Gemini"
+    avail = [m["available"] for m in basic]
+    assert avail == sorted(avail, reverse=True)  # usable models first, "coming soon" after
+    assert "openrouter" not in json.dumps(basic).lower()  # no provider names go out
     pro = {
         m["id"]: m
         for m in (await client.get("/v1/models", params={"plan": "pro"})).json()["models"]

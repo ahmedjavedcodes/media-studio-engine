@@ -66,7 +66,7 @@ def test_model_tier_is_computed_never_written() -> None:
     assert [p.name for p in card.providers_in(["b", "a"])] == ["a", "b"]  # cheapest first
 
 
-def test_registry_loads_with_live_cloudflare_models_and_a_hidden_paid_one() -> None:
+def test_registry_loads_with_live_cloudflare_models_and_testing_openrouter_ones() -> None:
     reg = load_registry()
     live = {c.id for c in reg.live(["cloudflare"])}
     assert {"flux-1-schnell", "flux-2-klein-4b", "flux-2-klein-9b", "phoenix-1"} <= live
@@ -174,7 +174,7 @@ async def test_a_manual_pick_is_strict(tmp_path: Path) -> None:
         ("phoenix-1", Plan.BASIC, 1, "1:1", "plan_limit"),  # tier too high for the plan
         ("flux-1-schnell", Plan.BASIC, 1, "16:9", "bad_input"),  # ratio not supported
         ("does-not-exist", Plan.MAX, 1, "1:1", "plan_limit"),
-        ("nano-banana-2", Plan.MAX, 1, "1:1", "plan_limit"),  # hidden, provider off
+        ("nano-banana-2", Plan.MAX, 1, "1:1", "plan_limit"),  # not live, provider off
     ]:
         svc = make_service(make_deps(tmp_path))
         svc.start(
@@ -205,3 +205,68 @@ async def test_2k_is_rejected_never_lowered_silently(tmp_path: Path) -> None:
         assert last.code == "plan_limit" and text in (last.message or "")
         assert deps.gateway._providers["cloudflare"].calls == []  # type: ignore[attr-defined]
         assert await deps.credits.balance("u") == 100
+
+
+def test_the_registry_has_every_model_the_spec_decided_in_its_tier() -> None:
+    """Spec section 6, the tier table. Names and tiers must match."""
+    spec = {
+        "basic": [
+            "Recraft V4.1 Flash",
+            "GPT Image 2.5 Flare",
+            "FLUX 3 Klein",
+            "FLUX.2 klein 4B",
+            "Muse Image",
+        ],
+        "pro": [
+            "Seedream 5.0 Flash",
+            "FLUX.2 Pro",
+            "Qwen Image 3",
+            "Nano Banana 2.1",
+            "Nano Banana 2 Lite",
+            "Recraft V4.1",
+            "Seedream 5.0 Lite",
+        ],
+        # FLUX.3 is in the spec's Pro list, but its real price ($0.048 at 1K) makes it Ultra
+        "ultra": [
+            "FLUX.2 Flex",
+            "Krea 2 Large",
+            "Nano Banana 2",
+            "FLUX.2 Max",
+            "Seedream 5.0 Pro",
+            "FLUX.3",
+        ],
+        "max": [
+            "Nano Banana Pro",
+            "GPT Image 2.5 Sunburst",
+            "Recraft V4.1 Pro",
+            "MAI-Image 2.5 Pro",
+            "Riverflow 2.5 Pro",
+        ],
+    }
+    reg = load_registry()
+    by_name = {c.name: c for c in reg.listed()}
+    for tier, names in spec.items():
+        for name in names:
+            assert name in by_name, name
+            assert by_name[name].tier.value == tier, (name, by_name[name].tier)
+
+
+def test_openrouter_models_cannot_run_while_openrouter_is_off() -> None:
+    reg = load_registry()
+    assert reg.live(["cloudflare"]) == [c for c in reg.live(["cloudflare"]) if c.status == "live"]
+    for c in reg.listed():
+        if c.status == "testing":
+            assert c not in reg.live(["cloudflare", "openrouter"])  # not live until a real run
+    # klein 4B is on both providers: Cloudflare first (cheaper), OpenRouter only as a fallback
+    klein = reg.get("flux-2-klein-4b")
+    assert klein is not None
+    assert [p.name for p in klein.providers_in(["cloudflare", "openrouter"])] == [
+        "cloudflare",
+        "openrouter",
+    ]
+    assert [p.name for p in klein.providers_in(["cloudflare"])] == ["cloudflare"]
+
+
+def test_every_family_has_a_label_and_a_guide() -> None:
+    for c in load_registry().all():
+        assert c.family_label and c.prompt_guide, c.id

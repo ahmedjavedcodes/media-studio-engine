@@ -329,12 +329,12 @@ async def test_the_paused_phase_is_closed_before_resume_continues(tmp_path: Path
 
 # ---- M3: the spend cap holds with parallel calls --------------------------------------------
 
-OR = "https://openrouter.ai/api/v1/chat/completions"
+OR = "https://openrouter.ai/api/v1/images"
 
 
 def or_reply(cost: float | None = 1.0) -> httpx.Response:
-    url = "data:image/png;base64," + base64.b64encode(b"PNG").decode()
-    body: dict[str, Any] = {"choices": [{"message": {"images": [{"image_url": {"url": url}}]}}]}
+    b64 = base64.b64encode(b"PNG").decode()
+    body: dict[str, Any] = {"data": [{"b64_json": b64, "media_type": "image/png"}]}
     if cost is not None:
         body["usage"] = {"cost": cost}
     return httpx.Response(200, json=body)

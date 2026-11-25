@@ -197,17 +197,14 @@ async def test_llm_sends_images_as_image_url_parts() -> None:
 
 # ---- OpenRouter (paid, off by default) -----------------------------------------------------
 
-OR = "https://openrouter.ai/api/v1/chat/completions"
+OR = "https://openrouter.ai/api/v1/images"
 
 
 def or_reply(cost: float = 0.07) -> httpx.Response:
-    url = "data:image/png;base64," + base64.b64encode(b"PNGDATA").decode()
+    b64 = base64.b64encode(b"PNGDATA").decode()
     return httpx.Response(
         200,
-        json={
-            "choices": [{"message": {"images": [{"image_url": {"url": url}}]}}],
-            "usage": {"cost": cost},
-        },
+        json={"data": [{"b64_json": b64, "media_type": "image/png"}], "usage": {"cost": cost}},
     )
 
 
@@ -231,9 +228,9 @@ async def test_openrouter_reads_the_image_and_records_billed_cost() -> None:
     assert out.data == b"PNGDATA" and out.cost_usd == 0.07
     assert guard.spent_usd == pytest.approx(0.07)
     body = json.loads(route.calls[0].request.content)
-    assert body["modalities"] == ["image", "text"]
-    assert body["image_config"] == {"aspect_ratio": "4:5", "image_size": "1K"}  # explicit size
-    assert body["seed"] == 3
+    assert body["model"] == "google/x" and body["response_format"] == "b64_json"
+    assert body["aspect_ratio"] == "4:5" and body["seed"] == 3  # an explicit size
+    assert "modalities" not in body and "input_references" not in body  # none attached
     await http.aclose()
 
 

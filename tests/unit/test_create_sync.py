@@ -39,9 +39,11 @@ async def test_sync_reports_new_models_and_never_trusts_the_input_image_price() 
     # reported and no cost is shown for the new model.
     assert report.price_changes == []
     assert report.new_models == [{"slug": "acme/new-image", "name": "New", "cost": None}]
-    assert report.missing == []
+    # every other OpenRouter model in the registry is not in this tiny fake catalogue
+    assert "nano-banana-2" not in report.missing  # it IS in the fake catalogue
+    assert "gpt-image-2-5-flare" in report.missing
     card = reg.get("nano-banana-2")
-    assert card is not None and card.status == "hidden"  # a sync never makes a model live
+    assert card is not None and card.status == "testing"  # a sync never makes a model live
 
 
 @respx.mock
@@ -49,4 +51,4 @@ async def test_models_gone_from_the_provider_are_reported() -> None:
     respx.get(f"{BASE}/models").mock(return_value=httpx.Response(200, json={"data": []}))
     async with httpx.AsyncClient() as client:
         report = await sync_openrouter(client, base_url=BASE, registry=load_registry())
-    assert report.missing == ["nano-banana-2"]
+    assert "nano-banana-2" in report.missing and "flux-2-klein-4b" in report.missing

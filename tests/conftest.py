@@ -10,3 +10,8 @@ import os
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGSMITH_API_KEY"] = ""
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
+# The OpenRouter adapter pauses a second before its one retry. Tests do not wait.
+from app.gateway.providers import openrouter_images  # noqa: E402
+
+openrouter_images.RETRY_PAUSE_S = 0.0

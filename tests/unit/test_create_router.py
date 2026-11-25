@@ -77,7 +77,7 @@ def test_router_never_picks_hidden_or_paid_models() -> None:
         card = pick_model(
             reg, plan=plan, category="people", aspect_ratio="1:1", enabled_providers=["cloudflare"]
         )
-        assert card.id != "nano-banana-2"  # hidden, and OpenRouter is off
+        assert card.id != "nano-banana-2"  # not live, and OpenRouter is off
 
 
 def test_no_model_for_the_ratio_is_a_plan_limit() -> None:
