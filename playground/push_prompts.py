@@ -1,9 +1,9 @@
-"""Push the enhancer and critic system prompts to LangSmith Hub with a version tag.
+"""Push the Art Director, Prompt Writer and critic system prompts to LangSmith Hub with a version tag.
 
     uv run python playground/push_prompts.py          # tags with dev (or prod when APP_ENV=prod)
 
 This WRITES to your LangSmith workspace, so run it yourself. The app pulls
-`media-enhancer:<tag>` and `media-critic:<tag>`, and falls back to prompts/create/txt2img/*.md
+`media-art-director:<tag>`, `media-prompt-writer:<tag>` and `media-critic:<tag>`, and falls back to prompts/create/txt2img/*.md
 when the Hub has nothing. Checked against the real Hub on 2026-11-25 (langsmith 0.16):
 pulling `<name>:<tag>` works. It tags the newest commit, and is safe to run again.
 """
@@ -19,7 +19,11 @@ from app.core.prompts import LOCAL_FILES
 def main() -> None:
     s = get_settings()
     client = Client(api_key=s.langsmith_api_key)
-    refs = {"enhancer": s.enhancer_prompt_ref, "critic": s.critic_prompt_ref}
+    refs = {
+        "art_director": s.art_director_prompt_ref,
+        "prompt_writer": s.writer_prompt_ref,
+        "critic": s.critic_prompt_ref,
+    }
     for name, path in LOCAL_FILES.items():
         text = (prompts_dir() / path).read_text("utf-8")
         # mustache keeps the single braces in the JSON examples from being read as variables

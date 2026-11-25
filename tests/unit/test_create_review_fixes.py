@@ -182,7 +182,7 @@ def assert_clean(event: Any) -> None:
 
 @pytest.mark.parametrize(
     "where",
-    ["enhancer_provider", "enhancer_format", "safety", "all_images", "settle_crash"],
+    ["enhancer_provider", "enhancer_format", "all_images", "settle_crash"],
 )
 async def test_failures_never_leak_internal_text(tmp_path: Path, where: str) -> None:
     kw: dict[str, Any] = {}
@@ -192,10 +192,6 @@ async def test_failures_never_leak_internal_text(tmp_path: Path, where: str) -> 
         ]
     elif where == "enhancer_format":
         kw["enhancer"] = [InvalidModelOutput("the model answered in the wrong format")]
-    elif where == "safety":
-        kw["vision"] = SeqVision(
-            [ProviderCallFailed("cloudflare reported failure", retryable=False)]
-        )
     provider = FakeProvider()
     if where == "all_images":
 
@@ -549,7 +545,7 @@ async def test_an_expired_run_drops_its_trace(tmp_path: Path) -> None:
 
 
 def test_enhancer_prompt_never_asks_about_a_settings_clash() -> None:
-    text = (prompts_dir() / "create" / "txt2img" / "enhancer.md").read_text()
+    text = (prompts_dir() / "create" / "txt2img" / "art_director.md").read_text()
     assert "do NOT ask" in text and "settings win" in text
     assert "or which of two clashing" not in text
     spec = (
@@ -585,8 +581,14 @@ def test_clean_ui_text_caps_the_length() -> None:
 
 
 def test_questions_with_a_model_name_are_dropped_and_options_cleaned() -> None:
-    from app.agents.image_grand.workers.brief import EnhancerOutput, Option, Question
-    from app.agents.image_grand.workers.prompt_enhancer import check_output
+    from app.agents.image_grand.workers.art_director import finalize
+    from app.agents.image_grand.workers.shot_plan import Option, Question, ShotPlan
+    from app.gateway.looks import get_looks
+
+    def check_output(out, *, prompt, allow_questions):  # type: ignore[no-untyped-def]
+        return finalize(
+            out, prompt=prompt, allow_questions=allow_questions, looks=get_looks(), fixed_look=None
+        )
 
     def q(text: str, labels: list[str]) -> Question:
         opts = [Option(id=x, label=lab) for x, lab in zip("abc", labels, strict=False)]
@@ -595,19 +597,17 @@ def test_questions_with_a_model_name_are_dropped_and_options_cleaned() -> None:
         )
 
     bad = check_output(
-        EnhancerOutput(status="missing", questions=[q("Use FLUX?", ["a", "b", "c"])]),
+        ShotPlan(missing=[q("Use FLUX?", ["a", "b", "c"])]),
         prompt="p",
         allow_questions=True,
     )
-    assert bad.status == "ready"  # the only question was dropped, so the run goes on
+    assert not bad.missing  # the only question was dropped, so the run goes on
     good = check_output(
-        EnhancerOutput(
-            status="missing", questions=[q("What?", ["A cat", "See http://x.io", "A dog"])]
-        ),
+        ShotPlan(missing=[q("What?", ["A cat", "See http://x.io", "A dog"])]),
         prompt="p",
         allow_questions=True,
     )
-    assert [o.label for o in good.questions[0].options] == ["A cat", "A dog", "Something else"]
+    assert [o.label for o in good.missing[0].options] == ["A cat", "A dog", "Something else"]
 
 
 async def test_the_critic_highlight_is_cleaned(tmp_path: Path) -> None:

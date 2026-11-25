@@ -19,6 +19,9 @@ Status = Literal["hidden", "testing", "live", "down"]
 ALL_RATIOS = ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
 
 
+TEXT_SKILLS = ("typography", "dense_text")  # a model that can be trusted with text in the image
+
+
 class ProviderEntry(BaseModel):
     name: str
     slug: str
@@ -63,10 +66,34 @@ class ModelCard(BaseModel):
     prompt_style: Literal["keywords", "sentences"] = "keywords"  # for COMPILE_MODE=code
     best_for: list[str] = Field(default_factory=list)  # router categories this model suits
     size_multiple: int = 32  # sides must be a multiple of this
+    # The pixel sizes the model really makes ("WxH"). The code guard snaps to the nearest one for
+    # the ratio. Empty = any size that is a multiple of `size_multiple`.
+    native_sizes: list[str] = Field(default_factory=list)
+    # Optional parameters the model really takes. A parameter is sent ONLY when it is listed here
+    # AND has a value in `params`. (OpenRouter documents no negative prompt, style, guidance or
+    # steps at top level, so the curated models list none of them.)
+    supported_params: list[str] = Field(default_factory=list)  # guidance, steps, style
+    params: dict[str, float | int | str] = Field(default_factory=dict)
+    # Quality by plan for models with a quality knob (GPT Image): low on Basic, medium on Pro and
+    # up. "high" is used only when a Max user PICKS the model by hand, never from Auto.
+    quality_by_plan: dict[str, str] = Field(default_factory=dict)
+    # Estimated USD per image at a quality other than the card's default (spend guard reserve).
+    cost_by_quality: dict[str, float] = Field(default_factory=dict)
 
     @property
     def cost_per_image(self) -> float:
         return min(p.cost for p in self.providers)
+
+    @property
+    def handles_text(self) -> bool:
+        """True when the model is trusted with text in the image (typography or dense_text)."""
+        return any(c in self.capabilities for c in TEXT_SKILLS)
+
+    def cost_for(self, entry: ProviderEntry, quality: str | None) -> float:
+        """USD estimate for one image from `entry` at `quality`."""
+        if quality is not None and quality != self.quality:
+            return self.cost_by_quality.get(quality, entry.cost)
+        return entry.cost
 
     @model_validator(mode="after")
     def _derive(self) -> "ModelCard":
@@ -82,9 +109,21 @@ class ModelCard(BaseModel):
 
 
 class Registry:
-    def __init__(self, cards: list[ModelCard], *, run_testing: bool = False) -> None:
+    def __init__(
+        self,
+        cards: list[ModelCard],
+        *,
+        run_testing: bool = False,
+        auto_rank: dict[str, dict[str, list[str]]] | None = None,
+    ) -> None:
         self._cards = {c.id: c for c in cards}
         self._runnable = ("live", "testing") if run_testing else ("live",)
+        # {category: {plan: [model ids, best first]}}, written by playground/eval.py
+        self.auto_rank = auto_rank or {}
+
+    def ranked(self, category: str, plan: Plan) -> list[str]:
+        """Model ids the eval found best for this category and plan, best first. May be empty."""
+        return list(self.auto_rank.get(category, {}).get(plan.value, []))
 
     def all(self) -> list[ModelCard]:
         return list(self._cards.values())
@@ -131,7 +170,14 @@ def load_registry(path: Path | None = None, *, run_testing: bool = False) -> Reg
             **item,  # a model can override the family values
         }
         cards.append(ModelCard.model_validate(merged))
-    return Registry(cards, run_testing=run_testing)
+    auto_rank = data.get("auto_rank") or {}
+    known = {c.id for c in cards}
+    for by_plan in auto_rank.values():  # a stale id in the rank must fail loudly, not route
+        for ids in by_plan.values():
+            for model_id in ids:
+                if model_id not in known:
+                    raise BadInput(f"models.yaml: auto_rank names unknown model {model_id!r}")
+    return Registry(cards, run_testing=run_testing, auto_rank=auto_rank)
 
 
 @lru_cache

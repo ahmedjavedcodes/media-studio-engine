@@ -23,3 +23,5 @@ outputs/
 
 # macOS
 .DS_Store
+.plans.sqlite*
+evals/results/

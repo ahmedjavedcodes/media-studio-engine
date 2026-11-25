@@ -17,6 +17,9 @@ class ImageSettings(BaseModel):
     brand_colors: list[str] = Field(default_factory=list, max_length=5)  # "#RRGGBB" (Recraft)
     transparent_bg: bool = False  # needs a model with the transparent_bg capability
     draft: bool = False  # fast, low-credit mode: the router picks the cheapest model
+    # A look id from gateway/looks.yaml, or `auto` (the Art Director picks the look for the prompt).
+    # The id is checked in the code checks, where the preset list is known.
+    preset: str = "auto"
 
     @field_validator("brand_colors")
     @classmethod
@@ -32,6 +35,9 @@ class GenerationRequest(BaseModel):
     # Uploaded images as base64 (a `data:image/...;base64,` prefix is allowed).
     images: list[str] = Field(default_factory=list)
     plan: Plan = Plan.BASIC  # picked by hand in the UI during the build phase
+    # Project memory (a hook): a project reuses the look, palette and props of its first
+    # approved plan.
+    project_id: str | None = Field(default=None, max_length=64)
     settings: ImageSettings = Field(default_factory=ImageSettings)
 
 

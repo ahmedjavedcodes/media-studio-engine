@@ -12,45 +12,71 @@
 # of its system prompt. `style` is used by COMPILE_MODE=code. 5-8 lines each.
 families:
   gpt_image:
+    # Source: https://developers.openai.com/api/docs/guides/image-generation and the images API
+    # reference (https://developers.openai.com/api/reference/resources/images). OpenAI publishes no
+    # separate prompting guide for GPT Image; its examples quote labels in single quotes, start
+    # "Generate a photorealistic image of ...", and for edits "describe the change and what to
+    # keep". No negative prompt, guidance, steps, style or seed exists on these models.
     label: OpenAI GPT Image
     style: sentences
     max_words: 40
     prompt_guide: |
-      Write 2 or 3 vivid sentences. Cover the subject, the light, the camera framing and the material textures.
-      Name the subject first, then the setting. Say the shot in words ("a low-angle close-up").
-      Put any text that must appear in "double quotes", and say where it sits.
-      Be literal and concrete. One clear scene, no keyword lists.
+      Write 2 or 3 vivid sentences. Start with the medium and the subject ("A photorealistic close-up of ...").
+      Then the setting, the light, the camera framing and the material textures, in that order.
+      Say the shot in words ("a low-angle close-up on a 50mm lens").
+      Put any text that must appear in "double quotes" and say where it sits. Say it once, spelled exactly.
+      Be literal and concrete: one clear scene, no keyword lists, no negative phrases (describe what IS there).
       Avoid: stacked adjectives, vague mood words, brand or artist names.
   gemini:
+    # Source: https://ai.google.dev/gemini-api/docs/image-generation (served at
+    # aistudio.google.com/docs/image-generation). Google's template: "A photorealistic [shot type]
+    # of [subject] in [setting]. [Light]. Shot from [angle] with [lens]." Describe the scene in
+    # rich sentences; ask for what IS there ("an empty street" not "no cars"). No negative prompt,
+    # seed, guidance, steps or style parameter exists.
     label: Google Nano Banana & Gemini
     style: sentences
     max_words: 50
     prompt_guide: |
-      Write a short descriptive paragraph in natural sentences, like a photo caption.
-      Cover who or what is in the scene, the setting, the light, the camera framing and the textures.
-      Say the shot and the light in words ("a close-up portrait in warm window light").
-      State the mood through visible things, not abstract words.
-      Avoid: keyword lists, tag soup, negative phrases like "no blur".
+      Write a descriptive paragraph in natural sentences, in this order:
+      "A photorealistic [shot type] of [subject] in [setting]. [The light]. Shot from [angle] with [lens]."
+      Then add the textures and one sharp-focus detail ("sharp focus on the cap's gold edge").
+      Use photographic and camera language to control the composition (close-up, low angle, 85mm, shallow depth of field).
+      Say what IS there, never what is not ("an empty street", not "no cars").
+      For a product shot name the lighting set-up and keep generous empty space if text will be added later.
+      Avoid: keyword lists, tag soup, negative phrases.
   flux:
+    # Source: https://docs.bfl.ml/guides/prompting_unified_basics.md, prompting_unified_style.md,
+    # prompting_unified_reference.md (FLUX.2 section), usecases_t2i_hex_color_prompting.md. BFL:
+    # front-load what matters, "Write in prose, not keyword lists" (klein), quote exact text and
+    # say where it goes, keep text short, tie each hex colour to an object, one or two effects at
+    # most, no quality filler, no negative prompts. klein has no prompt upsampling: what you write
+    # is exactly what the model receives.
     label: FLUX
-    style: keywords
+    style: sentences
     max_words: 60
     prompt_guide: |
-      Write comma-separated visual phrases. The most important thing goes first.
-      Order: subject, action, setting, lighting, camera or lens, style.
-      Use concrete words ("shallow depth of field, 85mm", "rim light from the left").
-      Keep it under the word limit. Do not repeat the same idea twice.
-      Avoid: negative prompts and "no ..." phrases, quality spam like "masterpiece, 8k".
+      Write flowing prose, not keyword lists. Put the most important thing first.
+      Order: subject, setting, style, camera and lens, lighting, colors, then one or two extra effects at most.
+      Use real camera words ("85mm lens at f/2, shallow depth of field", "golden hour", "backlit rim light").
+      Tie each color to one object ("the cap is deep teal"). Use a hex code only if the user gave one.
+      Put any text that must appear in "double quotes", short, and say where it sits.
+      Avoid: negative prompts and "no ..." phrases, quality spam like "masterpiece, 8k, highly detailed".
   seedream:
+    # Source: https://openrouter.ai/bytedance-seed/seedream-5-0-flash (parameters) and
+    # https://seed.bytedance.com/en/seedream5_5 (example prompts). ByteDance publishes no formula:
+    # its examples run subject and setting first, then camera and style, in 30 to 70 words; text
+    # is quoted with its placement; exclusions are written in prose ("a quiet street with no
+    # people"). OpenRouter lists no negative prompt, guidance, steps or watermark for it.
     label: ByteDance Seedream
     style: keywords
     max_words: 60
     prompt_guide: |
-      Write one clear sentence or a short run of phrases, subject first.
-      Add the setting, the light, the camera framing and the material textures in plain words.
-      Works well for products, food and clean commercial scenes.
-      Keep each detail concrete and visible.
-      Avoid: abstract mood words, long stories, negative phrases.
+      Write one or two clear sentences, subject and setting first, then camera, light and style.
+      Name the material textures in plain words (brushed gold, frosted glass, wet stone).
+      Works well for products, food and clean commercial scenes. Aim for 30 to 70 words.
+      Put any text that must appear in "double quotes" and say where it sits and that it is the only text.
+      Write exclusions as a plain fact ("a quiet street with no people"), not as a negative list.
+      Avoid: abstract mood words, long stories.
   qwen:
     label: Qwen
     style: keywords
@@ -61,15 +87,22 @@ families:
       Good at text in images and posters. Keep the text short.
       Avoid: long sentences, many competing subjects, vague words.
   recraft:
+    # Source: https://www.recraft.ai/docs/prompt-engineering-guide/prompting-with-recraft-v4.md.
+    # Recraft: structure "global to local" (earlier elements weigh more), quote all text and
+    # describe the typographic system, vector work needs graphic type + shape logic + a strict
+    # colour system + line discipline and "Avoid texture or material-focused language", and
+    # "Avoid stacking dramatic or evaluative adjectives". V4 takes up to 10,000 characters but no
+    # negative prompt or curated style; colours go in as brand colors (a separate option).
     label: Recraft Design & Vector
     style: keywords
-    max_words: 30
+    max_words: 50
     prompt_guide: |
-      Design models. Keep the exact display copy in "double quotes" and say where it sits.
-      Describe the layout and the typography placement: headline, subtitle, margins, alignment.
-      Name the look directly: "flat vector", "brand colors navy and orange", "poster", "packaging".
-      Keep it short. Do NOT use photographic lens jargon (no mm, f-stops or bokeh).
-      Avoid: long scenes, negative phrases, brand names.
+      Write from global to local: the format and the main subject first, then background, framing, secondary items, light.
+      Name the graphic type directly: "flat vector icon", "poster", "packaging", "editorial illustration".
+      Give a strict colour system (2 to 4 named colours) and say line weight and shapes for vector work.
+      Put every word that must appear in "double quotes" and describe the type: headline size, place, hierarchy, alignment.
+      For vector output use shape and colour words only. Do NOT use lens jargon, texture or material words.
+      Avoid: stacked dramatic adjectives, negative phrases, brand names.
   ideogram:
     label: Ideogram
     style: sentences
@@ -287,6 +320,11 @@ models:
     max_refs: 16
     quality: low
     supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    size_multiple: 16   # custom sizes: both sides a multiple of 16, ratio up to 3:1 (OpenAI images API)
+    # Quality by plan: low on Basic, medium on Pro and up. The medium price is an ESTIMATE until a
+    # real run reports usage.cost; the spend guard records the billed cost either way.
+    quality_by_plan: {basic: low, pro: medium, ultra: medium, max: medium}
+    cost_by_quality: {medium: 0.03}
     providers:
       - { name: openrouter, slug: openai/gpt-image-2.5-flare, cost: 0.006 }
 
@@ -303,6 +341,11 @@ models:
     max_refs: 16
     quality: high
     supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    size_multiple: 16
+    # High only when a Max user picks Sunburst by hand. Auto uses medium. The medium and low
+    # prices are ESTIMATES until a real run reports usage.cost.
+    quality_by_plan: {basic: low, pro: medium, ultra: medium, max: high}
+    cost_by_quality: {medium: 0.04, low: 0.01}
     providers:
       - { name: openrouter, slug: openai/gpt-image-2.5-sunburst, cost: 0.125 }
 
@@ -396,6 +439,8 @@ models:
     endpoint: chat
     resolutions: [1K, 2K, 4K]
     supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    # Gemini 1K output sizes (https://ai.google.dev/gemini-api/docs/image-generation, Nano Banana Pro table)
+    native_sizes: ["1024x1024", "848x1264", "1264x848", "896x1200", "1200x896", "928x1152", "1152x928", "768x1376", "1376x768", "1584x672"]
     providers:
       - { name: openrouter, slug: google/gemini-nano-banana-2.1, cost: 0.0336 }
 
@@ -414,6 +459,8 @@ models:
     resolutions: [1K, 2K, 4K]
     resolution_multipliers: {4K: 2.0}   # assumption: 4K is about 2x the tokens
     supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    # Gemini 1K output sizes (https://ai.google.dev/gemini-api/docs/image-generation, Nano Banana Pro table)
+    native_sizes: ["1024x1024", "848x1264", "1264x848", "896x1200", "1200x896", "928x1152", "1152x928", "768x1376", "1376x768", "1584x672"]
     providers:
       - { name: openrouter, slug: google/gemini-3-pro-image, cost: 0.1344 }
 
@@ -507,6 +554,8 @@ models:
     capabilities: [t2i, fast]
     max_refs: 0
     supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    # Recraft V4 1K sizes (https://www.recraft.ai/docs/api-reference/appendix.md). Any other WxH is rejected.
+    native_sizes: ["1024x1024", "1536x768", "768x1536", "1280x832", "832x1280", "1216x896", "896x1216", "1152x896", "896x1152", "1344x768", "768x1344"]
     providers:
       - { name: openrouter, slug: recraft/recraft-v4.1-flash, cost: 0.007 }
 
@@ -535,6 +584,8 @@ models:
     credits: 4
     max_refs: 1
     supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    # Recraft V4 1K sizes (https://www.recraft.ai/docs/api-reference/appendix.md). Any other WxH is rejected.
+    native_sizes: ["1024x1024", "1536x768", "768x1536", "1280x832", "832x1280", "1216x896", "896x1216", "1152x896", "896x1152", "1344x768", "768x1344"]
     providers:
       - { name: openrouter, slug: recraft/recraft-v4.1, cost: 0.035 }
 
@@ -564,6 +615,8 @@ models:
     max_refs: 1
     output_format: svg
     supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    # Recraft V4 1K sizes (https://www.recraft.ai/docs/api-reference/appendix.md). Any other WxH is rejected.
+    native_sizes: ["1024x1024", "1536x768", "768x1536", "1280x832", "832x1280", "1216x896", "896x1216", "1152x896", "896x1152", "1344x768", "768x1344"]
     providers:
       - { name: openrouter, slug: recraft/recraft-v4.1-vector, cost: 0.08 }
 
@@ -591,6 +644,8 @@ models:
     capabilities: [t2i, i2i, typography]
     max_refs: 1
     supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    # Recraft V4 Pro makes 2K images (https://www.recraft.ai/docs/api-reference/appendix.md)
+    native_sizes: ["2048x2048", "3072x1536", "1536x3072", "2560x1664", "1664x2560", "2432x1792", "1792x2432", "2304x1792", "1792x2304", "2688x1536", "1536x2688"]
     providers:
       - { name: openrouter, slug: recraft/recraft-v4.1-pro, cost: 0.21 }
 

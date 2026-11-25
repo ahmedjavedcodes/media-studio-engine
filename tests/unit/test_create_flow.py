@@ -221,7 +221,7 @@ async def test_seed_differs_per_image_and_is_sent_when_supported(tmp_path: Path)
     seeds = [c["seed"] for c in provider.calls]
     assert len(set(seeds)) == 2 and None not in seeds
     prompts = {c["prompt"] for c in provider.calls}
-    assert len(prompts) == 1  # one final prompt for every variation
+    assert len(prompts) == 2  # each image has its own prompt (one variation axis each)
 
 
 async def test_interrupt_and_resume_work_with_the_real_sqlite_checkpointer(tmp_path: Path) -> None:

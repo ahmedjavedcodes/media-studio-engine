@@ -20,7 +20,8 @@ from tests.unit.create_helpers import (
 STEPS = {
     "code_checks",
     "router",
-    "enhancer",
+    "art_director",
+    "prompt_writer",
     "interrupt",
     "code_guard",
     "generate",
@@ -120,8 +121,8 @@ async def test_traces_hold_ids_and_urls_never_image_bytes(tmp_path: Path) -> Non
 async def test_prompt_versions_are_recorded_in_the_trace_metadata(tmp_path: Path) -> None:
     client = RecordingClient()
     await full_run(tmp_path, client, n=1)
-    enhancer_span = by_name(client)["enhancer"][-1]
-    assert enhancer_span["extra"]["metadata"]["enhancer_prompt_version"].startswith("local-")
+    enhancer_span = by_name(client)["art_director"][-1]
+    assert enhancer_span["extra"]["metadata"]["art_director_prompt_version"].startswith("local-")
     critic_span = by_name(client)["critic"][0]
     assert critic_span["extra"]["metadata"]["critic_prompt_version"].startswith("local-")
 
@@ -173,9 +174,9 @@ async def test_prompts_are_pulled_from_the_hub_with_a_version_tag() -> None:
     client = _HubClient()
     store = PromptStore(source="hub", tag="dev", client_factory=lambda: client)  # type: ignore[arg-type,return-value]
     await store.load()
-    assert client.refs == ["media-enhancer:dev", "media-critic:dev"]
-    assert store.get("enhancer").text == "HUB TEXT"
-    assert store.get("enhancer").version == "dev@abcdef12"
+    assert client.refs == ["media-art-director:dev", "media-prompt-writer:dev", "media-critic:dev"]
+    assert store.get("art_director").text == "HUB TEXT"
+    assert store.get("art_director").version == "dev@abcdef12"
 
 
 async def test_hub_failure_falls_back_to_the_local_file() -> None:

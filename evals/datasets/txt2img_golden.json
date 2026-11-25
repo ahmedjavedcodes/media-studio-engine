@@ -1,0 +1,486 @@
+{
+ "name": "txt2img-golden",
+ "description": "60 golden prompts for the txt2img eval across eight subject types (product, person, animal, place, food, fantasy, poster, abstract), with Roman Urdu and Urdu prompts mixed in. `category` is the router's code classification (used by auto_rank).",
+ "examples": [
+  {
+   "id": "product-01",
+   "subject_type": "product",
+   "category": "product",
+   "lang": "en",
+   "prompt": "a glass bottle of olive oil on a kitchen counter",
+   "human_rating": null
+  },
+  {
+   "id": "product-02",
+   "subject_type": "product",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a leather wallet on a wooden desk",
+   "human_rating": null
+  },
+  {
+   "id": "product-03",
+   "subject_type": "product",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a pair of hiking shoes on a rocky trail",
+   "human_rating": null
+  },
+  {
+   "id": "product-04",
+   "subject_type": "product",
+   "category": "product",
+   "lang": "en",
+   "prompt": "a phone on a stack of books, product ad",
+   "human_rating": null
+  },
+  {
+   "id": "product-05",
+   "subject_type": "product",
+   "category": "product",
+   "lang": "en",
+   "prompt": "a jar of strawberry jam with a wooden spoon",
+   "human_rating": null
+  },
+  {
+   "id": "product-06",
+   "subject_type": "product",
+   "category": "product",
+   "lang": "roman_ur",
+   "prompt": "chai ka cup lakdi ki mez par, advert photo",
+   "human_rating": null
+  },
+  {
+   "id": "product-07",
+   "subject_type": "product",
+   "category": "general",
+   "lang": "roman_ur",
+   "prompt": "ek watch makhmal ke kapray par",
+   "human_rating": null
+  },
+  {
+   "id": "product-08",
+   "subject_type": "product",
+   "category": "product",
+   "lang": "ur",
+   "prompt": "لکڑی کی میز پر ایک بوتل",
+   "human_rating": null
+  },
+  {
+   "id": "person-01",
+   "subject_type": "person",
+   "category": "people",
+   "lang": "en",
+   "prompt": "portrait of an old woman with silver hair by a window",
+   "human_rating": null
+  },
+  {
+   "id": "person-02",
+   "subject_type": "person",
+   "category": "photo",
+   "lang": "en",
+   "prompt": "a farmer walking through a wheat field at sunset",
+   "human_rating": null
+  },
+  {
+   "id": "person-03",
+   "subject_type": "person",
+   "category": "people",
+   "lang": "en",
+   "prompt": "a girl painting a mural on a city wall",
+   "human_rating": null
+  },
+  {
+   "id": "person-04",
+   "subject_type": "person",
+   "category": "people",
+   "lang": "en",
+   "prompt": "a boy sitting on a train platform with a backpack",
+   "human_rating": null
+  },
+  {
+   "id": "person-05",
+   "subject_type": "person",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a chef holding a knife in a quiet kitchen",
+   "human_rating": null
+  },
+  {
+   "id": "person-06",
+   "subject_type": "person",
+   "category": "people",
+   "lang": "roman_ur",
+   "prompt": "ek ladka cricket khel raha hai gali mein",
+   "human_rating": null
+  },
+  {
+   "id": "person-07",
+   "subject_type": "person",
+   "category": "people",
+   "lang": "roman_ur",
+   "prompt": "ek buzurg aadmi chai peete hue",
+   "human_rating": null
+  },
+  {
+   "id": "person-08",
+   "subject_type": "person",
+   "category": "people",
+   "lang": "ur",
+   "prompt": "ایک بچی پتنگ اڑا رہی ہے",
+   "human_rating": null
+  },
+  {
+   "id": "animal-01",
+   "subject_type": "animal",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a wolf howling on a snowy ridge",
+   "human_rating": null
+  },
+  {
+   "id": "animal-02",
+   "subject_type": "animal",
+   "category": "photo",
+   "lang": "en",
+   "prompt": "a horse running along a beach at dawn",
+   "human_rating": null
+  },
+  {
+   "id": "animal-03",
+   "subject_type": "animal",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a sleeping dog in a patch of sunlight on a wooden floor",
+   "human_rating": null
+  },
+  {
+   "id": "animal-04",
+   "subject_type": "animal",
+   "category": "general",
+   "lang": "en",
+   "prompt": "an owl perched on a mossy branch at night",
+   "human_rating": null
+  },
+  {
+   "id": "animal-05",
+   "subject_type": "animal",
+   "category": "general",
+   "lang": "en",
+   "prompt": "two rabbits in a field of wildflowers",
+   "human_rating": null
+  },
+  {
+   "id": "animal-06",
+   "subject_type": "animal",
+   "category": "general",
+   "lang": "roman_ur",
+   "prompt": "ek billi dhoop mein baithi hui hai",
+   "human_rating": null
+  },
+  {
+   "id": "animal-07",
+   "subject_type": "animal",
+   "category": "general",
+   "lang": "roman_ur",
+   "prompt": "ek billi barish mein khidki ke saath",
+   "human_rating": null
+  },
+  {
+   "id": "animal-08",
+   "subject_type": "animal",
+   "category": "general",
+   "lang": "ur",
+   "prompt": "ایک شیر گھاس میں بیٹھا ہے",
+   "human_rating": null
+  },
+  {
+   "id": "place-01",
+   "subject_type": "place",
+   "category": "photo",
+   "lang": "en",
+   "prompt": "a foggy pine forest at dawn",
+   "human_rating": null
+  },
+  {
+   "id": "place-02",
+   "subject_type": "place",
+   "category": "photo",
+   "lang": "en",
+   "prompt": "a desert with tall dunes under a starry sky",
+   "human_rating": null
+  },
+  {
+   "id": "place-03",
+   "subject_type": "place",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a small harbour town with colourful houses",
+   "human_rating": null
+  },
+  {
+   "id": "place-04",
+   "subject_type": "place",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a river winding through a green valley",
+   "human_rating": null
+  },
+  {
+   "id": "place-05",
+   "subject_type": "place",
+   "category": "photo",
+   "lang": "en",
+   "prompt": "a quiet snowy mountain village",
+   "human_rating": null
+  },
+  {
+   "id": "place-06",
+   "subject_type": "place",
+   "category": "photo",
+   "lang": "roman_ur",
+   "prompt": "pahar ke upar badlon mein doobi subah",
+   "human_rating": null
+  },
+  {
+   "id": "place-07",
+   "subject_type": "place",
+   "category": "photo",
+   "lang": "roman_ur",
+   "prompt": "samandar ke kinare ek purana qila",
+   "human_rating": null
+  },
+  {
+   "id": "place-08",
+   "subject_type": "place",
+   "category": "photo",
+   "lang": "ur",
+   "prompt": "برف سے ڈھکی پہاڑوں کی وادی",
+   "human_rating": null
+  },
+  {
+   "id": "food-01",
+   "subject_type": "food",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a plate of sushi on a slate board",
+   "human_rating": null
+  },
+  {
+   "id": "food-02",
+   "subject_type": "food",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a stack of pancakes with berries for breakfast",
+   "human_rating": null
+  },
+  {
+   "id": "food-03",
+   "subject_type": "food",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a steaming bowl of tomato soup with bread",
+   "human_rating": null
+  },
+  {
+   "id": "food-04",
+   "subject_type": "food",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a colourful salad in a wooden bowl",
+   "human_rating": null
+  },
+  {
+   "id": "food-05",
+   "subject_type": "food",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a cheeseburger with fries on a tray",
+   "human_rating": null
+  },
+  {
+   "id": "food-06",
+   "subject_type": "food",
+   "category": "general",
+   "lang": "roman_ur",
+   "prompt": "garam biryani ki plate, dhuan uthta hua",
+   "human_rating": null
+  },
+  {
+   "id": "food-07",
+   "subject_type": "food",
+   "category": "general",
+   "lang": "ur",
+   "prompt": "ایک پلیٹ میں بریانی",
+   "human_rating": null
+  },
+  {
+   "id": "fantasy-01",
+   "subject_type": "fantasy",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a fairy village inside a giant mushroom",
+   "human_rating": null
+  },
+  {
+   "id": "fantasy-02",
+   "subject_type": "fantasy",
+   "category": "photo",
+   "lang": "en",
+   "prompt": "an alien city under two moons",
+   "human_rating": null
+  },
+  {
+   "id": "fantasy-03",
+   "subject_type": "fantasy",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a unicorn drinking from a glowing pond",
+   "human_rating": null
+  },
+  {
+   "id": "fantasy-04",
+   "subject_type": "fantasy",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a spaceship landing on a red desert planet",
+   "human_rating": null
+  },
+  {
+   "id": "fantasy-05",
+   "subject_type": "fantasy",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a wizard reading a spellbook in a candlelit library",
+   "human_rating": null
+  },
+  {
+   "id": "fantasy-06",
+   "subject_type": "fantasy",
+   "category": "general",
+   "lang": "roman_ur",
+   "prompt": "ek jadui qila badlon ke upar",
+   "human_rating": null
+  },
+  {
+   "id": "fantasy-07",
+   "subject_type": "fantasy",
+   "category": "general",
+   "lang": "ur",
+   "prompt": "ایک جادو کا قلعہ",
+   "human_rating": null
+  },
+  {
+   "id": "poster-01",
+   "subject_type": "poster",
+   "category": "text_in_image",
+   "lang": "en",
+   "prompt": "a film festival poster titled \"MIDNIGHT SUN\"",
+   "human_rating": null
+  },
+  {
+   "id": "poster-02",
+   "subject_type": "poster",
+   "category": "text_in_image",
+   "lang": "en",
+   "prompt": "a yoga studio flyer with the headline \"BREATHE\"",
+   "human_rating": null
+  },
+  {
+   "id": "poster-03",
+   "subject_type": "poster",
+   "category": "text_in_image",
+   "lang": "en",
+   "prompt": "a grand opening banner that says \"NOW OPEN\"",
+   "human_rating": null
+  },
+  {
+   "id": "poster-04",
+   "subject_type": "poster",
+   "category": "text_in_image",
+   "lang": "en",
+   "prompt": "a music concert poster with the words \"LIVE TONIGHT\"",
+   "human_rating": null
+  },
+  {
+   "id": "poster-05",
+   "subject_type": "poster",
+   "category": "text_in_image",
+   "lang": "en",
+   "prompt": "a bakery logo with the name \"SWEET CRUMB\"",
+   "human_rating": null
+  },
+  {
+   "id": "poster-06",
+   "subject_type": "poster",
+   "category": "text_in_image",
+   "lang": "roman_ur",
+   "prompt": "poster par \"EID SALE\" likha ho",
+   "human_rating": null
+  },
+  {
+   "id": "poster-07",
+   "subject_type": "poster",
+   "category": "text_in_image",
+   "lang": "ur",
+   "prompt": "پوسٹر پر \"خوش آمدید\" لکھا ہو",
+   "human_rating": null
+  },
+  {
+   "id": "abstract-01",
+   "subject_type": "abstract",
+   "category": "general",
+   "lang": "en",
+   "prompt": "an abstract swirl of orange and purple ink",
+   "human_rating": null
+  },
+  {
+   "id": "abstract-02",
+   "subject_type": "abstract",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a gradient wallpaper from deep blue to pink",
+   "human_rating": null
+  },
+  {
+   "id": "abstract-03",
+   "subject_type": "abstract",
+   "category": "design",
+   "lang": "en",
+   "prompt": "a geometric pattern of overlapping circles",
+   "human_rating": null
+  },
+  {
+   "id": "abstract-04",
+   "subject_type": "abstract",
+   "category": "general",
+   "lang": "en",
+   "prompt": "a fractal made of golden spirals",
+   "human_rating": null
+  },
+  {
+   "id": "abstract-05",
+   "subject_type": "abstract",
+   "category": "general",
+   "lang": "en",
+   "prompt": "marble texture with gold veins",
+   "human_rating": null
+  },
+  {
+   "id": "abstract-06",
+   "subject_type": "abstract",
+   "category": "design",
+   "lang": "roman_ur",
+   "prompt": "abstract pattern rangon ka ghuma hua",
+   "human_rating": null
+  },
+  {
+   "id": "abstract-07",
+   "subject_type": "abstract",
+   "category": "general",
+   "lang": "ur",
+   "prompt": "نیلے رنگوں کا ایک پیٹرن",
+   "human_rating": null
+  }
+ ]
+}

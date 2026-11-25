@@ -30,3 +30,27 @@ def dimensions(aspect_ratio: str, resolution: str = "1K", multiple: int = 32) ->
         return max(multiple, round(v / multiple) * multiple)
 
     return snap(width), snap(height)
+
+
+def snap_native(
+    sizes: list[str], aspect_ratio: str, resolution: str = "1K"
+) -> tuple[int, int] | None:
+    """The model's own size that is nearest to the requested ratio (None when it lists none).
+
+    Nearest means the smallest gap between the two ratios, compared as logarithms so 2:1 vs 3:1
+    and 1:2 vs 1:3 weigh the same. A tie goes to the size whose area is closest to the target.
+    """
+    parsed: list[tuple[int, int]] = []
+    for item in sizes:
+        w, _, h = item.lower().partition("x")
+        if w.isdigit() and h.isdigit() and int(w) > 0 and int(h) > 0:
+            parsed.append((int(w), int(h)))
+    if not parsed:
+        return None
+    a, b = parse_ratio(aspect_ratio)
+    want = math.log(a / b)
+    area = _AREA.get(resolution, _AREA["1K"])
+    return min(
+        parsed,
+        key=lambda wh: (round(abs(math.log(wh[0] / wh[1]) - want), 6), abs(wh[0] * wh[1] - area)),
+    )

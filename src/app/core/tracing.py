@@ -48,6 +48,8 @@ KINDS = {
     "code_checks": "check",
     "router": "router",
     "enhancer": "llm",
+    "art_director": "llm",
+    "prompt_writer": "llm",
     "interrupt": "wait",
     "code_guard": "check",
     "generate": "generate",
@@ -269,6 +271,7 @@ def _totals(spans: list[dict[str, Any]], duration_ms: int) -> dict[str, Any]:
     images_usd = 0.0
     images_estimated = False
     neurons = 0.0
+    llm_direct_usd = 0.0  # LLM calls billed per token (Groq), not in neurons
     tokens = {"prompt": 0, "completion": 0}
     held = charged = delivered = requested = 0
     for sp in spans:
@@ -281,6 +284,8 @@ def _totals(spans: list[dict[str, Any]], duration_ms: int) -> dict[str, Any]:
                 images_usd += float(out.get("cost_estimate_usd") or 0.0)
                 images_estimated = True
         neurons += float(out.get("neurons") or 0.0)
+        if sp["name"] != "generate_image":
+            llm_direct_usd += float(out.get("cost_usd") or 0.0)
         tokens["prompt"] += int(out.get("prompt_tokens") or 0)
         tokens["completion"] += int(out.get("completion_tokens") or 0)
         held += int(out.get("held") or 0)
@@ -289,12 +294,12 @@ def _totals(spans: list[dict[str, Any]], duration_ms: int) -> dict[str, Any]:
             requested = int(sp["inputs"].get("n") or 0)
         if sp["name"] == "settle":
             delivered = int(out.get("delivered") or 0)
-    llm_usd = neurons * NEURON_USD
+    llm_usd = neurons * NEURON_USD + llm_direct_usd
     return {
         "duration_ms": duration_ms,
         "images_usd": round(images_usd, 6),
         "images_cost_estimated": images_estimated,  # true when a provider reported no cost
-        "llm_usd_estimate": round(llm_usd, 6),  # from neurons, at Cloudflare's price
+        "llm_usd_estimate": round(llm_usd, 6),  # neurons at Cloudflare's price, plus Groq tokens
         "total_usd": round(images_usd + llm_usd, 6),
         "neurons": round(neurons, 1),
         "tokens": tokens,

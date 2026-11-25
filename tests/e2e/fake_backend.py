@@ -27,8 +27,8 @@ from PIL import Image
 
 from app.agents.grand.graph import build_grand_graph
 from app.agents.image_grand.generation.create.deps import CreateDeps
-from app.agents.image_grand.workers.brief import Brief, EnhancerOutput, Option, Question
 from app.agents.image_grand.workers.critic import CriticImage, CriticOutput, Scores
+from app.agents.image_grand.workers.shot_plan import Option, Question, ShotPlan
 from app.api import run_service
 from app.contracts.ports import GeneratedImage, VisionRaw
 from app.core.config import Settings
@@ -63,9 +63,8 @@ class FakeEnhancer:
         payload = json.loads(kw["user"].split("<user_prompt>")[1].split("</user_prompt>")[0])
         prompt: str = payload["prompt"]
         if "make it nice" in prompt.lower() and not payload["answers"]:
-            return EnhancerOutput(
-                status="missing",
-                questions=[
+            return ShotPlan(
+                missing=[
                     Question(
                         id="q1",
                         text="What should the image show?",
@@ -79,11 +78,24 @@ class FakeEnhancer:
                 ],
             )
         subject = " ".join([prompt, *payload["answers"].values()]).strip()
-        return EnhancerOutput(
-            status="ready",
-            brief=Brief(subject=subject, style="product photography", must_have=[subject]),
-            final_prompt=f"{subject}, studio light, sharp focus",
+        plan = ShotPlan.model_validate(
+            {
+                "intent": {"subject_type": "product", "medium": "photo"},
+                "look": "lifestyle",
+                "subject": subject,
+                "world": "a sunny table",
+                "subject_details": ["clean shape", "fine detail"],
+                "composition": "centred",
+                "depth": {"mid": subject},
+                "light": {"source": "window", "direction": "from the left"},
+                "palette": ["cream", "brown"],
+                "camera": {"lens": "50mm at f/2.8"},
+                "materials": ["glass"],
+                "realism_checks": ["a contact shadow"],
+                "must_have": [subject],
+            }
         )
+        return plan
 
 
 class FakeCritic:

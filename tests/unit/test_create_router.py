@@ -1,6 +1,6 @@
 import pytest
 
-from app.agents.image_grand.workers.brief import Brief
+from app.agents.image_grand.workers.shot_plan import ShotPlan
 from app.core.errors import PlanLimit
 from app.core.plans import Plan, tier_allowed
 from app.gateway.registry import load_registry
@@ -23,7 +23,14 @@ def test_classifier_maps_prompt_to_category(category: str) -> None:
 
 
 def test_unreadable_script_falls_back_to_general() -> None:
-    assert classify_prompt("ایک خوبصورت منظر") == "general"
+    assert classify_prompt("ایک خوبصورت چیز") == "general"  # no word the classifier knows
+
+
+def test_urdu_and_roman_urdu_keywords_are_read() -> None:
+    assert classify_prompt("ایک خوبصورت منظر") == "photo"
+    assert classify_prompt("ماربل پر پرفیوم کی بوتل") == "product"
+    assert classify_prompt("ek ladki park mein") == "people"
+    assert classify_prompt("پوسٹر پر عید مبارک") == "text_in_image"
 
 
 @pytest.mark.parametrize("plan", list(Plan))
@@ -90,4 +97,4 @@ def test_no_model_for_the_ratio_is_a_plan_limit() -> None:
 
 def test_brief_is_not_needed_by_the_router() -> None:
     # the router reads the raw prompt. A brief does not exist yet when it runs
-    assert Brief().subject == ""
+    assert ShotPlan().subject == ""

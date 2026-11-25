@@ -7,7 +7,7 @@ import httpx
 import pytest
 import respx
 
-from app.agents.image_grand.workers.brief import EnhancerOutput
+from app.agents.image_grand.workers.shot_plan import ShotPlan as EnhancerOutput
 from app.contracts.ports import GeneratedImage
 from app.core.errors import InvalidModelOutput, ProviderCallFailed, SpendCapReached
 from app.gateway.budget import SpendGuard
@@ -136,12 +136,12 @@ def test_extract_text_accepts_every_documented_shape() -> None:
 
 
 def test_parse_schema_strips_fences_and_rejects_garbage() -> None:
-    raw = '```json\n{"status": "ready", "brief": {"subject": "cat"}}\n```'
-    assert parse_schema(raw, EnhancerOutput).brief.subject == "cat"
+    raw = '```json\n{"subject": "cat"}\n```'
+    assert parse_schema(raw, EnhancerOutput).subject == "cat"
     with pytest.raises(InvalidModelOutput):
         parse_schema("not json", EnhancerOutput)
     with pytest.raises(InvalidModelOutput):
-        parse_schema('{"status": "maybe"}', EnhancerOutput)
+        parse_schema('{"props": {"a": 1}, "intent": 5, "palette": 3, "depth": []}', EnhancerOutput)
 
 
 @respx.mock
@@ -159,7 +159,7 @@ async def test_llm_asks_for_json_schema_and_validates() -> None:
     out = await llm.complete_json(
         system="S", user="U", schema=EnhancerOutput, max_tokens=300, temperature=0.2, timeout=5
     )
-    assert out.status == "ready"
+    assert out.subject == "iced coffee cup"
     sent = json.loads(route.calls[0].request.content)
     assert sent["response_format"]["type"] == "json_schema"
     assert sent["max_tokens"] == 300 and sent["temperature"] == 0.2

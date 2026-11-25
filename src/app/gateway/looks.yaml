@@ -1,0 +1,115 @@
+# The look library for image create. A look is a set of RANGES, not fixed text: the Art Director
+# picks the look that fits the request, then fills concrete values (one light, one lens, 2 or 3
+# named colours) from inside those ranges. The user's own choice (the `preset` setting, which
+# names one look id) overrides the pick, and the user's own words override both.
+#
+# Light is described by direction, time and quality, never by equipment: an image model draws what
+# you name, and a prompt that says softbox or reflector can put one in the picture.
+looks:
+  lifestyle:
+    label: Lifestyle
+    fits: an object, product or person in a real, lived-in place; ads and social posts
+    light: [warm low sun from one side at golden hour with long soft shadows, soft window daylight on a morning, late-afternoon light through a curtain]
+    lens: 50 to 85mm, eye level, f/2 to f/2.8
+    palette: [warm cream and honey, sage and natural wood, dusty rose and amber]
+    depth: three layers. A textured foreground surface, the subject sharp in the middle, a blurred real setting behind with one or two matching props
+    notes: a real place that fits the subject, never an empty void; a contact shadow under objects; light passing through glass and colour lands on the surface
+
+  cinematic:
+    label: Cinematic
+    fits: a scene with a story or a mood; places, landscapes, characters in a moment
+    light: [low sun at golden hour from the side with a warm backlight, blue hour with warm window lights, hard single source with deep shadow, overcast with a bright horizon]
+    lens: 24 to 40mm wide for scale or 85 to 135mm compressed, low or eye-level angle, f/1.8 to f/4
+    palette: [teal shadows and amber highlights, desaturated green and rust, deep blue and orange]
+    depth: layered, with atmosphere (haze, mist, dust in the light) separating foreground, middle and a distant horizon
+    notes: one clear focal point; film-still framing; colour grade, not neon
+
+  editorial:
+    label: Editorial
+    fits: a portrait or fashion image for a magazine; people, wardrobe, beauty
+    light: [broad soft window light from 45 degrees with a bounce from below, hard directional sun with a crisp shadow, open shade with a bright sky]
+    lens: 85 to 135mm, eye level, f/2 to f/2.8, eyes sharp
+    palette: [natural skin tones with one muted colour, monochrome with one accent, earth tones]
+    depth: the person sharp, a simple soft background with a gentle gradient or a plain wall
+    notes: hands doing something simple; natural skin texture and fabric weave; catch-lights in the eyes
+
+  documentary:
+    label: Documentary
+    fits: real life, work, crafts, markets, everyday people and places; honest and unposed
+    light: [available daylight, mixed window and lamp light, harsh midday sun with deep shadows, dusk with warm street lights]
+    lens: 28 to 50mm, eye level or slightly low, f/4 to f/8
+    palette: [true-to-life muted colours, weathered tones, one strong local colour]
+    depth: the subject within its surroundings, readable background with real detail
+    notes: imperfection is fine (worn surfaces, dust, creases); no staged perfection
+
+  studio:
+    label: Studio
+    fits: a clean catalogue or e-commerce look; a product alone, plain backdrop, only when the user wants it
+    light: [broad soft light from the front left with even fill, overhead even light with almost no shadow]
+    lens: 85 to 100mm macro at f/8, eye level to slightly high, sharp front to back
+    palette: [pure white with one accent from the product, light grey and the product colour]
+    depth: flat and clean, the subject alone on a plain surface with a soft contact shadow
+    notes: only when the prompt says white background, catalogue, e-commerce or studio; true colours
+
+  fantasy:
+    label: Fantasy
+    fits: dragons, magic, castles, other worlds, characters that do not exist
+    light: [low magical light from one source with coloured rim, dawn light breaking through mist, moonlight with a warm lantern]
+    lens: 24 to 35mm for scale or 85mm for a hero, low angle, f/2.8 to f/5.6
+    palette: [deep violet and gold, emerald and mist, ember orange and charcoal]
+    depth: strong layers with scale cues (a tiny figure-free path, trees, ruins) and atmosphere
+    notes: believable materials (stone, scales, cloth) and believable light; one clear hero; no clutter
+
+  flat_illustration:
+    label: Flat illustration
+    fits: icons, vector art, stickers, simple graphic illustration, infographics
+    light: [none, flat fills with no shading]
+    lens: straight-on flat view, no perspective
+    palette: [two or three flat colours plus white, a limited pastel set]
+    depth: no depth; a clear shape hierarchy and generous empty space
+    notes: name the graphic type first; uniform line weight; no photographic words, no texture
+
+  3d_render:
+    label: 3D render
+    fits: clean CGI objects, characters and scenes; toy-like or product-visual renders
+    light: [broad soft light from the top left with a cool rim from behind, even ambient light with a soft contact shadow]
+    lens: 50 to 85mm virtual camera at f/4, three-quarter angle
+    palette: [pastel base with one saturated accent, monochrome with a coloured rim]
+    depth: the object on a smooth gradient floor with a soft contact shadow and slight depth of field
+    notes: rounded forms, clean materials (matte plastic, glossy ceramic, soft rubber)
+
+  food:
+    label: Food
+    fits: dishes, drinks, ingredients, restaurant and recipe images
+    light: [side window light from the left with a backlight on the steam, soft overcast daylight from the side]
+    lens: 50 to 100mm macro at f/2.8 to f/4, 30 to 45 degrees above the plate
+    palette: [warm browns with fresh green, ceramic white with one bright ingredient colour]
+    depth: sharp on the nearest bite, a soft table and props behind (a cloth, a spoon, a bowl of ingredients)
+    notes: steam, gloss, crumbs and a few drips make it real; ingredients that belong together
+
+  architectural:
+    label: Architectural
+    fits: buildings, interiors, cityscapes, bridges, design spaces
+    light: [low golden-hour sun grazing the facade, blue hour with lit windows, soft overcast with even tone, window light across an interior floor]
+    lens: 16 to 35mm wide with vertical lines kept straight, or 70 to 200mm for details, f/8
+    palette: [warm stone against a deep blue sky, concrete grey with one warm light, white interior with wood]
+    depth: leading lines into the frame, a clear foreground, the building sharp, sky or distance behind
+    notes: straight verticals; scale from a doorway or a tree, not from people unless asked
+
+  street:
+    label: Street
+    fits: city life, markets, alleys, rain, signs, neon, night and day street scenes
+    light: [wet street at dusk with warm shop windows, midday sun with hard shadows, neon colours on dark pavement, overcast flat light]
+    lens: 28 to 50mm, eye level or low, f/2.8 to f/5.6
+    palette: [neon magenta and teal on dark, faded colour with one warm light, monochrome with a red accent]
+    depth: foreground detail, a clear middle ground, layers of signs and lights behind
+    notes: reflections on wet ground that match the lights; no readable signs unless the user asked for the words
+
+  minimal:
+    label: Minimal
+    fits: calm, simple, wallpaper-like, lots of negative space; abstract or single-object images
+    light: [one soft light from the side, even overhead light, gentle gradient light]
+    lens: 50 to 100mm, straight-on or a clean three-quarter, f/5.6 to f/11
+    palette: [one colour family in 2 or 3 tones, off-white with one muted accent]
+    depth: one subject, a large clean field around it, a soft shadow
+    notes: restraint; one idea; precise edges and a clear focal point

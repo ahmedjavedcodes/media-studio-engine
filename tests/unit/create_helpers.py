@@ -12,8 +12,9 @@ from pydantic import BaseModel
 
 from app.agents.grand.graph import build_grand_graph
 from app.agents.image_grand.generation.create.deps import CreateDeps
-from app.agents.image_grand.workers.brief import Brief, EnhancerOutput, Option, Question
 from app.agents.image_grand.workers.critic import CriticImage, CriticOutput, Scores
+from app.agents.image_grand.workers.prompt_writer import WrittenPrompts
+from app.agents.image_grand.workers.shot_plan import Option, Question, ShotPlan
 from app.api.run_service import RunService
 from app.contracts.ports import GeneratedImage, VisionRaw
 from app.core.config import Settings
@@ -39,41 +40,68 @@ def png(size: tuple[int, int] = (64, 64)) -> bytes:
     return buf.getvalue()
 
 
-def good_brief(subject: str = "iced coffee cup") -> Brief:
-    return Brief(
-        subject=subject,
-        setting="marble cafe table",
-        lighting="morning window light from the left",
-        camera="close-up, shallow depth of field",
-        style="product photography",
-        must_have=[subject],
+def good_plan(subject: str = "iced coffee cup") -> ShotPlan:
+    """A complete ShotPlan: every field the rules require is filled."""
+    return ShotPlan.model_validate(
+        {
+            "intent": {"subject_type": "product", "use": "a cafe ad", "medium": "photo"},
+            "look": "lifestyle",
+            "subject": subject,
+            "world": "a marble cafe table beside a window",
+            "moment": "a warm morning, ice just poured",
+            "subject_details": ["tall glass", "condensation beads"],
+            "props": ["a paper straw"],
+            "composition": "centred in the lower third of the frame",
+            "depth": {"fg": "marble table", "mid": subject, "bg": "blurred cafe wall"},
+            "light": {
+                "source": "window daylight",
+                "direction": "from the left",
+                "time": "morning",
+                "quality": "broad and soft with long shadows",
+                "temp": "warm",
+            },
+            "palette": ["cream", "coffee brown"],
+            "camera": {"lens": "85mm at f/2.8", "angle": "eye level", "dof": "shallow"},
+            "materials": ["cold glass", "polished marble"],
+            "realism_checks": ["one clear ice level", "a contact shadow under the glass"],
+            "variation_axes": ["camera angle", "time of day", "prop layout"],
+            "must_have": [subject],
+        }
     )
 
 
-def ready(final_prompt: str | None = "iced coffee cup on a marble cafe table") -> EnhancerOutput:
-    return EnhancerOutput(status="ready", brief=good_brief(), final_prompt=final_prompt)
+def ready(*_ignored: object) -> ShotPlan:
+    return good_plan()
 
 
-def missing() -> EnhancerOutput:
-    return EnhancerOutput(
-        status="missing",
-        questions=[
-            Question(
-                id="q1",
-                text="What style do you want?",
-                options=[
-                    Option(id="a", label="Clean product photo", recommended=True),
-                    Option(id="b", label="Lifestyle scene"),
-                    Option(id="c", label="Flat illustration"),
-                    Option(id="other", label="Something else"),
-                ],
-            )
-        ],
+def written(*prompts: str) -> WrittenPrompts:
+    """What the Prompt Writer returns: one prompt per image."""
+    return WrittenPrompts(prompts=list(prompts))
+
+
+def missing() -> ShotPlan:
+    return good_plan().model_copy(
+        update={
+            "missing": [
+                Question(
+                    id="q1",
+                    text="What should the image show?",
+                    options=[
+                        Option(id="a", label="Clean product photo", recommended=True),
+                        Option(id="b", label="A person in a street"),
+                        Option(id="c", label="A landscape"),
+                        Option(id="other", label="Something else"),
+                    ],
+                )
+            ]
+        }
     )
 
 
 class FakeLLM:
     """Answers with queued outputs. Records every call."""
+
+    provider = "cloudflare"
 
     def __init__(self, model: str, outputs: list[BaseModel | Exception]) -> None:
         self.model = model
@@ -162,6 +190,7 @@ def make_deps(
     tmp_path: Path,
     *,
     enhancer: list[BaseModel | Exception] | None = None,
+    writer: list[BaseModel | Exception] | None = None,
     critic: list[BaseModel | Exception] | None = None,
     provider: FakeProvider | None = None,
     credits: int = 100,
@@ -185,6 +214,7 @@ def make_deps(
         registry=load_registry(),
         gateway=ImageGateway({"cloudflare": prov}, ["cloudflare"]),
         enhancer=FakeLLM("fake-enhancer", enhancer or [ready()]),
+        writer=FakeLLM("fake-writer", writer) if writer else None,  # None: the code renders
         critic=FakeLLM("fake-critic", critic or [critic_ok(4)]),
         vision=vision or SeqVision(),
         credits=FakeCredits(credits),

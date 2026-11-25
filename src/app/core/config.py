@@ -36,7 +36,8 @@ class Settings(BaseSettings):
         "hub"  # hub falls back to prompts/create/txt2img/ on failure
     )
     prompt_hub_tag: str = ""  # empty = dev, or prod when APP_ENV is prod
-    enhancer_prompt_ref: str = "media-enhancer"
+    art_director_prompt_ref: str = "media-art-director"
+    writer_prompt_ref: str = "media-prompt-writer"
     critic_prompt_ref: str = "media-critic"
 
     # Guardrail timeouts in seconds. Unset (None) = the PROVIDER_MODE default in
@@ -65,13 +66,21 @@ class Settings(BaseSettings):
     stream_token_ttl_s: int = 7200
     # Dev only: let `testing` models run (their first real run is the test). Never in prod.
     allow_testing_models: bool = False
+    # PAID, per token. Moves the enhancer to a Groq reasoning model. The owner turns it on.
+    groq_llm: bool = False
+    groq_enhancer_model: str = "openai/gpt-oss-120b"
+    # PAID, per token. When a Cloudflare call fails (429, 5xx, timeout), ask Groq instead: the
+    # critic and the per-image safety check. The owner turns it on.
+    groq_fallback: bool = False
+    groq_vision_model: str = "qwen/qwen3.8-27b"  # Groq has no Llama vision model any more
     fal_images: bool = False  # the owner turns this on. Paid. Respects SPEND_CAP_USD
-    enhancer_max_tokens: int = 350
+    enhancer_max_tokens: int = 1400  # the Art Director's ShotPlan (the code never goes below 2,500)
     llm_timeout_s: float = 60.0
     image_timeout_s: float = 90.0
     draft_timeout_s: int = 300  # a question left unanswered this long becomes a draft
     start_credits: int = 100  # fake credits per user in dev
 
+    plans_db: str = "./.plans.sqlite"  # good ShotPlans and project memory (dev)
     local_output_dir: str = "./outputs"
     checkpoint_db: str = "./.checkpoints.sqlite"
 

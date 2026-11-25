@@ -93,9 +93,10 @@ class ContentBlocked(EngineError):
 class ProviderCallFailed(ProviderDown):
     """One model call failed. `retryable` is True for timeouts, 429 and 5xx."""
 
-    def __init__(self, message: str, *, retryable: bool) -> None:
+    def __init__(self, message: str, *, retryable: bool, retry_after: float | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.retry_after = retry_after  # seconds the provider asked us to wait (429 Retry-After)
 
 
 class InvalidModelOutput(EngineError):

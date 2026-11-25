@@ -94,7 +94,7 @@ class ImageGateway:
                     aspect_ratio=aspect_ratio,
                     seed=seed if card.supports_seed else None,
                     timeout=timeout,
-                    estimated_cost_usd=entry.cost,
+                    estimated_cost_usd=card.cost_for(entry, options.quality if options else None),
                     options=options,
                 )
             except SpendCapReached:

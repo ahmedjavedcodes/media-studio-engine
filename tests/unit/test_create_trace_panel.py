@@ -27,6 +27,7 @@ from tests.unit.create_helpers import (
     make_service,
     missing,
     ready,
+    written,
 )
 from tests.unit.guard_helpers import make_deps as make_guard_deps
 
@@ -79,7 +80,8 @@ async def test_a_run_records_every_step_with_time_model_provider_and_cost(tmp_pa
         "guardrail",
         "code_checks",
         "router",
-        "enhancer",
+        "art_director",
+        "prompt_writer",
         "code_guard",
         "generate",
         "critic",
@@ -100,7 +102,7 @@ async def test_a_run_records_every_step_with_time_model_provider_and_cost(tmp_pa
         spans["router"][0]["model"] == "phoenix-1"
         and spans["router"][0]["provider"] == "cloudflare"
     )
-    assert spans["enhancer"][0]["model"] == "fake-enhancer"
+    assert spans["art_director"][0]["model"] == "fake-enhancer"
     assert spans["critic"][0]["model"] == "fake-critic"
     img = spans["generate_image"][0]["outputs"]
     assert img["model"] == "phoenix-1" and img["provider"] == "cloudflare"
@@ -145,8 +147,12 @@ async def test_a_cost_the_provider_did_not_report_is_marked_as_an_estimate(tmp_p
 
 
 async def test_the_code_guard_shows_what_it_changed(tmp_path: Path) -> None:
-    weak = ready("a subtle, serene iced coffee on a table")
-    deps = make_deps(tmp_path, enhancer=[weak], critic=[critic_ok(1)], trace_ui=True)
+    deps = make_deps(
+        tmp_path,
+        writer=[written("a subtle, serene iced coffee on a table")],
+        critic=[critic_ok(1)],
+        trace_ui=True,
+    )
     service = make_service(deps)
     await run(service, "t4", req(n=1))
     await service.wait("t4")
@@ -158,7 +164,9 @@ async def test_the_code_guard_shows_what_it_changed(tmp_path: Path) -> None:
     assert out["max_words"] == 60 and out["size"].count("x") == 1
 
 
-async def test_a_question_adds_an_interrupt_span_and_a_second_enhancer_span(tmp_path: Path) -> None:
+async def test_a_question_adds_an_interrupt_span_and_a_second_art_director_span(
+    tmp_path: Path,
+) -> None:
     deps = make_deps(tmp_path, enhancer=[missing(), ready()], critic=[critic_ok(1)], trace_ui=True)
     service = make_service(deps)
     await run(service, "t5", req("make it nice", n=1))
@@ -168,9 +176,9 @@ async def test_a_question_adds_an_interrupt_span_and_a_second_enhancer_span(tmp_
     [e async for e in service.stream("t5")]
     await service.wait("t5")
     done = by_name(deps.tracer.trace_for("t5").snapshot("done"))  # type: ignore[union-attr]
-    assert len(done["enhancer"]) == 2 and done["interrupt"][0]["status"] == "ok"
+    assert len(done["art_director"]) == 2 and done["interrupt"][0]["status"] == "ok"
     assert done["interrupt"][0]["outputs"]["answers"] == {"q1": "A landscape"}
-    assert done["enhancer"][0]["outputs"]["status"] == "missing"
+    assert done["art_director"][0]["outputs"]["status"] == "missing"
 
 
 async def test_a_running_run_shows_open_spans(tmp_path: Path) -> None:
@@ -219,7 +227,7 @@ def test_usage_adds_up_over_calls() -> None:
 
 @respx.mock
 async def test_the_cloudflare_llm_reports_its_usage() -> None:
-    from app.agents.image_grand.workers.brief import EnhancerOutput
+    from app.agents.image_grand.workers.shot_plan import ShotPlan as EnhancerOutput
 
     url = "https://api.cloudflare.com/client/v4/accounts/acc/ai/run/@cf/openai/gpt-oss-20b"
     answer = ready().model_dump_json()
@@ -317,7 +325,8 @@ async def test_the_trace_endpoint_returns_the_whole_run_when_on(api) -> None:  #
     assert {
         "code_checks",
         "router",
-        "enhancer",
+        "art_director",
+        "prompt_writer",
         "code_guard",
         "generate",
         "generate_image",

@@ -930,47 +930,28 @@ async def test_svg_files_are_served_locked_down(tmp_path: Path) -> None:
         app.dependency_overrides.clear()
 
 
-# ---- the enhancer --------------------------------------------------------------------------------
+# ---- edit mode -----------------------------------------------------------------------------------
 
 
-def test_edit_mode_asks_for_a_delta_and_comes_before_the_model_section() -> None:
-    from app.agents.image_grand.workers.prompt_enhancer import system_prompt
+def test_edit_mode_plans_the_change_and_comes_before_the_model_section() -> None:
+    from app.agents.image_grand.workers import art_director as ad
+    from app.agents.image_grand.workers import prompt_writer as pw
+    from app.gateway.looks import get_looks
 
-    text = system_prompt("BASE", card("gpt-image-2"), "1:1", has_references=True)
-    assert "## Mode: edit" in text and "Do NOT rewrite or re-describe the whole scene" in text
-    assert "Keep the subject's face, pose and studio lighting identical" in text
+    plan_text = ad.system_prompt("BASE", get_looks(), "1:1", has_references=True)
+    assert "## Mode: edit" in plan_text and "Plan only what CHANGES" in plan_text
+    assert plan_text.index("## Mode: edit") < plan_text.index("## Look library")
+    text = pw.system_prompt("BASE", card("gpt-image-2"), "1:1", n=1, has_references=True)
+    assert "## Mode: edit" in text and "short, direct EDIT" in text
     assert text.index("## Mode: edit") < text.index("## Target model")
     assert text.rstrip().endswith(card("gpt-image-2").prompt_guide.strip())  # the guide stays last
-    plain = system_prompt("BASE", card("gpt-image-2"), "1:1")
-    assert "Mode: edit" not in plain
-
-
-async def test_the_enhancer_tells_the_model_when_there_are_references() -> None:
-    from app.agents.image_grand.workers.prompt_enhancer import enhance
-    from tests.unit.create_helpers import FakeLLM, ready
-
-    llm = FakeLLM("m", [ready()])
-    await enhance(
-        llm,
-        card("gpt-image-2"),
-        base_prompt="BASE",
-        prompt="make the jacket black",
-        aspect_ratio="1:1",
-        resolution="1K",
-        answers={},
-        allow_questions=False,
-        max_tokens=350,
-        timeout=5,
-        has_references=True,
-    )
-    call = llm.calls[0]
-    assert "Mode: edit" in call["system"] and '"has_references": true' in call["user"]
+    assert "Mode: edit" not in pw.system_prompt("BASE", card("gpt-image-2"), "1:1", n=1)
 
 
 def test_recraft_guide_keeps_copy_in_quotes_and_drops_lens_jargon() -> None:
     guide = card("recraft-v4-1").prompt_guide
-    assert '"double quotes"' in guide and "layout" in guide and "typography" in guide
-    assert "Do NOT use photographic lens jargon" in guide
+    assert '"double quotes"' in guide and "headline" in guide and "hierarchy" in guide
+    assert "Do NOT use lens jargon" in guide
 
 
 @pytest.mark.parametrize(
@@ -978,7 +959,7 @@ def test_recraft_guide_keeps_copy_in_quotes_and_drops_lens_jargon() -> None:
 )
 def test_photoreal_guides_expand_into_visual_detail(model_id: str) -> None:
     guide = card(model_id).prompt_guide
-    assert "camera framing" in guide and "textures" in guide and "light" in guide
+    assert "camera" in guide and "texture" in guide and "light" in guide
     assert "atmosphere" not in guide.lower()  # a weak word the code guard strips
 
 

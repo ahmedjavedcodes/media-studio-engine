@@ -1,4 +1,4 @@
-"""System prompts for the enhancer and the critic.
+"""System prompts for the Art Director, the Prompt Writer and the critic.
 
 Pulled from LangSmith Hub with a version tag, so a prompt can change without a deploy. When the
 Hub is off, has no key or fails, the file in `prompts/create/txt2img/` is used. The version that
@@ -18,7 +18,11 @@ from app.core.config import prompts_dir
 
 log = structlog.get_logger("prompts")
 
-LOCAL_FILES = {"enhancer": "create/txt2img/enhancer.md", "critic": "create/txt2img/critic.md"}
+LOCAL_FILES = {
+    "art_director": "create/txt2img/art_director.md",
+    "prompt_writer": "create/txt2img/prompt_writer.md",
+    "critic": "create/txt2img/critic.md",
+}
 
 
 @dataclass(frozen=True)
@@ -63,7 +67,11 @@ class PromptStore:
     ) -> None:
         self._source = source
         self._tag = tag
-        self._refs = refs or {"enhancer": "media-enhancer", "critic": "media-critic"}
+        self._refs = refs or {
+            "art_director": "media-art-director",
+            "prompt_writer": "media-prompt-writer",
+            "critic": "media-critic",
+        }
         self._client_factory = client_factory
         self._cache: dict[str, PromptText] = {}
 

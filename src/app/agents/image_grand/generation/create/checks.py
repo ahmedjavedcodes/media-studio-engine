@@ -32,6 +32,8 @@ async def run_code_checks(deps: CreateDeps, state: CreateState) -> dict[str, Any
         raise PlanLimit("2K is coming soon. Choose 1K for now.")
     if cfg["aspect_ratio"] not in ASPECT_RATIOS:
         raise BadInput("That aspect ratio is not supported.")
+    if cfg.get("preset", "auto") not in deps.looks.valid_ids():
+        raise BadInput("That style preset does not exist.")
 
     if cfg["model"] != "auto":  # a manual pick is strict: never swapped for another model
         card = deps.registry.get(cfg["model"])
@@ -48,6 +50,8 @@ async def run_code_checks(deps: CreateDeps, state: CreateState) -> dict[str, Any
                 references=("x",) * state.get("n_refs", 0),
                 brand_colors=tuple(cfg.get("brand_colors") or ()),
                 transparent_bg=bool(cfg.get("transparent_bg")),
+                plan=plan,
+                manual=True,
             ),
         )
     return {}

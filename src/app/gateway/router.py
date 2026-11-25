@@ -41,11 +41,27 @@ _RULES: Final[tuple[tuple[Category, tuple[str, ...]], ...]] = (
             "banner",
             "likha",
             "likhna",
+            "likho",
+            "پوسٹر",
+            "لوگو",
+            "لکھا",
         ),
     ),
     (
         "design",
-        ("brand", "flat", "vector", "icon", "infographic", "palette", "pattern", "mockup"),
+        (
+            "brand",
+            "flat",
+            "vector",
+            "icon",
+            "infographic",
+            "palette",
+            "pattern",
+            "mockup",
+            "فلیٹ",
+            "آئیکن",
+            "ویکٹر",
+        ),
     ),
     (
         "people",
@@ -69,6 +85,19 @@ _RULES: Final[tuple[tuple[Category, tuple[str, ...]], ...]] = (
             "couple",
             "ladki",
             "ladka",
+            "larki",
+            "larka",
+            "aurat",
+            "aadmi",
+            "admi",
+            "bacha",
+            "bachi",
+            "لڑکی",
+            "لڑکا",
+            "آدمی",
+            "عورت",
+            "بچہ",
+            "بچی",
         ),
     ),
     (
@@ -85,6 +114,12 @@ _RULES: Final[tuple[tuple[Category, tuple[str, ...]], ...]] = (
             "perfume",
             "cup",
             "jar",
+            "botal",
+            "jootay",
+            "بوتل",
+            "پرفیوم",
+            "جوتا",
+            "جوتے",
         ),
     ),
     (
@@ -108,20 +143,45 @@ _RULES: Final[tuple[tuple[Category, tuple[str, ...]], ...]] = (
             "car",
             "sky",
             "ocean",
+            "pahar",
+            "pahari",
+            "jheel",
+            "samandar",
+            "manzar",
+            "پہاڑ",
+            "پہاڑوں",
+            "جھیل",
+            "سمندر",
+            "منظر",
+            "ساحل",
         ),
     ),
 )
+
+
+_TOKENS = re.compile(r"[a-z]+|[\u0600-\u06ff]+")  # Latin words and Urdu/Arabic-script words
 
 
 def classify_prompt(prompt: str) -> Category:
     """Category of the raw prompt, by keyword rules. A quoted phrase means text in the image."""
     if '"' in prompt or "“" in prompt:
         return "text_in_image"
-    words = set(re.findall(r"[a-z]+", prompt.lower()))
+    words = set(_TOKENS.findall(prompt.lower()))
     for category, keywords in _RULES:
         if words & set(keywords):
             return category
     return "general"
+
+
+# "logo" alone does not mean words in the image (the vector rule handles logos), so it is left out.
+_TEXT_WORDS = frozenset(w for w in dict(_RULES)["text_in_image"] if w != "logo")
+
+
+def wants_text(prompt: str) -> bool:
+    """The prompt asks for words inside the image: a quoted phrase or a text word."""
+    if '"' in prompt or "“" in prompt:
+        return True
+    return bool(set(_TOKENS.findall(prompt.lower())) & _TEXT_WORDS)
 
 
 def pick_model(
@@ -133,9 +193,13 @@ def pick_model(
     enabled_providers: list[str],
     n_refs: int = 0,
     transparent: bool = False,
+    text_only: bool = False,
 ) -> ModelCard:
-    """The best live model the plan allows that supports the aspect ratio and the references."""
+    """The best live model the plan allows that supports the aspect ratio and the references.
+    `text_only` keeps only models trusted with text in the image (typography or dense_text)."""
     pool = _usable_pool(registry, plan, aspect_ratio, enabled_providers, n_refs, transparent)
+    if text_only:
+        pool = [c for c in pool if c.handles_text]
     if not pool:
         raise PlanLimit("No model is available for this plan and aspect ratio.")
     prefs = _PREFS.get(category, _PREFS["general"])
@@ -236,22 +300,55 @@ def _rule_for(req: RouteRequest) -> tuple[str, list[str]]:
 
 
 def route_auto(registry: Registry, req: RouteRequest) -> Routed:
-    """Pick a model for `model="auto"`. Raises PlanLimit when nothing can run."""
+    """Pick a model for `model="auto"`. Raises PlanLimit when nothing can run.
+
+    Order: a hard rule (draft, vector, brand, references) decides the candidates. For the soft
+    rules (default, and "precision" without references) the eval's `auto_rank` for this category
+    and plan comes first. A request that wants text in the image only ever goes to a model with
+    the `typography` or `dense_text` capability; the one exception is a vector logo request,
+    which needs the SVG model.
+    """
     pool = _usable_pool(
         registry, req.plan, req.aspect_ratio, req.enabled_providers, req.n_refs, req.transparent
     )
     usable = {c.id: c for c in pool}
+    category = classify_prompt(req.prompt)
     rule, candidates = _rule_for(req)
+    if rule in ("default", "precision") and req.n_refs == 0:
+        ranked = registry.ranked(category, req.plan)
+        if ranked:
+            candidates = [*ranked, *candidates]
+            rule = f"{rule}+auto_rank"
+    needs_text = wants_text(req.prompt) and not rule.startswith("vector")
+    if needs_text:
+        candidates = [m for m in candidates if m in usable and usable[m].handles_text]
     for model_id in candidates:
         if model_id in usable:
             return Routed(usable[model_id], rule)
+    if needs_text:
+        capable = any(c.handles_text for c in pool)
+        if capable:  # the plan's best text model, never a model that cannot be trusted with text
+            card = pick_model(
+                registry,
+                plan=req.plan,
+                category=category,
+                aspect_ratio=req.aspect_ratio,
+                enabled_providers=req.enabled_providers,
+                n_refs=req.n_refs,
+                transparent=req.transparent,
+                text_only=True,
+            )
+            return Routed(card, f"{rule}->text_model")
     card = pick_model(
         registry,
         plan=req.plan,
-        category=classify_prompt(req.prompt),
+        category=category,
         aspect_ratio=req.aspect_ratio,
         enabled_providers=req.enabled_providers,
         n_refs=req.n_refs,
         transparent=req.transparent,
     )
-    return Routed(card, f"{rule}->category")
+    # No text-capable model is available (a provider is off, or the plan is too low): the best
+    # match still runs, and the rule name says so for the trace.
+    suffix = "no_text_model" if needs_text else "category"
+    return Routed(card, f"{rule}->{suffix}")

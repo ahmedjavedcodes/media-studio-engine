@@ -9,8 +9,8 @@ import httpx
 import pytest
 import respx
 
-from app.agents.image_grand.workers.brief import EnhancerOutput, Option, Question
-from app.agents.image_grand.workers.prompt_enhancer import check_output
+from app.agents.image_grand.workers.art_director import finalize as _finalize
+from app.agents.image_grand.workers.shot_plan import Option, Question, ShotPlan
 from app.api.deps import get_create_deps
 from app.api.run_service import RunNotWaiting, RunService
 from app.contracts.request import GenerationRequest, ImageSettings
@@ -19,10 +19,18 @@ from app.core.plans import Plan
 from app.core.safe_text import clean_ui_text
 from app.core.tracing import Span
 from app.gateway.budget import SpendGuard
+from app.gateway.looks import get_looks
 from app.gateway.providers.openrouter_images import OpenRouterImages
 from app.main import app
 from tests.unit.create_helpers import critic_ok, make_deps, make_service, missing, ready
 from tests.unit.test_create_review_fixes import or_args, or_reply
+
+
+def check_output(out, *, prompt, allow_questions):  # type: ignore[no-untyped-def]
+    return _finalize(
+        out, prompt=prompt, allow_questions=allow_questions, looks=get_looks(), fixed_look=None
+    )
+
 
 OR = "https://openrouter.ai/api/v1/images"
 
@@ -67,11 +75,11 @@ def test_a_question_about_a_llama_is_kept_when_the_prompt_has_a_llama() -> None:
         opts = [Option(id=i, label=f"{i} llama") for i in "abc"]
         return Question(id="q1", text=text, options=[*opts, Option(id="other", label="x")])
 
-    out = EnhancerOutput(status="missing", questions=[q("Which llama?")])
+    out = ShotPlan(missing=[q("Which llama?")])
     kept = check_output(out, prompt="a llama in the Andes", allow_questions=True)
-    assert kept.status == "missing" and kept.questions[0].text == "Which llama?"
+    assert kept.missing and kept.missing[0].text == "Which llama?"
     dropped = check_output(out, prompt="make it nice", allow_questions=True)
-    assert dropped.status == "ready"  # no user llama: the model's llama question is dropped
+    assert not dropped.missing  # no user llama: the model's llama question is dropped
 
 
 async def test_the_critic_highlight_keeps_a_word_the_user_wrote(tmp_path: Path) -> None:

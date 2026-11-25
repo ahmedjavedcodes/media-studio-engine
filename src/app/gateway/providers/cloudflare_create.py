@@ -68,6 +68,8 @@ def add_usage(sink: dict[str, Any] | None, result: dict[str, Any]) -> None:
 class CloudflareLLM:
     """A text or vision model that answers in a Pydantic schema (LLMPort)."""
 
+    provider = "cloudflare"
+
     def __init__(self, cf: CloudflareClient, model: str) -> None:
         self._cf = cf
         self.model = model
@@ -144,6 +146,11 @@ class CloudflareImages:
             fields.update(width=width, height=height)
             if negative_prompt:
                 fields["negative_prompt"] = negative_prompt
+        if options is not None:  # only models whose card lists them ever get a value
+            if options.guidance is not None:
+                fields["guidance"] = options.guidance
+            if options.steps is not None and "flux-1-schnell" not in slug:
+                fields["steps" if "flux" in slug else "num_steps"] = options.steps
         if seed is not None:
             fields["seed"] = seed
         data = await self._call(slug, fields, multipart=multipart, timeout=timeout)

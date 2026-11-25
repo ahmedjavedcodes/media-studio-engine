@@ -28,13 +28,17 @@ export type Settings = {
   resolution: "1K" | "2K";
   n: number;
   draft?: boolean; // fast, low-credit mode: the router picks the cheapest model
+  preset?: string; // style preset id, or "auto" (the router picks one from the prompt)
 };
+
+export type PresetInfo = { id: string; label: string; description: string };
 
 export type PlanInfo = { id: Plan; max_n: number; max_resolution: string; tier: Tier };
 export type PlansResponse = {
   trace_ui?: boolean; // the dev trace panel is on (TRACE_UI=true on the server, never in prod)
   plans: PlanInfo[];
   aspect_ratios: string[];
+  presets?: PresetInfo[]; // style presets. The first one is "auto"
   resolutions: { id: string; available: boolean }[];
 };
 

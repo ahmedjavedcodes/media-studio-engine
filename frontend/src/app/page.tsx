@@ -62,6 +62,7 @@ export default function Home() {
     aspect_ratio: "1:1",
     resolution: "1K",
     n: 1,
+    preset: "auto",
   });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -301,6 +302,20 @@ export default function Home() {
               {(plans?.aspect_ratios ?? ["1:1"]).map((r) => (
                 <option key={r} value={r} disabled={!!chosen && !chosen.aspect_ratios.includes(r)}>
                   {r}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2" title="The look: light, lens, colours and background">
+            Style
+            <select
+              value={settings.preset ?? "auto"}
+              onChange={(e) => setSettings((s) => ({ ...s, preset: e.target.value }))}
+              className={select}
+            >
+              {(plans?.presets ?? [{ id: "auto", label: "Auto", description: "" }]).map((p) => (
+                <option key={p.id} value={p.id} title={p.description}>
+                  {p.label}
                 </option>
               ))}
             </select>

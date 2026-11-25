@@ -1,0 +1,2161 @@
+[
+ {
+  "id": "product-perfume",
+  "subject_type": "product",
+  "look": "lifestyle",
+  "prompt": "perfume bottle on marble",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "product",
+    "use": "a lifestyle ad for a fragrance",
+    "medium": "photo"
+   },
+   "look": "lifestyle",
+   "subject": "a faceted glass perfume bottle with a brushed brass cap",
+   "world": "a marble bathroom vanity beside a window with a folded linen towel",
+   "moment": "late afternoon, the sun low and warm, the glass catching the light",
+   "subject_details": [
+    "bottle filled to the shoulder with pale amber liquid, one level line",
+    "a blank label plate in brushed brass on the front",
+    "a soft contact shadow under the base"
+   ],
+   "props": [
+    "a sprig of dried lavender",
+    "a small ceramic dish"
+   ],
+   "composition": "bottle in the right third with the vanity edge leading the eye, space on the left for a vertical frame",
+   "depth": {
+    "fg": "veined white marble counter with a visible grain",
+    "mid": "the bottle, sharp, with light passing through the amber liquid",
+    "bg": "a blurred window, a cream wall and the soft shape of a linen towel"
+   },
+   "light": {
+    "source": "low sun through a window",
+    "direction": "from the left, just above the counter",
+    "time": "golden hour",
+    "quality": "warm and directional, long soft shadows across the marble",
+    "temp": "warm"
+   },
+   "palette": [
+    "warm cream",
+    "honey gold",
+    "dusty rose"
+   ],
+   "camera": {
+    "lens": "70mm at f/2.8",
+    "angle": "eye level",
+    "dof": "shallow, focus on the cap and the shoulder of the bottle"
+   },
+   "materials": [
+    "glass",
+    "brushed brass",
+    "polished marble",
+    "linen"
+   ],
+   "realism_checks": [
+    "the liquid shows one clean level line",
+    "light through the amber glass lands as a warm patch on the marble",
+    "a contact shadow anchors the base"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day",
+    "prop layout"
+   ],
+   "must_have": [
+    "perfume bottle",
+    "marble"
+   ]
+  }
+ },
+ {
+  "id": "product-sneaker",
+  "subject_type": "product",
+  "look": "lifestyle",
+  "prompt": "a pair of white running shoes",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "product",
+    "use": "a sports brand social post",
+    "medium": "photo"
+   },
+   "look": "lifestyle",
+   "subject": "a pair of white mesh running shoes with a sage-green sole",
+   "world": "a concrete step in an empty city plaza in the early morning",
+   "moment": "just before a run, one shoe slightly turned toward the camera",
+   "subject_details": [
+    "one lace loosely tied",
+    "a textured rubber sole with a clear tread",
+    "a little dust on the toe cap"
+   ],
+   "props": [
+    "a folded grey towel",
+    "a water bottle blurred behind"
+   ],
+   "composition": "shoes low in the lower third of a square frame with the step edge leading in",
+   "depth": {
+    "fg": "rough concrete with small cracks",
+    "mid": "the shoes, sharp, one turned three-quarter",
+    "bg": "a blurred plaza with distant trees and soft morning mist"
+   },
+   "light": {
+    "source": "early sun",
+    "direction": "from the right, low",
+    "time": "sunrise",
+    "quality": "crisp and directional, short crisp shadows on the concrete",
+    "temp": "cool morning with a warm edge"
+   },
+   "palette": [
+    "concrete grey",
+    "fresh white",
+    "sage green"
+   ],
+   "camera": {
+    "lens": "50mm at f/2.8",
+    "angle": "low, close to the step",
+    "dof": "shallow, focus on the front of the nearest shoe"
+   },
+   "materials": [
+    "mesh fabric",
+    "rubber",
+    "concrete"
+   ],
+   "realism_checks": [
+    "the sole touches the step with a contact shadow",
+    "laces and mesh show real texture"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day",
+    "prop layout"
+   ],
+   "must_have": [
+    "running shoes"
+   ]
+  }
+ },
+ {
+  "id": "product-headphones",
+  "subject_type": "product",
+  "look": "studio",
+  "prompt": "wireless headphones on a white background, studio shot",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "product",
+    "use": "an e-commerce listing",
+    "medium": "photo"
+   },
+   "look": "studio",
+   "subject": "matte black wireless over-ear headphones",
+   "world": "a clean white studio surface",
+   "moment": "the headphones standing upright on a small stand-less pose, ear cups angled to the camera",
+   "subject_details": [
+    "soft leatherette ear cushions",
+    "a thin brushed aluminium band",
+    "a visible hinge detail"
+   ],
+   "props": [],
+   "composition": "centred with generous white space on all sides for a square frame",
+   "depth": {
+    "fg": "a soft contact shadow on the white surface",
+    "mid": "the headphones, sharp from cushion to band",
+    "bg": "pure white"
+   },
+   "light": {
+    "source": "broad soft light",
+    "direction": "from the front left, slightly above",
+    "time": "studio",
+    "quality": "even with a soft shadow falling right",
+    "temp": "neutral"
+   },
+   "palette": [
+    "pure white",
+    "matte black",
+    "brushed silver"
+   ],
+   "camera": {
+    "lens": "90mm macro at f/8",
+    "angle": "eye level, slightly high",
+    "dof": "deep, everything sharp"
+   },
+   "materials": [
+    "matte plastic",
+    "brushed aluminium",
+    "soft leatherette"
+   ],
+   "realism_checks": [
+    "a soft contact shadow under the base",
+    "true colours, no colour cast"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "lighting direction"
+   ],
+   "must_have": [
+    "headphones"
+   ]
+  }
+ },
+ {
+  "id": "product-watch",
+  "subject_type": "product",
+  "look": "cinematic",
+  "prompt": "a luxury wristwatch",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "product",
+    "use": "a premium watch campaign",
+    "medium": "photo"
+   },
+   "look": "cinematic",
+   "subject": "a steel dive watch with a deep blue dial",
+   "world": "a dark slate surface in a dim room lit by a single window",
+   "moment": "the watch resting on its side, a moment of calm",
+   "subject_details": [
+    "a deep blue sunburst dial with crisp hour markers",
+    "a brushed steel case with polished edges",
+    "a woven blue strap"
+   ],
+   "props": [
+    "a small brass key",
+    "a folded dark cloth"
+   ],
+   "composition": "watch in the lower left third, the strap curling toward the lower right, space above for a wide frame",
+   "depth": {
+    "fg": "dark slate with fine grain",
+    "mid": "the watch face, sharp, the dial catching a single streak of light",
+    "bg": "a dim room dissolving into darkness"
+   },
+   "light": {
+    "source": "a single window",
+    "direction": "from the upper left",
+    "time": "late afternoon",
+    "quality": "hard and narrow, a sharp highlight along the case and a deep shadow",
+    "temp": "cool with a warm spill"
+   },
+   "palette": [
+    "deep blue",
+    "steel grey",
+    "brass"
+   ],
+   "camera": {
+    "lens": "100mm macro at f/4",
+    "angle": "slightly above, three-quarter",
+    "dof": "shallow, focus on the dial"
+   },
+   "materials": [
+    "brushed steel",
+    "sapphire glass",
+    "woven fabric",
+    "slate"
+   ],
+   "realism_checks": [
+    "the glass shows one reflection from the window",
+    "the strap has real weave and a soft shadow"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "light direction"
+   ],
+   "must_have": [
+    "wristwatch"
+   ]
+  }
+ },
+ {
+  "id": "product-mug",
+  "subject_type": "product",
+  "look": "lifestyle",
+  "prompt": "a ceramic coffee mug",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "product",
+    "use": "a coffee brand post",
+    "medium": "photo"
+   },
+   "look": "lifestyle",
+   "subject": "a handmade speckled ceramic mug of black coffee",
+   "world": "a wooden kitchen table beside a rain-streaked window",
+   "moment": "a quiet morning, steam rising",
+   "subject_details": [
+    "a thumb-print glaze with cream speckles",
+    "coffee filled a thumb's width below the rim",
+    "a thin curl of steam"
+   ],
+   "props": [
+    "a folded linen napkin",
+    "a small plant blurred behind"
+   ],
+   "composition": "mug on the lower third, table edge leading in, window behind, for a vertical frame",
+   "depth": {
+    "fg": "oak table with visible grain",
+    "mid": "the mug, sharp, steam backlit",
+    "bg": "a grey rainy window and a soft green plant"
+   },
+   "light": {
+    "source": "overcast window light",
+    "direction": "from the left",
+    "time": "morning",
+    "quality": "broad and soft, gentle shadows",
+    "temp": "cool daylight with a warm lamp glow"
+   },
+   "palette": [
+    "warm oak",
+    "cream",
+    "soft grey-green"
+   ],
+   "camera": {
+    "lens": "60mm at f/2.8",
+    "angle": "eye level, slightly above the rim",
+    "dof": "shallow, focus on the rim and the steam"
+   },
+   "materials": [
+    "glazed ceramic",
+    "oak",
+    "linen"
+   ],
+   "realism_checks": [
+    "coffee fills to one level below the rim",
+    "steam rises and fades, it does not float in a line"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day",
+    "prop layout"
+   ],
+   "must_have": [
+    "mug",
+    "coffee"
+   ]
+  }
+ },
+ {
+  "id": "person-fisherman",
+  "subject_type": "person",
+  "look": "documentary",
+  "prompt": "portrait of an elderly fisherman",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "person",
+    "use": "a magazine feature",
+    "medium": "photo"
+   },
+   "look": "documentary",
+   "subject": "an elderly fisherman with a deeply weathered face",
+   "world": "a stone harbour wall at the end of a grey morning",
+   "moment": "he has just finished mending a net and looks past the camera",
+   "subject_details": [
+    "white stubble and deep lines around the eyes",
+    "a navy knitted cap",
+    "calloused hands resting on the net in his lap"
+   ],
+   "props": [
+    "a coil of rope"
+   ],
+   "composition": "head and shoulders, eyes on the upper third, for a vertical frame",
+   "depth": {
+    "fg": "a coil of rope, soft out of focus",
+    "mid": "the man, sharp, eyes in focus",
+    "bg": "a blurred grey harbour wall and a boat mast"
+   },
+   "light": {
+    "source": "overcast sky",
+    "direction": "from above and the left",
+    "time": "morning",
+    "quality": "broad and soft with gentle shadows under the brim",
+    "temp": "cool"
+   },
+   "palette": [
+    "navy",
+    "weathered tan",
+    "slate grey"
+   ],
+   "camera": {
+    "lens": "85mm at f/2",
+    "angle": "eye level",
+    "dof": "shallow, focus on the eyes"
+   },
+   "materials": [
+    "wool knit",
+    "weathered skin",
+    "rope",
+    "stone"
+   ],
+   "realism_checks": [
+    "natural skin texture with pores",
+    "hands have the right number of fingers resting naturally"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "expression"
+   ],
+   "must_have": [
+    "elderly fisherman"
+   ]
+  }
+ },
+ {
+  "id": "person-reader",
+  "subject_type": "person",
+  "look": "editorial",
+  "prompt": "a woman reading in a cafe",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "person",
+    "use": "a lifestyle editorial",
+    "medium": "photo"
+   },
+   "look": "editorial",
+   "subject": "a woman in her thirties reading a paperback",
+   "world": "a sunny corner table in a small cafe",
+   "moment": "mid-page, a quiet half-smile",
+   "subject_details": [
+    "short dark curly hair",
+    "a rust-orange wool jumper",
+    "both hands holding the book open"
+   ],
+   "props": [
+    "a white cup on a saucer",
+    "a window plant"
+   ],
+   "composition": "three-quarter view in the left two thirds of a wide frame, window light from the right",
+   "depth": {
+    "fg": "a cup and saucer on the table, soft",
+    "mid": "the woman, sharp, eyes lowered to the page",
+    "bg": "a bright window and blurred cafe shelves"
+   },
+   "light": {
+    "source": "window daylight",
+    "direction": "from the right at 45 degrees",
+    "time": "late morning",
+    "quality": "broad and soft, a bright edge on her hair",
+    "temp": "warm"
+   },
+   "palette": [
+    "rust orange",
+    "cream",
+    "dark brown"
+   ],
+   "camera": {
+    "lens": "85mm at f/2",
+    "angle": "eye level",
+    "dof": "shallow, focus on her face and the book"
+   },
+   "materials": [
+    "wool knit",
+    "paper",
+    "ceramic",
+    "wood"
+   ],
+   "realism_checks": [
+    "hands hold the book naturally, five fingers each",
+    "the cup casts a shadow on the table"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "woman",
+    "book"
+   ]
+  }
+ },
+ {
+  "id": "person-child-kite",
+  "subject_type": "person",
+  "look": "documentary",
+  "prompt": "a child flying a kite in a field",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "person",
+    "use": "a family magazine",
+    "medium": "photo"
+   },
+   "look": "documentary",
+   "subject": "a child of about seven flying a red kite",
+   "world": "an open grass field under a wide sky in the late afternoon",
+   "moment": "the kite has just caught the wind",
+   "subject_details": [
+    "a yellow raincoat",
+    "both hands gripping the string",
+    "hair blown sideways"
+   ],
+   "props": [
+    "a red diamond kite high in the sky"
+   ],
+   "composition": "child in the lower left third, the string rising to the kite in the upper right, for a wide frame",
+   "depth": {
+    "fg": "long grass blades, soft",
+    "mid": "the child, sharp, looking up",
+    "bg": "a big sky with soft clouds and a distant tree line"
+   },
+   "light": {
+    "source": "low sun",
+    "direction": "from behind-left",
+    "time": "late afternoon",
+    "quality": "warm and directional, a bright edge on the hair and the raincoat",
+    "temp": "warm"
+   },
+   "palette": [
+    "yellow",
+    "red",
+    "soft blue"
+   ],
+   "camera": {
+    "lens": "35mm at f/4",
+    "angle": "low, from the grass",
+    "dof": "medium, the child and the kite both readable"
+   },
+   "materials": [
+    "nylon raincoat",
+    "grass",
+    "kite paper"
+   ],
+   "realism_checks": [
+    "the string runs straight from the hands to the kite",
+    "shadows fall away from the sun"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "child",
+    "kite"
+   ]
+  }
+ },
+ {
+  "id": "person-musician",
+  "subject_type": "person",
+  "look": "street",
+  "prompt": "a man playing guitar on a street corner",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "person",
+    "use": "a city culture story",
+    "medium": "photo"
+   },
+   "look": "street",
+   "subject": "a man in his forties playing an acoustic guitar",
+   "world": "a corner of an old city street at dusk, shop windows glowing",
+   "moment": "between songs, head tilted toward the strings",
+   "subject_details": [
+    "a worn wooden guitar",
+    "a grey scarf",
+    "fingers on the frets"
+   ],
+   "props": [
+    "an open guitar case on the pavement"
+   ],
+   "composition": "man centred-left in a vertical frame, the shop windows glowing behind",
+   "depth": {
+    "fg": "an open guitar case on the pavement, soft",
+    "mid": "the man and the guitar, sharp",
+    "bg": "warm shop windows and passers-by blurred into colour"
+   },
+   "light": {
+    "source": "shop windows and a street lamp",
+    "direction": "from behind and the right",
+    "time": "dusk",
+    "quality": "warm pools of light on the pavement with deep shadow",
+    "temp": "warm against a cool sky"
+   },
+   "palette": [
+    "amber",
+    "deep blue",
+    "warm brown"
+   ],
+   "camera": {
+    "lens": "35mm at f/2",
+    "angle": "eye level",
+    "dof": "shallow, focus on the hands and the guitar"
+   },
+   "materials": [
+    "worn wood",
+    "wool scarf",
+    "wet stone"
+   ],
+   "realism_checks": [
+    "his hands rest on the strings naturally",
+    "reflections on the wet pavement match the window lights"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "man",
+    "guitar"
+   ]
+  }
+ },
+ {
+  "id": "animal-fox",
+  "subject_type": "animal",
+  "look": "cinematic",
+  "prompt": "a red fox in the snow",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "animal",
+    "use": "a nature magazine",
+    "medium": "photo"
+   },
+   "look": "cinematic",
+   "subject": "a red fox walking through fresh snow",
+   "world": "the edge of a pine forest on a cold winter morning",
+   "moment": "it has stopped mid-step and looks toward the camera",
+   "subject_details": [
+    "thick orange winter coat with a white chest",
+    "dark legs",
+    "frost on the whiskers",
+    "breath visible in the cold air"
+   ],
+   "props": [
+    "snow-laden pine branches in the foreground"
+   ],
+   "composition": "fox in the right third, paw prints leading in from the left, for a wide frame",
+   "depth": {
+    "fg": "snow-laden pine branches, soft",
+    "mid": "the fox, sharp, eyes in focus",
+    "bg": "dark pine trunks fading into blue mist"
+   },
+   "light": {
+    "source": "low winter sun",
+    "direction": "from the left, behind the fox",
+    "time": "early morning",
+    "quality": "warm and low with a bright edge on the fur, blue shadows on the snow",
+    "temp": "warm light, cool shadows"
+   },
+   "palette": [
+    "burnt orange",
+    "snow white",
+    "deep blue"
+   ],
+   "camera": {
+    "lens": "300mm at f/4",
+    "angle": "eye level with the fox",
+    "dof": "shallow, focus on the eyes"
+   },
+   "materials": [
+    "fur",
+    "snow",
+    "pine needles"
+   ],
+   "realism_checks": [
+    "paw prints behind it match its steps",
+    "shadows on the snow are blue and fall to the right"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "fox",
+    "snow"
+   ]
+  }
+ },
+ {
+  "id": "animal-cat-window",
+  "subject_type": "animal",
+  "look": "lifestyle",
+  "prompt": "a cat sleeping on a windowsill",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "animal",
+    "use": "a pet brand post",
+    "medium": "photo"
+   },
+   "look": "lifestyle",
+   "subject": "an orange tabby cat asleep on a windowsill",
+   "world": "a sunny kitchen windowsill beside a pot of basil",
+   "moment": "a deep afternoon nap",
+   "subject_details": [
+    "paws tucked under its chin",
+    "stripes across the back",
+    "whiskers catching the light"
+   ],
+   "props": [
+    "a terracotta pot of basil"
+   ],
+   "composition": "cat in the left third, basil on the right, for a square frame",
+   "depth": {
+    "fg": "worn white-painted wood",
+    "mid": "the cat, sharp, face resting on its paws",
+    "bg": "a blurred green garden through the glass"
+   },
+   "light": {
+    "source": "afternoon sun",
+    "direction": "through the window from the right",
+    "time": "late afternoon",
+    "quality": "warm and soft, a gold edge on the fur",
+    "temp": "warm"
+   },
+   "palette": [
+    "warm orange",
+    "basil green",
+    "cream"
+   ],
+   "camera": {
+    "lens": "50mm at f/2.8",
+    "angle": "eye level",
+    "dof": "shallow, focus on the whiskers"
+   },
+   "materials": [
+    "soft fur",
+    "painted wood",
+    "terracotta"
+   ],
+   "realism_checks": [
+    "the cat rests its weight on the sill, no floating",
+    "its shadow falls on the wood"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "cat",
+    "windowsill"
+   ]
+  }
+ },
+ {
+  "id": "animal-eagle",
+  "subject_type": "animal",
+  "look": "cinematic",
+  "prompt": "an eagle flying over mountains",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "animal",
+    "use": "a wildlife documentary still",
+    "medium": "photo"
+   },
+   "look": "cinematic",
+   "subject": "a golden eagle in flight with wings fully spread",
+   "world": "high above a rugged mountain valley at dawn",
+   "moment": "banking in a thermal, looking down",
+   "subject_details": [
+    "dark brown wings with lighter flight feathers",
+    "a golden nape",
+    "talons tucked"
+   ],
+   "props": [
+    "mountain ridges far below"
+   ],
+   "composition": "eagle in the upper right third, the valley falling away to the lower left, for a wide frame",
+   "depth": {
+    "fg": "a hazy ridge, soft",
+    "mid": "the eagle, sharp, each primary feather visible",
+    "bg": "layered mountain ranges fading into pink mist"
+   },
+   "light": {
+    "source": "sunrise",
+    "direction": "from the left, low",
+    "time": "dawn",
+    "quality": "warm and directional, a gold edge on the wing tips",
+    "temp": "warm over cool haze"
+   },
+   "palette": [
+    "pink",
+    "deep blue",
+    "gold"
+   ],
+   "camera": {
+    "lens": "400mm at f/5.6",
+    "angle": "level with the bird, slightly below",
+    "dof": "shallow, focus on the head and the leading wing"
+   },
+   "materials": [
+    "feathers",
+    "mist",
+    "rock"
+   ],
+   "realism_checks": [
+    "wings are symmetric in span and the feathers overlap naturally",
+    "the shadow of the wing falls on the bird's body"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "eagle",
+    "mountains"
+   ]
+  }
+ },
+ {
+  "id": "animal-butterfly",
+  "subject_type": "animal",
+  "look": "minimal",
+  "prompt": "a butterfly on a flower",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "animal",
+    "use": "a calm wallpaper",
+    "medium": "photo"
+   },
+   "look": "minimal",
+   "subject": "a monarch butterfly resting on a pale pink flower",
+   "world": "a quiet meadow in soft morning light",
+   "moment": "wings half open, still",
+   "subject_details": [
+    "orange wings with black veins and white dots",
+    "thin legs gripping the petal",
+    "a dewdrop on a petal"
+   ],
+   "props": [],
+   "composition": "butterfly in the centre-left with soft negative space on the right for a wide frame",
+   "depth": {
+    "fg": "a petal in soft focus",
+    "mid": "the butterfly, sharp",
+    "bg": "a smooth cream-green blur"
+   },
+   "light": {
+    "source": "soft sky",
+    "direction": "from above",
+    "time": "early morning",
+    "quality": "even and soft with tiny highlights on the dew",
+    "temp": "neutral warm"
+   },
+   "palette": [
+    "orange",
+    "pale pink",
+    "cream green"
+   ],
+   "camera": {
+    "lens": "100mm macro at f/4",
+    "angle": "eye level with the butterfly",
+    "dof": "very shallow, focus on the wing eyespots"
+   },
+   "materials": [
+    "wing scales",
+    "petal",
+    "dew"
+   ],
+   "realism_checks": [
+    "the wings are symmetrical with correct vein patterns",
+    "the dewdrop refracts the flower colour"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "flower colour"
+   ],
+   "must_have": [
+    "butterfly",
+    "flower"
+   ]
+  }
+ },
+ {
+  "id": "place-lake",
+  "subject_type": "place",
+  "look": "cinematic",
+  "prompt": "sunrise over a mountain lake",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "place",
+    "use": "a travel magazine cover",
+    "medium": "photo"
+   },
+   "look": "cinematic",
+   "subject": "a still alpine lake at sunrise",
+   "world": "a high valley ringed by snow-capped peaks",
+   "moment": "the first sun touching the highest ridge",
+   "subject_details": [
+    "glass-still water mirroring the peaks",
+    "a thin mist drifting on the surface",
+    "a few small rocks at the shore"
+   ],
+   "props": [
+    "a lone pine on the left shore"
+   ],
+   "composition": "lake across the lower half, the peaks along the upper third, for a wide frame",
+   "depth": {
+    "fg": "wet shoreline stones, soft",
+    "mid": "the mirrored lake and the near shore",
+    "bg": "snow-capped peaks catching pink light"
+   },
+   "light": {
+    "source": "rising sun",
+    "direction": "from behind the peaks, left",
+    "time": "sunrise",
+    "quality": "warm and low with a gold edge on the ridges",
+    "temp": "warm over cool shadow"
+   },
+   "palette": [
+    "pink",
+    "ice blue",
+    "gold"
+   ],
+   "camera": {
+    "lens": "35mm at f/8",
+    "angle": "low, close to the water",
+    "dof": "deep, shore to peaks sharp"
+   },
+   "materials": [
+    "still water",
+    "snow",
+    "granite",
+    "mist"
+   ],
+   "realism_checks": [
+    "the reflection matches the peaks upside down",
+    "mist hugs the water and thins with height"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "mountain lake",
+    "sunrise"
+   ]
+  }
+ },
+ {
+  "id": "place-old-street",
+  "subject_type": "place",
+  "look": "street",
+  "prompt": "an old stone street in a European city after rain",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "place",
+    "use": "a travel feature",
+    "medium": "photo"
+   },
+   "look": "street",
+   "subject": "a narrow cobbled street between old stone houses",
+   "world": "an old town in the evening just after rain",
+   "moment": "the lamps have just come on",
+   "subject_details": [
+    "wet cobblestones reflecting the lamps",
+    "wrought-iron balconies",
+    "warm lit windows"
+   ],
+   "props": [
+    "a bicycle leaning against a wall"
+   ],
+   "composition": "the street running from the lower right to the vanishing point, for a vertical frame",
+   "depth": {
+    "fg": "glossy wet cobblestones",
+    "mid": "the street and the bicycle, sharp",
+    "bg": "warm lit windows and a church tower in blue dusk"
+   },
+   "light": {
+    "source": "street lamps and windows",
+    "direction": "from both sides, low",
+    "time": "dusk",
+    "quality": "warm pools of light on the stones, deep shadow between",
+    "temp": "warm against a cool blue sky"
+   },
+   "palette": [
+    "amber",
+    "deep blue",
+    "stone grey"
+   ],
+   "camera": {
+    "lens": "28mm at f/4",
+    "angle": "eye level, slightly low",
+    "dof": "deep, foreground to tower"
+   },
+   "materials": [
+    "wet stone",
+    "iron",
+    "glass"
+   ],
+   "realism_checks": [
+    "reflections on the wet stones match the lamp positions",
+    "verticals stay straight"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "old street",
+    "wet cobblestones"
+   ]
+  }
+ },
+ {
+  "id": "place-beach",
+  "subject_type": "place",
+  "look": "cinematic",
+  "prompt": "a quiet beach at sunset",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "place",
+    "use": "a wallpaper",
+    "medium": "photo"
+   },
+   "look": "cinematic",
+   "subject": "an empty sandy beach at sunset",
+   "world": "a wide coast with a calm sea and a low sun",
+   "moment": "the last half hour of light",
+   "subject_details": [
+    "wet sand mirroring the sky",
+    "ripples in the sand",
+    "foam lines from small waves"
+   ],
+   "props": [
+    "a driftwood log on the right"
+   ],
+   "composition": "horizon on the upper third, the shoreline running in from the lower left, for a wide frame",
+   "depth": {
+    "fg": "ripples and foam in the sand",
+    "mid": "the wet sand mirror and the driftwood",
+    "bg": "a calm sea and a low orange sun"
+   },
+   "light": {
+    "source": "low sun",
+    "direction": "from the right, at the horizon",
+    "time": "sunset",
+    "quality": "warm and directional, long shadows across the ripples",
+    "temp": "warm"
+   },
+   "palette": [
+    "amber",
+    "coral",
+    "deep teal"
+   ],
+   "camera": {
+    "lens": "24mm at f/8",
+    "angle": "low, near the sand",
+    "dof": "deep, ripples to horizon"
+   },
+   "materials": [
+    "wet sand",
+    "foam",
+    "driftwood"
+   ],
+   "realism_checks": [
+    "the sky reflects on the wet sand",
+    "ripples cast shadows away from the sun"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "beach",
+    "sunset"
+   ]
+  }
+ },
+ {
+  "id": "place-glass-building",
+  "subject_type": "place",
+  "look": "architectural",
+  "prompt": "a modern glass building against a blue sky",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "place",
+    "use": "an architecture magazine",
+    "medium": "photo"
+   },
+   "look": "architectural",
+   "subject": "a modern glass office tower with a gently curved facade",
+   "world": "a plaza in the early morning",
+   "moment": "the sun just reaching the upper floors",
+   "subject_details": [
+    "a facade of glass panels reflecting clouds",
+    "slim steel mullions",
+    "a stone plaza at the base"
+   ],
+   "props": [
+    "a young tree in a planter on the left"
+   ],
+   "composition": "tower rising from the lower left to the upper right, leading lines of the facade, for a vertical frame",
+   "depth": {
+    "fg": "stone paving and a planter, soft",
+    "mid": "the tower, sharp, verticals straight",
+    "bg": "a deep blue sky with thin clouds"
+   },
+   "light": {
+    "source": "morning sun",
+    "direction": "from the left, raking",
+    "time": "early morning",
+    "quality": "crisp and directional, a warm band across the upper floors",
+    "temp": "warm on cool blue"
+   },
+   "palette": [
+    "deep blue",
+    "warm stone",
+    "silver"
+   ],
+   "camera": {
+    "lens": "24mm tilt-corrected at f/8",
+    "angle": "low, looking up",
+    "dof": "deep, everything sharp"
+   },
+   "materials": [
+    "glass",
+    "steel",
+    "stone"
+   ],
+   "realism_checks": [
+    "reflections in the glass show the clouds and the buildings opposite",
+    "vertical lines stay vertical"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "glass building",
+    "blue sky"
+   ]
+  }
+ },
+ {
+  "id": "place-village-dusk",
+  "subject_type": "place",
+  "look": "documentary",
+  "prompt": "a village at dusk in the mountains",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "place",
+    "use": "a travel documentary",
+    "medium": "photo"
+   },
+   "look": "documentary",
+   "subject": "a small stone village on a mountain slope",
+   "world": "a high valley at dusk with smoke rising from chimneys",
+   "moment": "lights coming on in the windows",
+   "subject_details": [
+    "flat stone roofs",
+    "terraced fields",
+    "a winding dirt path"
+   ],
+   "props": [
+    "a few goats on the path"
+   ],
+   "composition": "village in the middle ground on the right, the path leading in from the lower left, for a wide frame",
+   "depth": {
+    "fg": "dry grass and stones, soft",
+    "mid": "the village, sharp",
+    "bg": "mountains in blue haze under a violet sky"
+   },
+   "light": {
+    "source": "dusk sky and house lights",
+    "direction": "from the sky and the windows",
+    "time": "dusk",
+    "quality": "soft and cool with warm window dots",
+    "temp": "cool with warm accents"
+   },
+   "palette": [
+    "violet",
+    "slate blue",
+    "warm amber"
+   ],
+   "camera": {
+    "lens": "50mm at f/5.6",
+    "angle": "slightly elevated",
+    "dof": "deep"
+   },
+   "materials": [
+    "stone",
+    "smoke",
+    "dry grass"
+   ],
+   "realism_checks": [
+    "smoke rises and bends with one wind direction",
+    "window lights are warmer than the sky"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "village",
+    "mountains"
+   ]
+  }
+ },
+ {
+  "id": "food-ramen",
+  "subject_type": "food",
+  "look": "food",
+  "prompt": "a bowl of ramen with steam",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "food",
+    "use": "a restaurant menu",
+    "medium": "photo"
+   },
+   "look": "food",
+   "subject": "a bowl of tonkotsu ramen with a soft egg",
+   "world": "a dark wooden counter in a small ramen shop",
+   "moment": "just served, steam rising",
+   "subject_details": [
+    "a halved soft-boiled egg with a jammy yolk",
+    "slices of pork belly",
+    "green onion rings",
+    "a glossy broth"
+   ],
+   "props": [
+    "wooden chopsticks resting on the bowl",
+    "a small bowl of pickled ginger"
+   ],
+   "composition": "bowl in the lower centre, chopsticks pointing to the upper right, for a square frame",
+   "depth": {
+    "fg": "dark wood counter with a few spilled sesame seeds",
+    "mid": "the bowl, sharp on the egg and the pork",
+    "bg": "warm shop lights blurred behind"
+   },
+   "light": {
+    "source": "side window and a warm pendant lamp",
+    "direction": "from the left, a backlight on the steam",
+    "time": "evening",
+    "quality": "soft and warm, steam glowing",
+    "temp": "warm"
+   },
+   "palette": [
+    "warm brown",
+    "cream",
+    "fresh green"
+   ],
+   "camera": {
+    "lens": "60mm macro at f/3.2",
+    "angle": "40 degrees above the bowl",
+    "dof": "shallow, focus on the egg"
+   },
+   "materials": [
+    "glossy broth",
+    "pork",
+    "ceramic",
+    "dark wood"
+   ],
+   "realism_checks": [
+    "steam rises and curls, it does not form a flat wall",
+    "broth glossy with small fat droplets"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "prop layout"
+   ],
+   "must_have": [
+    "ramen",
+    "egg"
+   ]
+  }
+ },
+ {
+  "id": "food-pizza",
+  "subject_type": "food",
+  "look": "food",
+  "prompt": "a fresh pizza",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "food",
+    "use": "a pizzeria social post",
+    "medium": "photo"
+   },
+   "look": "food",
+   "subject": "a wood-fired margherita pizza",
+   "world": "a rustic wooden table beside a stone oven",
+   "moment": "straight from the oven, the cheese still bubbling",
+   "subject_details": [
+    "blistered charred crust edges",
+    "melted mozzarella in soft pools",
+    "torn basil leaves",
+    "tomato sauce showing through"
+   ],
+   "props": [
+    "a small bowl of olive oil",
+    "a linen cloth"
+   ],
+   "composition": "pizza filling the lower two thirds, one slice lifted slightly, for a square frame",
+   "depth": {
+    "fg": "flour dust on the wood",
+    "mid": "the pizza, sharp on the cheese and basil",
+    "bg": "a blurred stone oven with a warm glow"
+   },
+   "light": {
+    "source": "oven glow and a window",
+    "direction": "from behind-right and the left",
+    "time": "evening",
+    "quality": "warm with glossy highlights on the cheese",
+    "temp": "warm"
+   },
+   "palette": [
+    "tomato red",
+    "cream",
+    "basil green"
+   ],
+   "camera": {
+    "lens": "50mm at f/3.5",
+    "angle": "45 degrees above",
+    "dof": "medium, the whole pizza readable"
+   },
+   "materials": [
+    "charred dough",
+    "mozzarella",
+    "basil"
+   ],
+   "realism_checks": [
+    "the cheese stretches in a thin strand from the lifted slice",
+    "char is darker at the crust edge"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "prop layout"
+   ],
+   "must_have": [
+    "pizza",
+    "basil"
+   ]
+  }
+ },
+ {
+  "id": "food-cake",
+  "subject_type": "food",
+  "look": "food",
+  "prompt": "a chocolate cake slice",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "food",
+    "use": "a bakery menu",
+    "medium": "photo"
+   },
+   "look": "food",
+   "subject": "a slice of dark chocolate cake with ganache",
+   "world": "a marble cafe table beside a window",
+   "moment": "freshly cut, a fork resting beside it",
+   "subject_details": [
+    "glossy ganache dripping down the side",
+    "layers of moist crumb",
+    "cocoa dust on the plate"
+   ],
+   "props": [
+    "a silver fork",
+    "a small cup of espresso"
+   ],
+   "composition": "slice on the lower right third, the espresso behind on the left, for a wide frame",
+   "depth": {
+    "fg": "cocoa dust on a white plate",
+    "mid": "the slice, sharp on the ganache edge",
+    "bg": "a soft cafe window and a blurred plant"
+   },
+   "light": {
+    "source": "window daylight",
+    "direction": "from the left",
+    "time": "late morning",
+    "quality": "soft with a highlight on the ganache",
+    "temp": "neutral warm"
+   },
+   "palette": [
+    "deep brown",
+    "white",
+    "warm gold"
+   ],
+   "camera": {
+    "lens": "90mm macro at f/3.5",
+    "angle": "30 degrees above",
+    "dof": "shallow, focus on the front edge of the ganache"
+   },
+   "materials": [
+    "ganache",
+    "crumb",
+    "marble",
+    "porcelain"
+   ],
+   "realism_checks": [
+    "the ganache drips and pools on the plate under gravity",
+    "crumb texture shows moisture"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "prop layout"
+   ],
+   "must_have": [
+    "chocolate cake"
+   ]
+  }
+ },
+ {
+  "id": "food-chai",
+  "subject_type": "food",
+  "look": "lifestyle",
+  "prompt": "a cup of chai",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "food",
+    "use": "a tea brand post",
+    "medium": "photo"
+   },
+   "look": "lifestyle",
+   "subject": "a glass cup of dark milk tea with steam",
+   "world": "a roadside table on a cool evening",
+   "moment": "freshly poured",
+   "subject_details": [
+    "a golden foam ring at the rim",
+    "tea filled to a thumb below the rim",
+    "a thin curl of steam"
+   ],
+   "props": [
+    "a steel plate of biscuits",
+    "a spoon in the saucer"
+   ],
+   "composition": "cup in the centre-left of a square frame, the plate beside it",
+   "depth": {
+    "fg": "a worn metal table",
+    "mid": "the cup, sharp, steam backlit",
+    "bg": "blurred warm street lights and a motorbike"
+   },
+   "light": {
+    "source": "street lamp and shop lights",
+    "direction": "from behind",
+    "time": "evening",
+    "quality": "warm and soft, the steam glowing",
+    "temp": "warm"
+   },
+   "palette": [
+    "amber",
+    "milk tea brown",
+    "deep blue"
+   ],
+   "camera": {
+    "lens": "50mm at f/2",
+    "angle": "eye level",
+    "dof": "shallow, focus on the rim"
+   },
+   "materials": [
+    "glass",
+    "steam",
+    "worn metal"
+   ],
+   "realism_checks": [
+    "tea fills to one level below the rim",
+    "steam rises and fades"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "prop layout"
+   ],
+   "must_have": [
+    "chai"
+   ]
+  }
+ },
+ {
+  "id": "fantasy-dragon",
+  "subject_type": "fantasy",
+  "look": "fantasy",
+  "prompt": "a dragon on a ruined castle tower",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "fantasy",
+    "use": "a fantasy book cover",
+    "medium": "digital painting"
+   },
+   "look": "fantasy",
+   "subject": "a huge bronze dragon coiled around a ruined castle tower",
+   "world": "a stormy mountain at dusk with broken stone walls",
+   "moment": "about to take off, wings half raised",
+   "subject_details": [
+    "bronze scales with green verdigris",
+    "glowing amber eyes",
+    "torn wing membranes"
+   ],
+   "props": [
+    "a broken banner on the tower",
+    "fallen stones below"
+   ],
+   "composition": "tower on the left, dragon rising to the upper right, for a vertical frame",
+   "depth": {
+    "fg": "fallen stones and mist, soft",
+    "mid": "the dragon on the tower, sharp",
+    "bg": "storm clouds with a break of orange light"
+   },
+   "light": {
+    "source": "a break in the clouds",
+    "direction": "from the lower right behind the dragon",
+    "time": "dusk",
+    "quality": "warm and strong, an amber rim on the scales",
+    "temp": "warm against cool storm"
+   },
+   "palette": [
+    "bronze",
+    "storm grey",
+    "ember orange"
+   ],
+   "camera": {
+    "lens": "35mm equivalent",
+    "angle": "low angle",
+    "dof": "medium, the dragon sharp"
+   },
+   "materials": [
+    "bronze scales",
+    "weathered stone",
+    "torn leather wing"
+   ],
+   "realism_checks": [
+    "the dragon's weight rests on the tower with claws gripping stone",
+    "mist sits low around the base"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "dragon",
+    "castle tower"
+   ]
+  }
+ },
+ {
+  "id": "fantasy-floating-island",
+  "subject_type": "fantasy",
+  "look": "fantasy",
+  "prompt": "a floating island with a waterfall",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "fantasy",
+    "use": "a game concept art",
+    "medium": "digital painting"
+   },
+   "look": "fantasy",
+   "subject": "a floating island with a waterfall pouring into the clouds",
+   "world": "a sky of layered clouds at sunrise",
+   "moment": "the first light on the island's forest",
+   "subject_details": [
+    "a rocky underside with hanging roots",
+    "a green meadow and a stone arch",
+    "a thin waterfall dissolving into mist"
+   ],
+   "props": [
+    "a tiny wooden bridge"
+   ],
+   "composition": "island in the upper centre, the waterfall falling to the lower right, for a wide frame",
+   "depth": {
+    "fg": "cloud tops, soft",
+    "mid": "the island, sharp, rocks and waterfall readable",
+    "bg": "a pink and gold sky with distant islands"
+   },
+   "light": {
+    "source": "sunrise",
+    "direction": "from the left, low",
+    "time": "dawn",
+    "quality": "warm and soft with a gold edge on the rocks",
+    "temp": "warm"
+   },
+   "palette": [
+    "emerald",
+    "gold",
+    "soft pink"
+   ],
+   "camera": {
+    "lens": "24mm equivalent",
+    "angle": "slightly below the island",
+    "dof": "deep"
+   },
+   "materials": [
+    "rock",
+    "moss",
+    "mist",
+    "wood"
+   ],
+   "realism_checks": [
+    "the waterfall breaks into mist before it reaches the clouds",
+    "roots hang down with gravity"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "time of day"
+   ],
+   "must_have": [
+    "floating island",
+    "waterfall"
+   ]
+  }
+ },
+ {
+  "id": "fantasy-robot-garden",
+  "subject_type": "fantasy",
+  "look": "3d_render",
+  "prompt": "a robot watering plants in a greenhouse",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "fantasy",
+    "use": "a children's book illustration",
+    "medium": "3D render"
+   },
+   "look": "3d_render",
+   "subject": "a small friendly robot with a copper watering can",
+   "world": "a glass greenhouse full of leafy plants in the morning",
+   "moment": "it tips the can over a young seedling",
+   "subject_details": [
+    "rounded body with a blue panel",
+    "two round lens eyes",
+    "a dented copper watering can"
+   ],
+   "props": [
+    "a row of potted seedlings",
+    "a wooden crate"
+   ],
+   "composition": "robot in the left third, the seedling in the lower right, for a wide frame",
+   "depth": {
+    "fg": "a wet stone floor with small puddles",
+    "mid": "the robot and the seedling, sharp",
+    "bg": "glass walls and tall green plants in soft focus"
+   },
+   "light": {
+    "source": "morning sun through glass",
+    "direction": "from the upper right",
+    "time": "morning",
+    "quality": "soft with warm rays and gentle shadows",
+    "temp": "warm"
+   },
+   "palette": [
+    "copper",
+    "leaf green",
+    "sky blue"
+   ],
+   "camera": {
+    "lens": "50mm virtual camera at f/4",
+    "angle": "slightly above",
+    "dof": "shallow, focus on the water stream"
+   },
+   "materials": [
+    "brushed metal",
+    "wet leaves",
+    "glass"
+   ],
+   "realism_checks": [
+    "water falls straight down from the can with a clear arc",
+    "puddles reflect the glass roof"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "prop layout"
+   ],
+   "must_have": [
+    "robot",
+    "watering can",
+    "plants"
+   ]
+  }
+ },
+ {
+  "id": "fantasy-wizard-tower",
+  "subject_type": "fantasy",
+  "look": "cinematic",
+  "prompt": "a wizard tower at night",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "fantasy",
+    "use": "a game world poster",
+    "medium": "digital painting"
+   },
+   "look": "cinematic",
+   "subject": "a tall crooked stone wizard tower with one lit window",
+   "world": "a cliff above a dark forest under a huge moon",
+   "moment": "a pale glow in the top window",
+   "subject_details": [
+    "a spiral of stone steps up the side",
+    "a copper roof turned green",
+    "a faint violet glow from the window"
+   ],
+   "props": [
+    "a lantern on the path"
+   ],
+   "composition": "tower in the right third rising from the lower right, the moon in the upper left, for a vertical frame",
+   "depth": {
+    "fg": "dark rocks and grass, soft",
+    "mid": "the tower, sharp",
+    "bg": "a big pale moon and thin clouds above a black forest"
+   },
+   "light": {
+    "source": "the moon and one window",
+    "direction": "from the upper left and the tower window",
+    "time": "night",
+    "quality": "cool and soft with one warm violet accent",
+    "temp": "cool with a violet accent"
+   },
+   "palette": [
+    "midnight blue",
+    "pale silver",
+    "violet"
+   ],
+   "camera": {
+    "lens": "28mm equivalent",
+    "angle": "low angle looking up",
+    "dof": "deep"
+   },
+   "materials": [
+    "old stone",
+    "weathered copper",
+    "moss"
+   ],
+   "realism_checks": [
+    "the moon lights one side of the tower and the other side stays dark",
+    "the window glow lands on nearby stones"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "camera angle",
+    "moon position"
+   ],
+   "must_have": [
+    "wizard tower",
+    "night"
+   ]
+  }
+ },
+ {
+  "id": "poster-coffee",
+  "subject_type": "poster",
+  "look": "flat_illustration",
+  "prompt": "a coffee shop poster with the headline \"FRESH ROAST\"",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "poster",
+    "use": "a coffee shop poster",
+    "medium": "flat illustration"
+   },
+   "look": "flat_illustration",
+   "subject": "a vertical coffee shop poster with a flat illustration of a steaming cup",
+   "world": "a warm cream poster field",
+   "moment": "none, a graphic layout",
+   "subject_details": [
+    "a white ceramic cup on a saucer",
+    "three thin steam curls",
+    "a caramel and terracotta palette"
+   ],
+   "props": [],
+   "composition": "headline across the top third, the cup centred below, calm space around the lettering, vertical frame",
+   "depth": {
+    "fg": "",
+    "mid": "the cup and saucer",
+    "bg": "a flat warm cream field"
+   },
+   "light": {
+    "source": "none",
+    "direction": "flat graphic lighting",
+    "time": "none",
+    "quality": "even and flat",
+    "temp": "neutral"
+   },
+   "palette": [
+    "espresso brown",
+    "caramel",
+    "cream"
+   ],
+   "camera": {
+    "lens": "straight-on flat view",
+    "angle": "straight-on",
+    "dof": "none"
+   },
+   "materials": [
+    "flat colour",
+    "matte paper print"
+   ],
+   "realism_checks": [
+    "the saucer sits under the cup with one clean shadow shape",
+    "steam curls rise and fade"
+   ],
+   "text": {
+    "exact": "FRESH ROAST",
+    "placement": "across the top third, centred, bold geometric sans-serif in espresso brown",
+    "policy": "only these words; no other text anywhere"
+   },
+   "variation_axes": [
+    "colour balance",
+    "cup size"
+   ],
+   "must_have": [
+    "headline FRESH ROAST",
+    "coffee cup"
+   ]
+  }
+ },
+ {
+  "id": "poster-sale-banner",
+  "subject_type": "poster",
+  "look": "flat_illustration",
+  "prompt": "a summer sale banner with the text \"50% OFF\"",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "poster",
+    "use": "a shop banner",
+    "medium": "flat illustration"
+   },
+   "look": "flat_illustration",
+   "subject": "a wide summer sale banner with a bold offer",
+   "world": "a bright flat graphic field",
+   "moment": "none, a graphic layout",
+   "subject_details": [
+    "a large yellow sun shape",
+    "flat blue wave stripes along the bottom",
+    "a coral starburst behind the words"
+   ],
+   "props": [],
+   "composition": "the offer on the left two thirds in large lettering, the sun on the right, wide frame",
+   "depth": {
+    "fg": "",
+    "mid": "the lettering on the starburst",
+    "bg": "a flat sky-blue field"
+   },
+   "light": {
+    "source": "none",
+    "direction": "flat graphic lighting",
+    "time": "none",
+    "quality": "even and flat",
+    "temp": "warm"
+   },
+   "palette": [
+    "sky blue",
+    "sun yellow",
+    "coral"
+   ],
+   "camera": {
+    "lens": "straight-on flat view",
+    "angle": "straight-on",
+    "dof": "none"
+   },
+   "materials": [
+    "flat colour"
+   ],
+   "realism_checks": [
+    "text stays readable with strong contrast against the starburst"
+   ],
+   "text": {
+    "exact": "50% OFF",
+    "placement": "left two thirds, very large bold sans-serif in white on the coral starburst",
+    "policy": "only these words; no other text anywhere"
+   },
+   "variation_axes": [
+    "colour balance",
+    "sun position"
+   ],
+   "must_have": [
+    "text 50% OFF"
+   ]
+  }
+ },
+ {
+  "id": "abstract-waves",
+  "subject_type": "abstract",
+  "look": "minimal",
+  "prompt": "an abstract pattern of blue waves",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "abstract",
+    "use": "a calm wallpaper",
+    "medium": "digital art"
+   },
+   "look": "minimal",
+   "subject": "flowing layered blue wave shapes",
+   "world": "a seamless soft gradient field",
+   "moment": "none",
+   "subject_details": [
+    "five overlapping wave bands in graduated blues",
+    "smooth curved edges",
+    "a thin pale highlight along each crest"
+   ],
+   "props": [],
+   "composition": "waves sweeping from the lower left to the upper right with calm space at the top, for a wide frame",
+   "depth": {
+    "fg": "",
+    "mid": "the layered wave bands",
+    "bg": "a pale blue gradient"
+   },
+   "light": {
+    "source": "none",
+    "direction": "soft gradient light from above",
+    "time": "none",
+    "quality": "smooth with soft shadow between the bands",
+    "temp": "cool"
+   },
+   "palette": [
+    "deep navy",
+    "cerulean",
+    "pale ice blue"
+   ],
+   "camera": {
+    "lens": "flat front view",
+    "angle": "straight-on",
+    "dof": "none"
+   },
+   "materials": [
+    "smooth paper-cut layers"
+   ],
+   "realism_checks": [
+    "each band casts a soft shadow on the one below",
+    "the curves stay smooth and consistent"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "colour balance",
+    "wave direction"
+   ],
+   "must_have": [
+    "blue waves"
+   ]
+  }
+ },
+ {
+  "id": "abstract-geometric",
+  "subject_type": "abstract",
+  "look": "minimal",
+  "prompt": "geometric shapes in warm colours",
+  "aesthetic": 9,
+  "realism": 9,
+  "plan": {
+   "intent": {
+    "subject_type": "abstract",
+    "use": "a poster background",
+    "medium": "digital art"
+   },
+   "look": "minimal",
+   "subject": "a balanced arrangement of geometric shapes",
+   "world": "a flat warm off-white field",
+   "moment": "none",
+   "subject_details": [
+    "a large terracotta circle",
+    "a mustard half-circle",
+    "a thin dark green rectangle",
+    "sharp clean edges"
+   ],
+   "props": [],
+   "composition": "the circle off-centre left, the shapes balanced with generous empty space, for a square frame",
+   "depth": {
+    "fg": "",
+    "mid": "the shapes in a calm arrangement",
+    "bg": "an off-white field"
+   },
+   "light": {
+    "source": "none",
+    "direction": "even soft light",
+    "time": "none",
+    "quality": "flat with faint paper shadows",
+    "temp": "warm"
+   },
+   "palette": [
+    "terracotta",
+    "mustard",
+    "dark green"
+   ],
+   "camera": {
+    "lens": "straight-on flat view",
+    "angle": "straight-on",
+    "dof": "none"
+   },
+   "materials": [
+    "matte paper"
+   ],
+   "realism_checks": [
+    "shapes cast the same soft shadow direction",
+    "edges are crisp"
+   ],
+   "text": {
+    "exact": null,
+    "placement": "",
+    "policy": "no text anywhere; any label shows a blank label plate"
+   },
+   "variation_axes": [
+    "colour balance",
+    "shape arrangement"
+   ],
+   "must_have": [
+    "geometric shapes"
+   ]
+  }
+ }
+]

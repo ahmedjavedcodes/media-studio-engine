@@ -2,17 +2,17 @@
 
 import pytest
 
-from app.agents.image_grand.workers.brief import Brief
+from app.agents.image_grand.workers.prompt_writer import render_template as template_prompt
+from app.agents.image_grand.workers.shot_plan import ShotPlan
 from app.core.errors import ContentRefused
 from app.gateway.compiler import (
     build_prompt,
     guard_prompt,
     strip_weak_words,
-    template_prompt,
     trim_words,
 )
 from app.gateway.registry import load_registry
-from tests.unit.create_helpers import good_brief
+from tests.unit.create_helpers import good_plan as good_brief
 
 
 def card(model_id: str):  # type: ignore[no-untyped-def]
@@ -97,9 +97,9 @@ def test_code_mode_is_byte_identical_for_the_same_brief() -> None:
 
 def test_code_mode_uses_the_family_template_style() -> None:
     brief = good_brief()
-    keywords = template_prompt(card("flux-2-klein-4b"), brief)
-    sentences = template_prompt(card("lucid-origin"), brief)
-    assert ", " in keywords and "." not in keywords
+    keywords = template_prompt(card("seedream-5-flash"), brief)  # a keyword family
+    sentences = template_prompt(card("flux-2-klein-4b"), brief)  # FLUX is prose (BFL docs)
+    assert ", " in keywords and ". " not in keywords
     assert sentences.endswith(".") and sentences.count(".") >= 3
 
 
@@ -110,8 +110,8 @@ def test_llm_mode_uses_the_final_prompt_and_falls_back_to_the_brief() -> None:
     )
     assert llm.prompt == "my llm prompt"
     fallback = build_prompt(card("flux-2-klein-4b"), brief, None, mode="llm", aspect_ratio="1:1")
-    assert "iced coffee cup" in fallback.prompt
+    assert "iced coffee cup" in fallback.prompt.lower()
 
 
 def test_empty_brief_template_is_empty() -> None:
-    assert template_prompt(card("flux-2-klein-4b"), Brief()) == ""
+    assert template_prompt(card("flux-2-klein-4b"), ShotPlan()) == ""

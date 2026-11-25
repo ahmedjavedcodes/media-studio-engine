@@ -10,6 +10,17 @@ import os
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGSMITH_API_KEY"] = ""
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
+# The owner's dev switches in `.env` (paid providers, testing models, trace panel) must not leak
+# into tests. Tests that need one turn it on themselves.
+for _flag in (
+    "OPENROUTER_IMAGES",
+    "FAL_IMAGES",
+    "GROQ_LLM",
+    "GROQ_FALLBACK",
+    "ALLOW_TESTING_MODELS",
+    "TRACE_UI",
+):
+    os.environ[_flag] = "false"
 
 # The OpenRouter adapter pauses a second before its one retry. Tests do not wait.
 from app.gateway.providers import openrouter_images  # noqa: E402

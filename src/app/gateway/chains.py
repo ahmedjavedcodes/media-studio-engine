@@ -32,4 +32,7 @@ def load_chain(settings: Settings, path: Path | None = None) -> Chain:
         providers = ["fal", *providers]
     if settings.openrouter_images:
         providers = ["openrouter", *providers]
-    return chain.model_copy(update={"image_providers": providers, "paid": paid})
+    update: dict[str, Any] = {"image_providers": providers, "paid": paid}
+    if settings.groq_llm:  # the enhancer thinks on Groq. The critic and the guardrail do not move
+        update["enhancer"] = LLMChoice(provider="groq", model=settings.groq_enhancer_model)
+    return chain.model_copy(update=update)

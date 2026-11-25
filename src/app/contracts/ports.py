@@ -83,6 +83,7 @@ class LLMPort(Protocol):
     """One text or vision model that answers in a Pydantic schema. No free text parsing."""
 
     model: str
+    provider: str
 
     async def complete_json[T: BaseModel](
         self,
@@ -113,6 +114,10 @@ class ImageOptions:
     complexity: int | None = None  # GPT Image 2.6 only
     endpoint: str = "images"  # OpenRouter: "images" or "chat" (Gemini, multi-turn)
     history: tuple[dict[str, Any], ...] = ()  # earlier chat messages, for multi-turn edits
+    # Sent only to models that list them in `supported_params` (registry). None = not sent.
+    guidance: float | None = None
+    steps: int | None = None
+    style: str | None = None
 
 
 @dataclass(frozen=True)

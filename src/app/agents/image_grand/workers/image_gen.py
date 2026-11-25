@@ -89,7 +89,9 @@ async def generate_one(
             model_name=card.name,
             slug=entry.slug if entry else None,
             cost_usd=image.cost_usd,  # what the provider billed (None if it did not say)
-            cost_estimate_usd=entry.cost if entry else card.cost_per_image,
+            cost_estimate_usd=(
+                card.cost_for(entry, opts.quality) if entry else card.cost_per_image
+            ),
             bytes=len(image.data),
             media_type=info.mime,
             options={
@@ -99,6 +101,9 @@ async def generate_one(
                 "endpoint": opts.endpoint,
                 "references": len(opts.references),
                 "brand_colors": len(opts.brand_colors),
+                "guidance": opts.guidance,
+                "steps": opts.steps,
+                "style": opts.style,
             },
             prompt_words=len(compiled.prompt.split()),
             image_id=f"img_{index + 1}",

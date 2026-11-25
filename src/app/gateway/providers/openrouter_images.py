@@ -81,6 +81,20 @@ def build_images_body(
         }
     if options.complexity is not None and _NO_LOW_QUALITY.match(slug):
         provider_options["openai"] = {"complexity": options.complexity}
+    # guidance, steps and style are not top-level OpenRouter fields. They go to the upstream
+    # vendor under `provider.options` (docs example: black-forest-labs {steps, guidance}), and
+    # only for a model whose registry card lists them.
+    extra = {
+        k: v
+        for k, v in (
+            ("guidance", options.guidance),
+            ("steps", options.steps),
+            ("style", options.style),
+        )
+        if v is not None
+    }
+    if extra:
+        provider_options.setdefault(slug.split("/", 1)[0], {}).update(extra)
     if provider_options:
         body["provider"] = {"options": provider_options}
     return body

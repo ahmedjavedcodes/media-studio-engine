@@ -11,11 +11,13 @@ a benchmark gives every model the exact same prompt.
 import re
 from dataclasses import dataclass
 
-from app.agents.image_grand.workers.brief import Brief
+from app.agents.image_grand.workers import plan_rules
+from app.agents.image_grand.workers.prompt_writer import render_template
+from app.agents.image_grand.workers.shot_plan import ShotPlan
 from app.core.errors import ContentRefused
 from app.gateway.registry import ModelCard
 from app.guardrails.blocklists import is_blocked
-from app.tools.sizes import dimensions
+from app.tools.sizes import dimensions, snap_native
 
 # Weak words make a model produce flat, vague images (spec section 4 [4]). Longest first.
 _WEAK = (
@@ -33,6 +35,13 @@ _WEAK = (
     "balanced",
     "fading",
     "pristine",
+    # Generic quality words say nothing a viewer can see (item 1: every word visible and specific)
+    "highly detailed",
+    "high detail",
+    "beautiful",
+    "stunning",
+    "masterpiece",
+    "breathtaking",
 )
 # Anything that looks like an API parameter inside the text: `--ar 16:9`, `--seed 5`, `width=512`.
 _FLAG_RE = re.compile(
@@ -78,22 +87,6 @@ def trim_words(text: str, max_words: int) -> str:
     return text if len(words) <= max_words else " ".join(words[:max_words]).rstrip(",.")
 
 
-def _parts(brief: Brief, keep: frozenset[str]) -> list[str]:
-    scene = " ".join(p for p in (brief.subject, brief.action) if p)
-    parts = [scene, brief.setting, *brief.details, brief.lighting, brief.camera, brief.style]
-    return [p for p in (strip_weak_words(x, keep) for x in parts if x) if p]
-
-
-def template_prompt(card: ModelCard, brief: Brief, user_prompt: str = "") -> str:
-    """COMPILE_MODE=code: the prompt built from the brief. Same brief, same bytes."""
-    parts = _parts(brief, user_weak_words(user_prompt))
-    if not parts:
-        return ""
-    if card.prompt_style == "sentences":
-        return " ".join(p[0].upper() + p[1:].rstrip(".") + "." for p in parts)
-    return ", ".join(parts)
-
-
 def guard_prompt(
     card: ModelCard,
     text: str,
@@ -105,12 +98,16 @@ def guard_prompt(
     """Trim, clean and check `text`, then add the size. Raises ContentRefused on a blocklist hit.
     Weak words that appear in `user_prompt` are kept, because the user asked for them."""
     keep = user_weak_words(user_prompt)
+    if not plan_rules._BANNED.search(user_prompt):  # the user did not ask for these ideas
+        text = plan_rules._BANNED.sub("", text)
     cleaned = trim_words(strip_weak_words(text, keep), card.prompt_max_words)
     if not cleaned:
         raise ContentRefused("This request can't be turned into an image prompt.")
     if is_blocked(cleaned):  # the text is LLM output, so it is untrusted
         raise ContentRefused("This request can't be generated.")
-    width, height = dimensions(aspect_ratio, resolution, card.size_multiple)
+    # The model's own size nearest to the ratio, or about 1 megapixel on a multiple of 16 or 32
+    snapped = snap_native(card.native_sizes, aspect_ratio, resolution)
+    width, height = snapped or dimensions(aspect_ratio, resolution, card.size_multiple)
     negative = _NEGATIVE if card.supports_negative_prompt or card.family == "sd" else ""
     return CompiledPrompt(
         prompt=cleaned,
@@ -124,21 +121,19 @@ def guard_prompt(
 
 def build_prompt(
     card: ModelCard,
-    brief: Brief,
-    final_prompt: str | None,
+    plan: ShotPlan,
+    written: str | None,
     *,
     mode: str,
     aspect_ratio: str,
     resolution: str = "1K",
     user_prompt: str = "",
+    change: str = "",
 ) -> CompiledPrompt:
-    """`llm` uses the enhancer's final_prompt (the brief template if it sent none). `code` always
-    uses the brief template."""
-    text = (
-        template_prompt(card, brief, user_prompt)
-        if mode == "code" or not final_prompt
-        else final_prompt
-    )
+    """`llm` uses the Prompt Writer's prompt (the plan rendered by code if it sent none). `code`
+    always renders the plan by code, for benchmarks. `change` is one variation axis phrase for the
+    code renderer. Either way the text goes through the same guard."""
+    text = render_template(card, plan, change) if mode == "code" or not written else written
     return guard_prompt(
         card, text, aspect_ratio=aspect_ratio, resolution=resolution, user_prompt=user_prompt
     )

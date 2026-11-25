@@ -7,9 +7,20 @@ import httpx
 from app.core.errors import ProviderCallFailed
 
 
+def _retry_after(resp: httpx.Response) -> float | None:
+    """Seconds a 429 asks us to wait (Retry-After). None when absent or not a number."""
+    raw = resp.headers.get("retry-after")
+    try:
+        return max(0.0, float(raw)) if raw is not None else None
+    except ValueError:
+        return None
+
+
 def _raise_for_status(resp: httpx.Response) -> None:
     if resp.status_code == 429 or resp.status_code >= 500:
-        raise ProviderCallFailed(f"provider returned {resp.status_code}", retryable=True)
+        raise ProviderCallFailed(
+            f"provider returned {resp.status_code}", retryable=True, retry_after=_retry_after(resp)
+        )
     if resp.status_code >= 400:
         raise ProviderCallFailed(f"provider returned {resp.status_code}", retryable=False)
 

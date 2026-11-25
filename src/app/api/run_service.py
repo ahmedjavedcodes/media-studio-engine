@@ -140,6 +140,7 @@ class RunService:
             "plan": request.plan.value,
             "settings": request.settings.model_dump(),
             "has_images": bool(request.images),
+            "project_id": request.project_id or "",
             "n_refs": len(request.images),
             "results": [],
         }
@@ -229,7 +230,9 @@ class RunService:
             n = record.request.settings.n
             await self._push(
                 record,
-                status_event(record.run_id, "creating", progress=f"{record.images_seen}/{n}"),
+                status_event(
+                    record.run_id, "creating", progress=f"{min(record.images_seen, n)}/{n}"
+                ),
             )
             return
         await self._push(record, event)

@@ -44,9 +44,9 @@ async def settle_run(deps: CreateDeps, state: CreateState, span: Span) -> dict[s
     run_id = state["run_id"]
     card = deps.registry.get(state["model_id"])
     assert card is not None
-    # Every result here already passed the per-image safety check. Unsafe images were deleted.
-    kept = sorted((r for r in state["results"] if r["ok"]), key=lambda r: r["index"])
     review = state["review"]
+    # Every image that was made is delivered. The critic only scores and ranks: it never drops one.
+    kept = sorted((r for r in state["results"] if r["ok"]), key=lambda r: r["index"])
     verdicts = review["verdicts"]
     if not kept:  # the critic step ends the run first. This is a last guard
         raise OutputBlocked()
@@ -77,13 +77,30 @@ async def settle_run(deps: CreateDeps, state: CreateState, span: Span) -> dict[s
                     model=card.id,
                     provider=r["provider"],
                     seed=r["seed"] if r["seed_sent"] else None,
-                    prompt=compiled["prompt"],
+                    prompt=r.get("prompt") or compiled["prompt"],  # each variation has its own
                     negative_prompt=compiled["negative_prompt"],
                 )
             ],
         )
         docs.append(doc)
         deps.store.write_json(run_id, f"doc_{k}.json", doc.model_dump(mode="json"))
+
+    # Every delivered image keeps its plan with the critic's scores: good plans (aesthetic 8 or
+    # more) teach the Art Director on later prompts. The plan is never sent to the client.
+    for r in kept:
+        v = verdicts.get(critic_worker.image_id(r["index"])) or {}
+        shot = state.get("shot_plan") or {}
+        deps.plans.add(
+            run_id=run_id,
+            index=r["index"],
+            subject_type=state.get("subject_type") or "other",
+            look=str(shot.get("look") or ""),
+            prompt=state["prompt"],
+            plan=shot,
+            aesthetic=v.get("aesthetic"),
+            realism=v.get("realism"),
+            project_id=state.get("project_id") or None,
+        )
 
     order = [critic_worker.image_id(r["index"]) for r in kept]
     rv = critic_worker.Review(
@@ -104,6 +121,10 @@ async def settle_run(deps: CreateDeps, state: CreateState, span: Span) -> dict[s
     # Saving the result is what releases the images: only files named in it can be fetched.
     deps.store.write_json(run_id, RESULT_FILE, result.model_dump(mode="json"))
     charged = await deps.credits.settle(state["hold_id"], charge)  # last step before the event
-    span.log(delivered=len(kept), charged=charged, critic_failed=bool(review.get("failed")))
+    span.log(
+        delivered=len(kept),
+        charged=charged,
+        critic_failed=bool(review.get("failed")),
+    )
     emit(RunEvent(type="ready", run_id=run_id, images=images, recommendation=line or None))
     return {}

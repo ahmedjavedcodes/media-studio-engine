@@ -27,6 +27,11 @@ async def list_plans(deps: Annotated[CreateDeps, Depends(get_create_deps)]) -> d
             for p, lim in PLAN_LIMITS.items()
         ],
         "aspect_ratios": list(ASPECT_RATIOS),
+        # Looks (the `preset` setting). `auto` lets the Art Director pick one for the prompt.
+        "presets": [
+            {"id": "auto", "label": "Auto", "description": "Chosen to fit your prompt"},
+            *({"id": p.id, "label": p.label, "description": p.fits} for p in deps.looks.all()),
+        ],
         # Every image is made at 1K for now. 2K comes from the upscale tool later.
         "resolutions": [{"id": "1K", "available": True}, {"id": "2K", "available": False}],
     }

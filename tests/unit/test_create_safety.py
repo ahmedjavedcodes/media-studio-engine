@@ -93,23 +93,22 @@ async def test_an_unsafe_image_is_deleted_never_sent_and_never_charged(tmp_path:
     assert await deps.credits.balance("u1") == 99
 
 
-async def test_a_safety_timeout_drops_that_image_only(tmp_path: Path) -> None:
+async def test_a_safety_timeout_never_costs_the_user_an_image(tmp_path: Path) -> None:
     vision = SeqVision([ProviderCallFailed("timed out", retryable=False), "safe"])
     deps = make_deps(tmp_path, critic=[critic_ok(2)], vision=vision)
     events = await run(make_service(deps), "s3", req(n=2, plan=Plan.BASIC))
-    assert events[-1].type == "ready" and len(events[-1].images) == 1
-    assert await deps.credits.balance("u1") == 99
+    assert events[-1].type == "ready" and len(events[-1].images) == 2  # a check that cannot run
+    assert await deps.credits.balance("u1") == 98  # still delivers, and charges for both
 
 
-async def test_if_every_check_fails_nothing_is_delivered_and_nothing_charged(
+async def test_if_every_check_fails_every_image_is_still_delivered(
     tmp_path: Path,
 ) -> None:
     vision = SeqVision([ProviderCallFailed("down", retryable=False)])
     deps = make_deps(tmp_path, vision=vision)
     events = await run(make_service(deps), "s4", req(n=2, plan=Plan.BASIC))
-    assert events[-1].type == "error" and events[-1].code == "provider_down"
-    assert await deps.credits.balance("u1") == 100
-    assert not (tmp_path / "s4").exists()
+    assert events[-1].type == "ready" and len(events[-1].images) == 2
+    assert await deps.credits.balance("u1") == 98
 
 
 async def test_all_unsafe_is_output_blocked_not_provider_down(tmp_path: Path) -> None:
