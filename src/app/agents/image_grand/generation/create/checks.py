@@ -10,6 +10,7 @@ from app.agents.image_grand.generation.create.deps import CreateDeps
 from app.agents.image_grand.generation.create.state import CreateState
 from app.core.errors import BadInput, PlanLimit
 from app.core.plans import PLAN_LIMITS, RESOLUTIONS, Plan, tier_allowed
+from app.gateway.options import RequestExtras, options_for
 from app.tools.sizes import ASPECT_RATIOS
 
 
@@ -40,4 +41,12 @@ async def run_code_checks(deps: CreateDeps, state: CreateState) -> dict[str, Any
             raise PlanLimit(f"{card.name} needs a higher plan. Upgrade to use it.")
         if cfg["aspect_ratio"] not in card.supported_aspect_ratios:
             raise BadInput(f"{card.name} does not support the {cfg['aspect_ratio']} aspect ratio.")
+        options_for(  # reference limit, quality guardrail, transparent background, colors
+            card,
+            RequestExtras(
+                references=("x",) * state.get("n_refs", 0),
+                brand_colors=tuple(cfg.get("brand_colors") or ()),
+                transparent_bg=bool(cfg.get("transparent_bg")),
+            ),
+        )
     return {}

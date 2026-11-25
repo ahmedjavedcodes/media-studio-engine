@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.contracts.ports import GeneratedImage
+from app.contracts.ports import GeneratedImage, ImageOptions
 from app.core.errors import ProviderCallFailed
 from app.gateway.budget import SpendGuard
 from app.gateway.providers.http import post_json
@@ -52,6 +52,7 @@ class FalImages:
         seed: int | None,
         timeout: float,
         estimated_cost_usd: float = 0.0,
+        options: ImageOptions | None = None,
     ) -> GeneratedImage:
         if not self._api_key:
             raise ProviderCallFailed("fal key is not set", retryable=False)

@@ -17,8 +17,9 @@ from app.agents.image_grand.workers import critic as critic_worker
 from app.contracts.events import ImageOut, RunEvent
 from app.contracts.result import Document, Layer, RunResult, Version
 from app.core.errors import OutputBlocked
-from app.core.plans import Plan, credits_for
+from app.core.plans import Plan
 from app.core.tracing import Span
+from app.gateway.pricing import credits_for_run
 from app.local.output_store import RESULT_FILE
 
 log = structlog.get_logger("settle")
@@ -94,7 +95,9 @@ async def settle_run(deps: CreateDeps, state: CreateState, span: Span) -> dict[s
     line = critic_worker.recommendation(rv, order)  # every plan gets the line
     images = [_image_out(deps, run_id, state["user_id"], layers[i], i) for i in order]
 
-    charge = credits_for(card.tier, len(kept))  # only for delivered images
+    charge = credits_for_run(  # only for delivered images. The same price the hold used
+        card, len(kept), resolution="1K", n_refs=state.get("n_refs", 0)
+    )
     result = RunResult(
         run_id=run_id, documents=docs, recommendation=line or None, credits_charged=charge
     )

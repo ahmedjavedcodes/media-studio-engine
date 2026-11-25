@@ -25,11 +25,13 @@ from app.agents.image_grand.workers.image_gen import generate_one
 from app.agents.image_grand.workers.safety import Safety, check_image
 from app.contracts.events import RunEvent, status_event
 from app.core.errors import InvalidModelOutput, OutputBlocked, ProviderCallFailed, ProviderDown
-from app.core.plans import Plan, credits_for
+from app.core.plans import Plan
 from app.core.user_errors import to_user_error
 from app.gateway.compiler import CompiledPrompt, build_prompt
+from app.gateway.options import RequestExtras, options_for
+from app.gateway.pricing import credits_for_run
 from app.gateway.registry import ModelCard
-from app.gateway.router import classify_prompt, pick_model
+from app.gateway.router import RouteRequest, route_auto
 
 log = structlog.get_logger("txt2img")
 
@@ -77,20 +79,31 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
                 card = deps.registry.get(picked)
                 category = "manual"
             else:
-                category = classify_prompt(state["prompt"])
-                card = pick_model(
+                routed = route_auto(
                     deps.registry,
-                    plan=Plan(state["plan"]),
-                    category=category,
-                    aspect_ratio=state["settings"]["aspect_ratio"],
-                    enabled_providers=deps.enabled_providers,
+                    RouteRequest(
+                        prompt=state["prompt"],
+                        plan=Plan(state["plan"]),
+                        aspect_ratio=state["settings"]["aspect_ratio"],
+                        enabled_providers=deps.enabled_providers,
+                        n_refs=state.get("n_refs", 0),
+                        brand_colors=tuple(state["settings"].get("brand_colors") or ()),
+                        draft=bool(state["settings"].get("draft")),
+                        transparent=bool(state["settings"].get("transparent_bg")),
+                    ),
                 )
+                card, category = routed.card, routed.rule  # the rule that chose, for the trace
             if card is None:
                 raise ProviderDown("The selected model is not available.")
             provider = card.providers_in(deps.enabled_providers)[0].name
             trace.set_metadata(model=card.id, provider=provider)
             # Hold exactly what this model costs. The tier is known now, so no worst-case guess.
-            amount = credits_for(card.tier, state["settings"]["n"])
+            amount = credits_for_run(
+                card,
+                state["settings"]["n"],
+                resolution=GENERATE_RESOLUTION,
+                n_refs=state.get("n_refs", 0),
+            )
             hold_id = await deps.credits.hold(state["user_id"], state["run_id"], amount)
             try:  # `safe()` drops this node's return value on an error, so `fail` would never
                 # learn the hold id. Anything that can raise after the hold must release it.
@@ -122,7 +135,8 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
             run_type="llm",
         ) as span:
             span.meta(prompt_version=base.version, model=deps.enhancer.model)
-            if not asked and enhancer_worker.should_skip(prompt):
+            refs = state.get("n_refs", 0) > 0  # an edit needs the enhancer to write the delta
+            if not asked and not refs and enhancer_worker.should_skip(prompt):
                 out = enhancer_worker.skipped_output(prompt)
                 span.log(skipped=True)
             else:
@@ -135,6 +149,7 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
                     resolution=GENERATE_RESOLUTION,
                     answers=answers,
                     allow_questions=not asked,  # at most 1 round
+                    has_references=refs,
                     max_tokens=s.enhancer_max_tokens,
                     timeout=s.llm_timeout_s,
                 )
@@ -200,6 +215,14 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
             inputs={"index": index, "final_prompt": compiled.prompt},
         )
         try:
+            settings = state["settings"]
+            options = options_for(
+                card,
+                RequestExtras(
+                    brand_colors=tuple(settings.get("brand_colors") or ()),
+                    transparent_bg=bool(settings.get("transparent_bg")),
+                ),
+            )
             saved = await generate_one(
                 deps.gateway,
                 deps.store,
@@ -209,6 +232,7 @@ def build_txt2img_graph(deps: CreateDeps) -> StateGraph[CreateState]:
                 index=index,
                 timeout=s.image_timeout_s,
                 span=span,
+                options=options,
             )
         except Exception as exc:  # noqa: BLE001 - one bad variation never kills the others
             span.end(error=type(exc).__name__)

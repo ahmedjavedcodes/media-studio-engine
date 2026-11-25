@@ -40,11 +40,24 @@ class ModelCard(BaseModel):
     seed_honoured: bool | None = None  # None = never tested. True only after a repeat-seed test
     supports_negative_prompt: bool = False
     n_per_call: int = 1
-    max_input_images: int = 0
+    max_refs: int = 0  # reference images the model accepts (0 = text only)
+    capabilities: list[str] = Field(
+        default_factory=list
+    )  # t2i, i2i, svg_vector, multi_ref_merge ...
+    credits: int | None = None  # what a user pays per image. None = the tier's credits
+    ref_surcharge: int = 0  # extra credits for each reference image after the first
+    resolutions: list[str] = Field(default_factory=list)  # `resolution` values the provider takes
+    resolution_multipliers: dict[str, float] = Field(default_factory=dict)  # credit multiplier
+    endpoint: Literal["images", "chat"] = "images"  # which OpenRouter API the model uses
+    quality: str | None = None  # sent to providers that have a quality knob (GPT Image)
+    forbidden_qualities: list[str] = Field(default_factory=list)  # never sent (cost guardrail)
+    output_format: str | None = None  # `svg` for vector models
+    notes: str = ""
     supported_aspect_ratios: list[str] = Field(default_factory=lambda: list(ALL_RATIOS))
     max_resolution: str = "1K"
     prompt_max_words: int = 0
     prompt_guide: str = ""  # copied from the family at load time
+    family_label: str = ""  # the family's display name, for the picker
     prompt_style: Literal["keywords", "sentences"] = "keywords"  # for COMPILE_MODE=code
     best_for: list[str] = Field(default_factory=list)  # router categories this model suits
     size_multiple: int = 32  # sides must be a multiple of this
@@ -56,6 +69,8 @@ class ModelCard(BaseModel):
     @model_validator(mode="after")
     def _derive(self) -> "ModelCard":
         self.tier = tier_for_cost(self.cost_per_image)
+        if self.quality is not None and self.quality in self.forbidden_qualities:
+            raise ValueError(f"{self.id}: quality {self.quality!r} is forbidden for this model")
         return self
 
     def providers_in(self, enabled: list[str]) -> list[ProviderEntry]:
@@ -82,6 +97,11 @@ class Registry:
             if c.status == "live" and c.providers_in(enabled_providers)
         ]
 
+    def listed(self) -> list[ModelCard]:
+        """Models the picker shows: live ones, and `testing` ones as "coming soon". A `testing`
+        model cannot be run (the checks and the router only accept `live`)."""
+        return [c for c in self._cards.values() if c.status in ("live", "testing")]
+
     def allowed(self, plan: Plan, enabled_providers: list[str]) -> list[ModelCard]:
         return [c for c in self.live(enabled_providers) if tier_allowed(plan, c.tier)]
 
@@ -100,6 +120,7 @@ def load_registry(path: Path | None = None) -> Registry:
             raise BadInput(f"models.yaml: unknown family for model {item.get('id')!r}")
         merged = {
             "prompt_guide": str(fam.get("prompt_guide", "")).strip(),
+            "family_label": str(fam.get("label", item.get("family", ""))),
             "prompt_style": fam.get("style", "keywords"),
             "prompt_max_words": fam.get("max_words", 60),
             **item,  # a model can override the family values

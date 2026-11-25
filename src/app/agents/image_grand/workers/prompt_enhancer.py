@@ -36,12 +36,24 @@ _STYLE_CUES = (
 SKIP_MIN_WORDS = 25
 
 
-def system_prompt(base: str, card: ModelCard, aspect_ratio: str) -> str:
-    """`base` (from the Hub or the file) first so it stays cacheable. The target model and its
-    family guide come at the END."""
+EDIT_MODE = """## Mode: edit
+The user attached reference images. Do NOT rewrite or re-describe the whole scene. Write
+`final_prompt` as a short, direct EDIT: say only what changes and what must stay the same.
+Example: "Keep the subject's face, pose and studio lighting identical; replace only the jacket
+with matte black leather." Never describe what the reference images already show. Set `brief` from
+the same change, and `must_have` to the things that must stay.
+"""
+
+
+def system_prompt(
+    base: str, card: ModelCard, aspect_ratio: str, has_references: bool = False
+) -> str:
+    """`base` (from the Hub or the file) first so it stays cacheable. The mode, the target model
+    and its family guide come at the END."""
     fixed = base.rstrip()
+    mode = f"\n\n{EDIT_MODE.rstrip()}" if has_references else ""
     return (
-        f"{fixed}\n\n## Target model\n"
+        f"{fixed}{mode}\n\n## Target model\n"
         f"Model: {card.name}\n"
         f"Max words in final_prompt: {card.prompt_max_words}\n"
         f"Aspect ratio: {aspect_ratio}\n\n"
@@ -120,6 +132,7 @@ async def enhance(
     allow_questions: bool,
     max_tokens: int,
     timeout: float,
+    has_references: bool = False,
 ) -> EnhancerOutput:
     payload = {
         "prompt": prompt,
@@ -127,12 +140,13 @@ async def enhance(
         "resolution": resolution,
         "answers": answers,
         "allow_questions": allow_questions,
+        "has_references": has_references,
     }
     out: EnhancerOutput | None = None
     for attempt in range(2):  # a cut-off answer is retried once with room to finish
         try:
             out = await llm.complete_json(
-                system=system_prompt(base_prompt, card, aspect_ratio),
+                system=system_prompt(base_prompt, card, aspect_ratio, has_references),
                 user=f"<user_prompt>\n{json.dumps(payload, ensure_ascii=False)}\n</user_prompt>",
                 schema=EnhancerOutput,
                 max_tokens=max_tokens * (attempt + 1),

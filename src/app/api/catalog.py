@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from app.agents.image_grand.generation.create.deps import CreateDeps
 from app.api.deps import get_create_deps
 from app.core.plans import PLAN_LIMITS, TIER_CREDITS, Plan, tier_allowed
+from app.gateway.pricing import credits_per_image
 from app.tools.sizes import ASPECT_RATIOS
 
 router = APIRouter(prefix="/v1")
@@ -34,22 +35,38 @@ async def list_plans() -> dict[str, Any]:
 async def list_models(
     deps: Annotated[CreateDeps, Depends(get_create_deps)], plan: Plan = Plan.BASIC
 ) -> dict[str, Any]:
-    """Models a user can pick. `locked` is true when the plan is too low. Featured models first,
-    then by tier. No prices or provider names."""
-    cards = deps.registry.live(deps.enabled_providers)
+    """Models for the picker. `locked` is true when the plan is too low, `available` is false for
+    "coming soon" models. No prices or provider names."""
+    usable = {c.id for c in deps.registry.live(deps.enabled_providers)}
     models = [
         {
             "id": c.id,
             "name": c.name,
             "family": c.family,
+            "family_label": c.family_label,
             "tier": c.tier.value,
+            # False = shown as "coming soon". Not run yet, or its provider is off. No provider
+            # name is sent: the pipeline stays hidden.
+            "available": c.id in usable,
             "tag": c.tag,
             "featured": c.featured,
-            "credits_per_image": TIER_CREDITS[c.tier],
+            "credits_per_image": credits_per_image(c),
+            "ref_surcharge": c.ref_surcharge,  # extra credits for each reference after the first
+            "resolution_multipliers": c.resolution_multipliers,
+            "max_refs": c.max_refs,
+            "capabilities": c.capabilities,
             "locked": not tier_allowed(plan, c.tier),
             "aspect_ratios": c.supported_aspect_ratios,
         }
-        for c in cards
+        for c in deps.registry.listed()
     ]
-    models.sort(key=lambda m: (not m["featured"], list(TIER_CREDITS).index(m["tier"]), m["name"]))  # type: ignore[arg-type]
+    # Usable models come first (featured, then by tier). "Coming soon" models follow, by tier.
+    models.sort(
+        key=lambda m: (
+            not m["available"],
+            not m["featured"],
+            list(TIER_CREDITS).index(m["tier"]),  # type: ignore[arg-type]
+            m["name"],
+        )
+    )
     return {"models": models, "plan": plan.value}

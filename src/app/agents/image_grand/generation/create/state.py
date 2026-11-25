@@ -12,6 +12,7 @@ class CreateState(TypedDict, total=False):
     plan: str
     settings: dict[str, Any]  # model, aspect_ratio, resolution, n
     has_images: bool
+    n_refs: int  # how many reference images the user attached
     # code checks
     hold_id: str
     # router and enhancer

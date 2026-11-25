@@ -98,9 +98,25 @@ class LLMPort(Protocol):
 
 
 @dataclass(frozen=True)
+class ImageOptions:
+    """Per-call options. Built by CODE from the request and the model card, never by the LLM."""
+
+    references: tuple[str, ...] = ()  # reference images: data URLs or https URLs
+    quality: str | None = None  # GPT Image only. Never `low` on the 2.6 models
+    resolution: str | None = None  # "1K" and so on, for providers that take one
+    output_format: str | None = None  # "svg" for vector models, "gif", "png" ...
+    background: str | None = None  # "transparent"
+    brand_colors: tuple[str, ...] = ()  # "#RRGGBB", Recraft only
+    complexity: int | None = None  # GPT Image 2.6 only
+    endpoint: str = "images"  # OpenRouter: "images" or "chat" (Gemini, multi-turn)
+    history: tuple[dict[str, Any], ...] = ()  # earlier chat messages, for multi-turn edits
+
+
+@dataclass(frozen=True)
 class GeneratedImage:
     data: bytes  # the file bytes. The type is read from them, never assumed
     cost_usd: float | None = None  # billed cost when the provider reports it
+    media_type: str | None = None  # what the provider said (image/svg+xml ...). A hint only
 
 
 class ImageProviderPort(Protocol):
@@ -119,6 +135,7 @@ class ImageProviderPort(Protocol):
         seed: int | None,
         timeout: float,
         estimated_cost_usd: float = 0.0,  # what the registry expects this call to cost
+        options: ImageOptions | None = None,
     ) -> GeneratedImage: ...
 
 

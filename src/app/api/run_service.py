@@ -27,6 +27,7 @@ from app.api.checkpoint_cleanup import forget_thread
 from app.contracts.events import OptionOut, QuestionOut, RunEvent, status_event
 from app.contracts.request import GenerationRequest
 from app.core.user_errors import INTERNAL_MESSAGE
+from app.gateway.options import RequestExtras, options_for
 
 log = structlog.get_logger("runs")
 
@@ -76,6 +77,24 @@ class RunService:
 
     # ---- start and resume --------------------------------------------------------------------
 
+    def preflight(self, request: GenerationRequest) -> None:
+        """Cheap checks before anything runs (and before any cost). A picked model must take this
+        many reference images, this quality, transparent background and brand colors. Raises
+        BadInput, which is a 400. `auto` is checked by the router, which only picks a model that
+        fits."""
+        cfg = request.settings
+        card = self._deps.registry.get(cfg.model) if cfg.model != "auto" else None
+        if card is None:
+            return
+        options_for(
+            card,
+            RequestExtras(
+                references=("x",) * len(request.images),
+                brand_colors=tuple(cfg.brand_colors),
+                transparent_bg=cfg.transparent_bg,
+            ),
+        )
+
     def start(self, run_id: str, user_id: str, request: GenerationRequest) -> RunRecord:
         self._prune()
         meta = {
@@ -100,6 +119,7 @@ class RunService:
             "plan": request.plan.value,
             "settings": request.settings.model_dump(),
             "has_images": bool(request.images),
+            "n_refs": len(request.images),
             "results": [],
         }
         record.task = asyncio.create_task(self._drive(record, graph_input))

@@ -51,14 +51,11 @@ async def create_run(
     x_user_id: Annotated[str, Header()] = "local-dev",
 ) -> dict[str, str]:
     run_id = uuid.uuid4().hex
+    images = decode_images(req.images)
+    service.preflight(req)  # 400 if the picked model cannot take these images. No cost yet
     # Raises 400 / 403 / 422 / 429 / 503. Nothing below runs unless every check approved.
     await guard(
-        GuardInput(
-            request_id=run_id,
-            user_id=x_user_id,
-            prompt=req.prompt,
-            images=decode_images(req.images),
-        ),
+        GuardInput(request_id=run_id, user_id=x_user_id, prompt=req.prompt, images=images),
         deps,
     )
     service.start(run_id, x_user_id, req)  # the generator gets the raw prompt and the images
@@ -171,7 +168,7 @@ def _public_result(
     return {"images": images, "recommendation": result.get("recommendation")}
 
 
-_IMAGE_NAME = re.compile(r"^(img|thumb)_\d+\.(jpg|png|webp)$")
+_IMAGE_NAME = re.compile(r"^(img|thumb)_\d+\.(jpg|png|webp|gif|svg)$")
 
 
 @router.get("/files/{run_id}/{name}")
@@ -186,7 +183,17 @@ async def get_file(
     data = deps.store.read_released(run_id, name) if _IMAGE_NAME.match(name) else None
     if data is None:
         raise HTTPException(status_code=404, detail="not found")
-    media = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}[name.rsplit(".", 1)[-1]]
-    return Response(
-        content=data, media_type=media, headers={"Cache-Control": "private, max-age=3600"}
-    )
+    media = {
+        "jpg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp",
+        "gif": "image/gif",
+        "svg": "image/svg+xml",
+    }[name.rsplit(".", 1)[-1]]
+    headers = {
+        "Cache-Control": "private, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+        # An SVG opened on its own must not run anything. A sandboxed, script-less policy.
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    }
+    return Response(content=data, media_type=media, headers=headers)

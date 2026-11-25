@@ -12,24 +12,27 @@
 # of its system prompt. `style` is used by COMPILE_MODE=code. 5-8 lines each.
 families:
   gpt_image:
+    label: OpenAI GPT Image
     style: sentences
     max_words: 40
     prompt_guide: |
-      Write 2 or 3 plain, natural sentences.
-      Name the subject first, then the setting, then the light and the camera.
-      Put any text that must appear inside the image in "double quotes".
-      Be literal and concrete. One clear scene, no lists of keywords.
+      Write 2 or 3 vivid sentences. Cover the subject, the light, the camera framing and the material textures.
+      Name the subject first, then the setting. Say the shot in words ("a low-angle close-up").
+      Put any text that must appear in "double quotes", and say where it sits.
+      Be literal and concrete. One clear scene, no keyword lists.
       Avoid: stacked adjectives, vague mood words, brand or artist names.
   gemini:
+    label: Google Nano Banana & Gemini
     style: sentences
     max_words: 50
     prompt_guide: |
       Write a short descriptive paragraph in natural sentences, like a photo caption.
-      Describe who or what is in the scene, what they do, and where.
-      Say the shot type and the light in words ("a close-up portrait in warm window light").
-      Good at people, faces and creative scenes. State the mood through visible things.
+      Cover who or what is in the scene, the setting, the light, the camera framing and the textures.
+      Say the shot and the light in words ("a close-up portrait in warm window light").
+      State the mood through visible things, not abstract words.
       Avoid: keyword lists, tag soup, negative phrases like "no blur".
   flux:
+    label: FLUX
     style: keywords
     max_words: 60
     prompt_guide: |
@@ -39,15 +42,17 @@ families:
       Keep it under the word limit. Do not repeat the same idea twice.
       Avoid: negative prompts and "no ..." phrases, quality spam like "masterpiece, 8k".
   seedream:
+    label: ByteDance Seedream
     style: keywords
     max_words: 60
     prompt_guide: |
       Write one clear sentence or a short run of phrases, subject first.
-      Add setting, lighting and style in plain words.
+      Add the setting, the light, the camera framing and the material textures in plain words.
       Works well for products, food and clean commercial scenes.
       Keep each detail concrete and visible.
       Avoid: abstract mood words, long stories, negative phrases.
   qwen:
+    label: Qwen
     style: keywords
     max_words: 60
     prompt_guide: |
@@ -56,15 +61,17 @@ families:
       Good at text in images and posters. Keep the text short.
       Avoid: long sentences, many competing subjects, vague words.
   recraft:
+    label: Recraft Design & Vector
     style: keywords
     max_words: 30
     prompt_guide: |
-      Write a very short subject phrase, then 2 or 4 style tags.
-      Name the look directly: "flat vector", "isometric", "brand colors navy and orange".
-      Good at design, icons and clean illustration.
-      Keep it under 30 words.
-      Avoid: camera or lens terms, long scenes.
+      Design models. Keep the exact display copy in "double quotes" and say where it sits.
+      Describe the layout and the typography placement: headline, subtitle, margins, alignment.
+      Name the look directly: "flat vector", "brand colors navy and orange", "poster", "packaging".
+      Keep it short. Do NOT use photographic lens jargon (no mm, f-stops or bokeh).
+      Avoid: long scenes, negative phrases, brand names.
   ideogram:
+    label: Ideogram
     style: sentences
     max_words: 50
     prompt_guide: |
@@ -73,6 +80,7 @@ families:
       Name the layout (poster, sign, label) when there is text.
       Avoid: long text blocks, many different texts in one image.
   sd:
+    label: Stable Diffusion
     style: keywords
     max_words: 60
     prompt_guide: |
@@ -81,6 +89,7 @@ families:
       A separate negative prompt is added by the system. Do not write one.
       Avoid: full sentences, "no ..." phrases.
   leonardo:
+    label: Leonardo
     style: sentences
     max_words: 60
     prompt_guide: |
@@ -90,11 +99,55 @@ families:
       Put any text that must appear in "double quotes".
       Avoid: keyword spam, "no ..." phrases, abstract mood words.
 
+  # Provisional guides for families added with the OpenRouter list. Written from general
+  # practice, not from each vendor's docs. Refine them after the first real runs.
+  krea:
+    label: Krea
+    style: sentences
+    max_words: 60
+    prompt_guide: |
+      Write 2 or 3 natural sentences, subject first.
+      Name the light, the colors and the lens in plain words.
+      Good at photoreal and art-directed images with a strong look.
+      Keep every detail visible and concrete.
+      Avoid: keyword spam, "no ..." phrases, abstract mood words.
+  mai:
+    label: Microsoft MAI
+    style: sentences
+    max_words: 50
+    prompt_guide: |
+      Write a short descriptive paragraph in natural sentences.
+      Say who or what is in the scene, where it is, and the light.
+      Describe the camera in words ("a wide shot at eye level").
+      Put any text that must appear in "double quotes".
+      Avoid: keyword lists and negative phrases.
+  riverflow:
+    label: Riverflow
+    style: sentences
+    max_words: 50
+    prompt_guide: |
+      Write 1 to 3 clear sentences, subject first.
+      Add the setting, the light and the style in plain words.
+      Keep it literal. One scene, no stacked adjectives.
+      Put any text that must appear in "double quotes".
+      Avoid: negative phrases and vague mood words.
+  muse:
+    label: Meta Muse
+    style: sentences
+    max_words: 50
+    prompt_guide: |
+      Write a short natural description, like a photo caption.
+      Cover the subject, the setting, the light, the camera framing and the textures.
+      Say the shot type in words ("a close-up in warm window light").
+      Keep the scene to one clear idea.
+      Avoid: keyword lists and "no ..." phrases.
+
 models:
   # ---- Cloudflare Workers AI (build mode, free daily neurons) -------------------------------
   - id: flux-1-schnell
     name: FLUX.1 schnell
     family: flux
+    capabilities: [t2i, fast]
     status: live
     tag: Fastest
     featured: true
@@ -107,6 +160,7 @@ models:
   - id: flux-2-klein-4b
     name: FLUX.2 klein 4B
     family: flux
+    capabilities: [t2i, fast]
     status: live
     tag: Photoreal
     featured: true
@@ -115,10 +169,12 @@ models:
     size_multiple: 16
     providers:
       - { name: cloudflare, slug: "@cf/black-forest-labs/flux-2-klein-4b", cost: 0.0011 }
+      - { name: openrouter, slug: black-forest-labs/flux.2-klein-4b, cost: 0.014 }  # fallback only
 
   - id: flux-2-klein-9b
     name: FLUX.2 klein 9B
     family: flux
+    capabilities: [t2i]
     status: live
     tag: Sharper detail
     best_for: [photo, product]
@@ -130,6 +186,7 @@ models:
   - id: lucid-origin
     name: Lucid Origin
     family: leonardo
+    capabilities: [t2i]
     status: testing    # not run for real yet: about $0.03 an image uses real free neurons
     tag: Creative scenes
     best_for: [people, general]
@@ -141,6 +198,7 @@ models:
   - id: phoenix-1
     name: Phoenix 1.0
     family: leonardo
+    capabilities: [t2i]
     status: live
     tag: Best for text
     best_for: [text_in_image, design]
@@ -150,13 +208,484 @@ models:
     providers:
       - { name: cloudflare, slug: "@cf/leonardo/phoenix-1.0", cost: 0.0261 }
 
-  # ---- OpenRouter (paid, off until the owner asks) ------------------------------------------
-  # Slug and price come from the spec's example. Unverified: run the registry sync first.
+  # ---- OpenRouter models (paid, OFF until the owner asks) -----------------------------------
+  # Slugs, limits and aspect ratios come from the live OpenRouter catalogue (GET /images/models,
+  # 2026-11-25). Costs are published prices where OpenRouter lists one (Seedream, Recraft, FLUX, Krea,
+  # Qwen, Riverflow), the token price x typical output tokens for GPT Image and Gemini (measured:
+  # gpt-image-2 low $0.006, nano-banana-2-lite $0.0336), and the brief's number for Muse. The real cost
+  # of every call is `usage.cost`, which the spend guard records. `credits` is what a user pays; a model
+  # without it pays its tier's credits. Status `testing` = shown as Soon until a real run verifies it.
+  # Verified live (one real call each, 2026-11-25): gpt-image-2, gpt-image-2-5-flare, seedream-5-flash,
+  # nano-banana-2-lite (chat route), recraft-v4-1-flash-free, recraft-v4-1 (brand colors). NOT yet run:
+  # the vector model (svg), gpt-image-2-6-* (complexity), muse-image (403 in this region), the rest.
+
+  - id: gpt-image-2
+    name: GPT Image 2
+    family: gpt_image
+    status: live   # verified 2026-11-25: one real call through the adapter (images route, quality low, $0.005975)
+    tag: Budget drafts and edits
+    best_for: [text_in_image]
+    capabilities: [t2i, i2i, transparent_bg, fast]
+    credits: 1
+    max_refs: 16
+    quality: low
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    notes: "Measured: low quality costs about $0.006 per image."
+    providers:
+      - { name: openrouter, slug: openai/gpt-image-2, cost: 0.006 }
+
+  - id: gpt-image-1-mini
+    name: GPT Image 1 Mini
+    family: gpt_image
+    status: testing
+    tag: Fast everyday images
+    best_for: [text_in_image]
+    capabilities: [t2i, i2i, transparent_bg, fast]
+    credits: 2
+    max_refs: 16
+    quality: medium
+    supported_aspect_ratios: ["1:1", "2:3", "3:2"]
+    notes: "Legacy mini model."
+    providers:
+      - { name: openrouter, slug: openai/gpt-image-1-mini, cost: 0.0084 }
+
+  - id: gpt-image-1
+    name: GPT Image 1
+    family: gpt_image
+    status: testing
+    tag: Creative, legacy
+    best_for: [text_in_image]
+    capabilities: [t2i, i2i, transparent_bg]
+    credits: 4
+    max_refs: 16
+    quality: medium
+    supported_aspect_ratios: ["1:1", "2:3", "3:2"]
+    notes: "Legacy standard model."
+    providers:
+      - { name: openrouter, slug: openai/gpt-image-1, cost: 0.042 }
+
+  - id: gpt-image-2-5-flare
+    name: GPT Image 2.5 Flare
+    family: gpt_image
+    status: live   # verified 2026-11-25: one real call through the adapter (images route, quality low, $0.005975)
+    tag: Best for text, fast
+    best_for: [text_in_image]
+    capabilities: [t2i, i2i, transparent_bg, fast]
+    credits: 2
+    max_refs: 16
+    quality: low
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: openai/gpt-image-2.5-flare, cost: 0.006 }
+
+  - id: gpt-image-2-5-sunburst
+    name: GPT Image 2.5 Sunburst
+    family: gpt_image
+    status: testing
+    tag: Dense text, high detail
+    best_for: [text_in_image]
+    capabilities: [t2i, i2i, transparent_bg, dense_text]
+    credits: 7
+    max_refs: 16
+    quality: high
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: openai/gpt-image-2.5-sunburst, cost: 0.125 }
+
+  - id: gpt-image-2-6-flare
+    name: GPT Image 2.6 Flare
+    family: gpt_image
+    status: testing
+    tag: Complexity control, GIF
+    best_for: [text_in_image]
+    capabilities: [t2i, i2i, transparent_bg, gif, complexity_dial]
+    credits: 4
+    max_refs: 16
+    quality: medium
+    forbidden_qualities: [low]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    notes: "Never low quality: it costs about 4x more tokens than 2.5."
+    providers:
+      - { name: openrouter, slug: openai/gpt-image-2.6-flare, cost: 0.032 }
+
+  - id: gpt-image-2-6-sunburst
+    name: GPT Image 2.6 Sunburst
+    family: gpt_image
+    status: testing
+    tag: Complex layouts, consistency
+    best_for: [text_in_image]
+    capabilities: [t2i, i2i, transparent_bg, dense_text, gif, complexity_dial]
+    credits: 7
+    max_refs: 16
+    quality: high
+    forbidden_qualities: [low]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    notes: "Never low quality: it costs about 4x more tokens than 2.5."
+    providers:
+      - { name: openrouter, slug: openai/gpt-image-2.6-sunburst, cost: 0.125 }
+
+  - id: nano-banana-2-lite
+    name: Nano Banana 2 Lite
+    family: gemini
+    status: live   # verified 2026-11-25: one real call through the adapter (chat route, $0.0336)
+    tag: Fast, creative
+    best_for: [people, general]
+    capabilities: [t2i, i2i, multi_turn, fast]
+    credits: 2
+    max_refs: 14
+    endpoint: chat
+    resolutions: [1K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: google/gemini-3.1-flash-lite-image, cost: 0.0336 }
+
+  - id: nano-banana
+    name: Nano Banana
+    family: gemini
+    status: testing
+    tag: Fast contextual edits
+    best_for: [people, general]
+    capabilities: [t2i, i2i, multi_turn, fast]
+    credits: 2
+    max_refs: 3
+    endpoint: chat
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: google/gemini-2.5-flash-image, cost: 0.0387 }
+
   - id: nano-banana-2
     name: Nano Banana 2
     family: gemini
-    status: hidden
-    tag: People and creative scenes
-    supports_seed: false
+    status: testing
+    tag: Balanced, multi-reference
+    best_for: [people, general]
+    capabilities: [t2i, i2i, multi_turn, 2k]
+    credits: 4
+    max_refs: 14
+    endpoint: chat
+    resolutions: [1K, 2K, 4K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
     providers:
-      - { name: openrouter, slug: google/gemini-3.1-flash-image, cost: 0.069 }
+      - { name: openrouter, slug: google/gemini-3.1-flash-image, cost: 0.0739 }
+
+  - id: nano-banana-2-1
+    name: Nano Banana 2.1
+    family: gemini
+    status: testing
+    tag: Latest all-rounder
+    best_for: [people, general]
+    capabilities: [t2i, i2i, multi_turn, 1k_to_4k]
+    credits: 4
+    max_refs: 14
+    endpoint: chat
+    resolutions: [1K, 2K, 4K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: google/gemini-nano-banana-2.1, cost: 0.0336 }
+
+  - id: nano-banana-pro
+    name: Nano Banana Pro
+    family: gemini
+    status: testing
+    tag: Studio photoreal
+    best_for: [people, photo, product]
+    capabilities: [t2i, i2i, multi_turn, 4k, studio_photoreal]
+    credits: 12
+    max_refs: 14
+    endpoint: chat
+    resolutions: [1K, 2K, 4K]
+    resolution_multipliers: {4K: 2.0}   # assumption: 4K is about 2x the tokens
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: google/gemini-3-pro-image, cost: 0.1344 }
+
+  - id: seedream-5-flash
+    name: Seedream 5.0 Flash
+    family: seedream
+    status: live   # verified 2026-11-25: one real call through the adapter (images route, seed sent, $0.018)
+    tag: Fast, clean product shots
+    best_for: [product, photo]
+    capabilities: [t2i, i2i, seed_lock, fast]
+    credits: 2
+    max_refs: 14
+    supports_seed: true
+    resolutions: [1K, 2K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: bytedance-seed/seedream-5-0-flash, cost: 0.018 }
+
+  - id: seedream-5-5
+    name: Seedream 5.5
+    family: seedream
+    status: testing
+    tag: Best multi-reference merging
+    best_for: [product, photo]
+    capabilities: [t2i, i2i, multi_ref_merge, seed_lock]
+    credits: 2
+    max_refs: 10
+    ref_surcharge: 1   # credits for each reference after the first
+    supports_seed: true
+    resolutions: [1K, 2K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: bytedance-seed/seedream-5-5, cost: 0.02 }
+
+  - id: seedream-5-lite
+    name: Seedream 5.0 Lite
+    family: seedream
+    status: testing
+    tag: Native 2K scenes
+    best_for: [product, photo]
+    capabilities: [t2i, i2i, 2k, seed_lock]
+    credits: 4
+    max_refs: 14
+    supports_seed: true
+    resolutions: [2K, 4K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: bytedance-seed/seedream-5-0-lite, cost: 0.035 }
+
+  - id: seedream-5-pro
+    name: Seedream 5.0 Pro
+    family: seedream
+    status: testing
+    tag: Studio photography
+    best_for: [product, photo]
+    capabilities: [t2i, i2i, 2k, studio_photoreal, seed_lock]
+    credits: 4
+    max_refs: 14
+    supports_seed: true
+    resolutions: [1K, 2K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: bytedance-seed/seedream-5-0-pro, cost: 0.045 }
+
+  - id: recraft-v4-1-flash-free
+    name: Recraft V4.1 Flash (free)
+    family: recraft
+    status: live   # verified 2026-11-25: one real call through the adapter (images route, free)
+    tag: Free text-only drafts
+    best_for: [design]
+    capabilities: [t2i, fast]
+    credits: 1
+    max_refs: 0
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    notes: "Free variant: 20 requests a minute, 50 a day on a new account. Text only."
+    providers:
+      - { name: openrouter, slug: recraft/recraft-v4.1-flash-v2:free, cost: 0.0 }
+
+  - id: recraft-v4-1-flash
+    name: Recraft V4.1 Flash
+    family: recraft
+    status: testing
+    tag: Design, fast
+    best_for: [design]
+    capabilities: [t2i, fast]
+    max_refs: 0
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: recraft/recraft-v4.1-flash, cost: 0.007 }
+
+  - id: recraft-v4
+    name: Recraft V4
+    family: recraft
+    status: testing
+    tag: Posters and brand colors
+    best_for: [design, text_in_image]
+    capabilities: [t2i, i2i, rgb_colors, typography]
+    credits: 4
+    max_refs: 1
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: recraft/recraft-v4, cost: 0.04 }
+
+  - id: recraft-v4-1
+    name: Recraft V4.1
+    family: recraft
+    status: live   # verified 2026-11-25: one real call through the adapter (images route, brand colors via provider.options, $0.035)
+    tag: Posters, ads, packaging
+    best_for: [design, text_in_image]
+    capabilities: [t2i, i2i, rgb_colors, typography]
+    credits: 4
+    max_refs: 1
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: recraft/recraft-v4.1, cost: 0.035 }
+
+  - id: recraft-v4-styles
+    name: Recraft V4 Styles
+    family: recraft
+    status: testing
+    tag: Match a style reference
+    best_for: [design]
+    capabilities: [t2i, style_lock, rgb_colors]
+    credits: 4
+    max_refs: 10
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: recraft/recraft-v4-styles, cost: 0.035 }
+
+  - id: recraft-v4-1-vector
+    name: Recraft V4.1 Vector
+    family: recraft
+    status: testing
+    tag: True SVG logos and icons
+    best_for: [design]
+    capabilities: [t2i, svg_vector, rgb_colors]
+    credits: 7
+    max_refs: 1
+    output_format: svg
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: recraft/recraft-v4.1-vector, cost: 0.08 }
+
+  - id: recraft-v4-pro
+    name: Recraft V4 Pro
+    family: recraft
+    status: testing
+    tag: ~2K editorial design
+    best_for: [design, text_in_image]
+    capabilities: [t2i, i2i, 2k, typography]
+    credits: 12
+    max_refs: 1
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: recraft/recraft-v4-pro, cost: 0.25 }
+
+  - id: recraft-v4-1-pro
+    name: Recraft V4.1 Pro
+    family: recraft
+    status: testing
+    tag: Best for design
+    best_for: [design]
+    capabilities: [t2i, i2i, typography]
+    max_refs: 1
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: recraft/recraft-v4.1-pro, cost: 0.21 }
+
+  - id: muse-image
+    name: Muse Image
+    family: muse
+    status: testing
+    tag: Budget workhorse
+    best_for: [general, people]
+    capabilities: [t2i, i2i, fast]
+    credits: 1
+    max_refs: 4
+    notes: "UNVERIFIED: OpenRouter answers 403 'not available in your region' from here, and publishes no price or parameters. Cost and 4 references come from the product brief."
+    providers:
+      - { name: openrouter, slug: meta/muse-image, cost: 0.01 }
+
+  - id: flux-3-klein
+    name: FLUX 3 Klein
+    family: flux
+    status: testing
+    tag: Photoreal, fast
+    best_for: [photo, product, general]
+    capabilities: [t2i, fast]
+    max_refs: 10
+    resolutions: [1K, 2K, 4K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: black-forest-labs/flux-3-image-klein, cost: 0.009 }
+
+  - id: flux-3
+    name: FLUX.3
+    family: flux
+    status: testing
+    tag: Photoreal
+    best_for: [photo, product, general]
+    capabilities: [t2i]
+    max_refs: 10
+    resolutions: [1K, 2K, 4K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: black-forest-labs/flux-3-image, cost: 0.048 }
+
+  - id: flux-2-pro
+    name: FLUX.2 Pro
+    family: flux
+    status: testing
+    tag: Sharp detail
+    best_for: [photo, product]
+    capabilities: [t2i, i2i]
+    max_refs: 8
+    supported_aspect_ratios: ["1:1", "4:5", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: black-forest-labs/flux.2-pro, cost: 0.0315 }
+
+  - id: flux-2-flex
+    name: FLUX.2 Flex
+    family: flux
+    status: testing
+    tag: Flexible control
+    best_for: [photo, product, general]
+    capabilities: [t2i, i2i]
+    max_refs: 8
+    supported_aspect_ratios: ["1:1", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: black-forest-labs/flux.2-flex, cost: 0.063 }
+
+  - id: flux-2-max
+    name: FLUX.2 Max
+    family: flux
+    status: testing
+    tag: Top FLUX quality
+    best_for: [photo, product]
+    capabilities: [t2i, i2i]
+    max_refs: 8
+    supported_aspect_ratios: ["1:1", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: black-forest-labs/flux.2-max, cost: 0.0735 }
+
+  - id: qwen-image-3
+    name: Qwen Image 3
+    family: qwen
+    status: testing
+    tag: Best for text
+    best_for: [text_in_image]
+    capabilities: [t2i, i2i]
+    max_refs: 3
+    resolutions: [1K, 2K]
+    supported_aspect_ratios: ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: qwen/qwen-image-3, cost: 0.03 }
+
+  - id: krea-2-large
+    name: Krea 2 Large
+    family: krea
+    status: testing
+    tag: Art-directed looks
+    best_for: [photo, general]
+    capabilities: [t2i]
+    max_refs: 1
+    resolutions: [1K]
+    supported_aspect_ratios: ["1:1", "4:5", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: krea/krea-2-large, cost: 0.06 }
+
+  - id: mai-image-2-5-pro
+    name: MAI-Image 2.5 Pro
+    family: mai
+    status: testing
+    tag: Detailed scenes
+    best_for: [people, photo]
+    capabilities: [t2i]
+    max_refs: 1
+    supported_aspect_ratios: ["1:1", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"]
+    providers:
+      - { name: openrouter, slug: microsoft/mai-image-2.5-pro, cost: 0.11 }
+
+  - id: riverflow-2-5-pro
+    name: Riverflow 2.5 Pro
+    family: riverflow
+    status: testing
+    tag: Polished results
+    best_for: [photo, product]
+    capabilities: [t2i, i2i]
+    max_refs: 10
+    resolutions: [1K, 2K, 4K]
+    supported_aspect_ratios: ["1:1", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"]
+    providers:
+      - { name: openrouter, slug: sourceful/riverflow-v2.5-pro, cost: 0.13 }

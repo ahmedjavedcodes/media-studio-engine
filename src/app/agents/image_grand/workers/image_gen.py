@@ -4,6 +4,7 @@ import hashlib
 import time
 from dataclasses import dataclass
 
+from app.contracts.ports import ImageOptions
 from app.core.tracing import Span
 from app.gateway.compiler import CompiledPrompt
 from app.gateway.image_gateway import ImageGateway
@@ -44,6 +45,7 @@ async def generate_one(
     index: int,
     timeout: float,
     span: Span | None = None,
+    options: ImageOptions | None = None,
 ) -> SavedImage:
     seed = seed_for(run_id, index)
     started = time.monotonic()
@@ -56,10 +58,11 @@ async def generate_one(
         aspect_ratio=compiled.aspect_ratio,
         seed=seed,
         timeout=timeout,
+        options=options,
     )
     image, provider = result.image, result.provider
     latency_ms = int((time.monotonic() - started) * 1000)
-    info = sniff(image.data)  # the type comes from the bytes. Never assume PNG
+    info = sniff(image.data, image.media_type)  # the type comes from the bytes. Never assume PNG
     name = f"img_{index + 1}.{info.ext}"
     thumb = f"thumb_{index + 1}.jpg"
     store.write_bytes(run_id, name, image.data)

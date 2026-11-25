@@ -13,7 +13,7 @@ import httpx
 import structlog
 from pydantic import BaseModel, ValidationError
 
-from app.contracts.ports import GeneratedImage
+from app.contracts.ports import GeneratedImage, ImageOptions
 from app.core.errors import InvalidModelOutput, ProviderCallFailed
 from app.gateway.providers.cloudflare import CloudflareClient
 from app.gateway.providers.http import post_raw
@@ -118,6 +118,7 @@ class CloudflareImages:
         seed: int | None,
         timeout: float,
         estimated_cost_usd: float = 0.0,
+        options: ImageOptions | None = None,
     ) -> GeneratedImage:
         fields: dict[str, Any] = {"prompt": prompt}
         multipart = False

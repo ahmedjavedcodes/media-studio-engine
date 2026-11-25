@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import structlog
 
-from app.contracts.ports import GeneratedImage, ImageProviderPort
+from app.contracts.ports import GeneratedImage, ImageOptions, ImageProviderPort
 from app.core.errors import ProviderCallFailed, ProviderDown, SpendCapReached
 from app.gateway.registry import ModelCard
 
@@ -71,6 +71,7 @@ class ImageGateway:
         aspect_ratio: str,
         seed: int | None,
         timeout: float = 90.0,
+        options: ImageOptions | None = None,
     ) -> GatewayResult:
         """Returns the image, the provider that made it and the providers tried."""
         last: ProviderCallFailed | None = None
@@ -94,6 +95,7 @@ class ImageGateway:
                     seed=seed if card.supports_seed else None,
                     timeout=timeout,
                     estimated_cost_usd=entry.cost,
+                    options=options,
                 )
             except SpendCapReached:
                 # Fall back only to a free provider. Never to another paid one.
