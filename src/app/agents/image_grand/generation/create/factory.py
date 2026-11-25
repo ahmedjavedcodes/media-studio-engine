@@ -49,7 +49,7 @@ def build_create_deps(s: Settings) -> tuple[CreateDeps, httpx.AsyncClient]:
 
     use_hub = s.prompt_source == "hub" and bool(s.langsmith_api_key)
     deps = CreateDeps(
-        registry=load_registry(),
+        registry=load_registry(run_testing=s.testing_models_on),
         gateway=gateway,
         enhancer=CloudflareLLM(cf, chain.enhancer.model),
         critic=CloudflareLLM(cf, chain.critic.model),

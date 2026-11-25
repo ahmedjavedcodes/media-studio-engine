@@ -356,3 +356,11 @@ async def test_a_manual_pick_of_a_hidden_model_passes_the_checks(tmp_path: Path)
         "settings": {"model": "gpt-image-2", "aspect_ratio": "1:1", "resolution": "1K", "n": 1},
     }
     await run_code_checks(deps, state)  # type: ignore[arg-type]  # no error: a hidden model is allowed
+
+
+def test_testing_models_run_only_when_the_dev_switch_is_on() -> None:
+    off = load_registry().live(["cloudflare", "openrouter"])
+    on = load_registry(run_testing=True).live(["cloudflare", "openrouter"])
+    assert "nano-banana-pro" not in {c.id for c in off}
+    assert {"nano-banana-pro", "recraft-v4-1-vector"} <= {c.id for c in on}
+    assert {c.id for c in off} <= {c.id for c in on}

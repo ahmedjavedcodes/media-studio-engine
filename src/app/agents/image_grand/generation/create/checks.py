@@ -35,7 +35,8 @@ async def run_code_checks(deps: CreateDeps, state: CreateState) -> dict[str, Any
 
     if cfg["model"] != "auto":  # a manual pick is strict: never swapped for another model
         card = deps.registry.get(cfg["model"])
-        if card is None or card.status != "live" or not card.providers_in(deps.enabled_providers):
+        usable = card is not None and card in deps.registry.live(deps.enabled_providers)
+        if card is None or not usable:
             raise PlanLimit("That model is not available right now.")
         if not tier_allowed(plan, card.tier):
             raise PlanLimit(f"{card.name} needs a higher plan. Upgrade to use it.")

@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     trace_ui: bool = False
     stream_token_secret: str = ""  # signs ?t= tokens. Empty = a temporary key (dev only)
     stream_token_ttl_s: int = 7200
+    # Dev only: let `testing` models run (their first real run is the test). Never in prod.
+    allow_testing_models: bool = False
     fal_images: bool = False  # the owner turns this on. Paid. Respects SPEND_CAP_USD
     enhancer_max_tokens: int = 350
     llm_timeout_s: float = 60.0
@@ -81,6 +83,10 @@ class Settings(BaseSettings):
     def trace_project(self) -> str:
         """LangSmith project per environment (dev / prod)."""
         return self.langsmith_project or ("app-prod" if self.is_prod else "app-dev")
+
+    @property
+    def testing_models_on(self) -> bool:
+        return self.allow_testing_models and not self.is_prod
 
     @property
     def trace_ui_on(self) -> bool:

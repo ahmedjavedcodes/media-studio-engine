@@ -82,8 +82,9 @@ class ModelCard(BaseModel):
 
 
 class Registry:
-    def __init__(self, cards: list[ModelCard]) -> None:
+    def __init__(self, cards: list[ModelCard], *, run_testing: bool = False) -> None:
         self._cards = {c.id: c for c in cards}
+        self._runnable = ("live", "testing") if run_testing else ("live",)
 
     def all(self) -> list[ModelCard]:
         return list(self._cards.values())
@@ -92,11 +93,12 @@ class Registry:
         return self._cards.get(model_id)
 
     def live(self, enabled_providers: list[str]) -> list[ModelCard]:
-        """Models a user can pick: status live and at least one enabled provider."""
+        """Models a user can pick: status live (or testing, in dev when allowed) and at least
+        one enabled provider."""
         return [
             c
             for c in self._cards.values()
-            if c.status == "live" and c.providers_in(enabled_providers)
+            if c.status in self._runnable and c.providers_in(enabled_providers)
         ]
 
     def listed(self) -> list[ModelCard]:
@@ -109,7 +111,7 @@ class Registry:
         return [c for c in self.live(enabled_providers) if tier_allowed(plan, c.tier)]
 
 
-def load_registry(path: Path | None = None) -> Registry:
+def load_registry(path: Path | None = None, *, run_testing: bool = False) -> Registry:
     src = path or Path(__file__).with_name("models.yaml")
     data = yaml.safe_load(src.read_text("utf-8")) or {}
     raw = data.get("models") or []
@@ -129,7 +131,7 @@ def load_registry(path: Path | None = None) -> Registry:
             **item,  # a model can override the family values
         }
         cards.append(ModelCard.model_validate(merged))
-    return Registry(cards)
+    return Registry(cards, run_testing=run_testing)
 
 
 @lru_cache
