@@ -19,7 +19,7 @@ node_modules/
 .artifacts/
 .runs/
 outputs/
-.checkpoints.sqlite
+.checkpoints.sqlite*
 
 # macOS
 .DS_Store

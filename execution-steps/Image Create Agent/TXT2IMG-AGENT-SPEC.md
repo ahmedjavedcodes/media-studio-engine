@@ -372,6 +372,8 @@ Each model tier matches a plan. A plan can use its own tier and every tier below
 
 Example models use OpenRouter prices measured in November 2026. The sync re-checks them daily.
 
+**In the registry (v1.3.1).** Every model in the table above is in `models.yaml` with its real OpenRouter slug (checked against the live catalogue on 2026-11-25), in the tier the table gives it. All except the four verified Cloudflare models have `status: testing`: the picker lists them as **Soon** and they cannot run. **Their costs are placeholders** inside the tier band, because OpenRouter's catalogue has no per-output-image price. The real cost is `usage.cost` after the first call. "GPT Image 2.5 High" is `openai/gpt-image-2.5-sunburst`. `FLUX.2 klein 4B` is on both providers: Cloudflare first, OpenRouter only as a fallback.
+
 ### Turning OpenRouter on
 
 OpenRouter is **off** by default. When the owner asks:
@@ -379,6 +381,19 @@ OpenRouter is **off** by default. When the owner asks:
 2. Run `playground/sync_registry.py` (a free metadata read) and fix slugs and prices in `models.yaml`.
 3. Test each model with a real run, then set its `status: live`.
 4. Text and the critic stay on Cloudflare.
+
+### OpenRouter adapter and the five families (v1.3.2)
+
+- **Two request formats, one adapter** (`gateway/providers/openrouter_images.py`): `POST /api/v1/images` for most models, and `POST /api/v1/chat/completions` with `modalities: [image, text]` for models marked `endpoint: chat` (Gemini / Nano Banana, which can edit over several turns). Both were checked with real calls on 2026-11-25. The docs only describe `/images`, but the chat route works for Gemini.
+- **No `image_config.rgb_colors`.** The API has no such field. Brand colors go through `provider.options.recraft.controls.colors` (checked live). GPT Image 2.6's `complexity` goes through `provider.options.openai`.
+- **Per-call options come from code** (`gateway/options.py`): quality, references, output format (`svg`), transparent background, brand colors. The LLM never writes them. Quality `low` is never sent to GPT Image 2.6 (cost guardrail, enforced in the registry, the options builder and the adapter).
+- **Files:** WEBP, GIF and SVG are accepted. An SVG with scripts or external links is refused, is drawn to a JPEG thumbnail with resvg for the safety check, and is served with `nosniff` and a sandboxed CSP.
+- **Registry fields:** `credits`, `max_refs`, `capabilities`, `ref_surcharge`, `resolutions`, `resolution_multipliers`, `endpoint`, `quality`, `forbidden_qualities`, `output_format`, `notes`. Limits and aspect ratios come from the live catalogue. Where the product brief differed, the live API won: Nano Banana takes 3 references (not 14), Seedream Flash and Lite 14 (not 10), Recraft Styles 10 (not 1), Recraft Vector 1 (not 0), and GPT Image 2.6 has GIF but no SVG.
+- **Credits:** a model's own `credits` (else its tier's), plus `ref_surcharge` for each reference after the first, times the resolution multiplier (Nano Banana Pro 4K is assumed 2x), rounded up. The hold and the charge use the same function. A failed run refunds the hold.
+- **Auto routing** (`gateway/router.py::route_auto`, fixed order): draft, then logo or vector, then brand colors or poster, then 2+ references (Seedream 5.5, or Nano Banana 2 above 10), then one reference or dense text (GPT Image 2.6 Sunburst, Nano Banana 2.1), then the default (Nano Banana 2.1, Seedream 5.0 Pro). A candidate must be live, in the plan, on an enabled provider, and take the ratio and the reference count. If none does, the category picker chooses.
+- **Pre-flight:** too many references for a picked model is a 400 at `POST /v1/runs`, before anything runs.
+- **Enhancer:** with references it writes a short edit instruction, not a new scene. The Recraft guide keeps copy in quotes and drops lens jargon. The photoreal guides cover light, camera framing and textures (not "atmosphere", which the code guard strips).
+- **Verified live** (one real call each, through the adapter): gpt-image-2, gpt-image-2-5-flare, seedream-5-flash, nano-banana-2-lite, recraft-v4-1-flash-free, recraft-v4-1. **Not yet run:** the vector model, GPT Image 2.6, Muse (403 "not available in your region" from this account), and the rest.
 
 ### Going live
 
@@ -444,6 +459,7 @@ FLUX · Seedream · Recraft · Qwen · Ideogram · …
 - Models above the selected plan show a lock and an "Upgrade" option
 - **Build phase:** a `Plan` dropdown (Basic / Pro / Ultra / Max) sits next to the picker. Changing it updates the locks, the variation limit and the resolution options right away.
 - Search box for the full list. Featured models appear first.
+- A model that cannot run yet (not tested, or its provider is off) is shown **disabled with a "Soon" badge** and sorted after the usable ones. No provider name is shown. The Family view uses each family's display name (for example "Gemini (Nano Banana)").
 
 ---
 
