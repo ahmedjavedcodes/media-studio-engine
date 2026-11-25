@@ -27,6 +27,7 @@ export type Settings = {
   aspect_ratio: string;
   resolution: "1K" | "2K";
   n: number;
+  draft?: boolean; // fast, low-credit mode: the router picks the cheapest model
 };
 
 export type PlanInfo = { id: Plan; max_n: number; max_resolution: string; tier: Tier };
@@ -40,11 +41,17 @@ export type ModelInfo = {
   id: string;
   name: string;
   family: string;
+  family_label: string; // display name, for the Family view
   tier: Tier;
   tag: string;
   featured: boolean;
   credits_per_image: number;
-  locked: boolean;
+  ref_surcharge: number; // extra credits for each reference image after the first
+  resolution_multipliers: Record<string, number>;
+  max_refs: number; // reference images the model takes (0 = text only)
+  capabilities: string[];
+  locked: boolean; // the plan is too low
+  available: boolean; // false = "coming soon"
   aspect_ratios: string[];
 };
 
@@ -151,9 +158,31 @@ export async function fetchPlans(): Promise<PlansResponse> {
   return res.json();
 }
 
+// Fill in anything an older backend does not send, so a version mismatch cannot crash the picker.
+function withDefaults(m: Partial<ModelInfo> & { id: string; name: string }): ModelInfo {
+  return {
+    family: "",
+    family_label: m.family ?? "",
+    tier: "basic",
+    tag: "",
+    featured: false,
+    credits_per_image: 1,
+    ref_surcharge: 0,
+    resolution_multipliers: {},
+    max_refs: 99, // unknown: do not disable anything
+    capabilities: [],
+    locked: false,
+    available: true,
+    aspect_ratios: ["1:1"],
+    ...m,
+  } as ModelInfo;
+}
+
 export async function fetchModels(plan: Plan): Promise<ModelInfo[]> {
   const res = await fetch(`${API_URL}/v1/models?plan=${plan}`);
-  return (await res.json()).models;
+  return ((await res.json()).models as (Partial<ModelInfo> & { id: string; name: string })[]).map(
+    withDefaults,
+  );
 }
 
 export async function fetchRun(

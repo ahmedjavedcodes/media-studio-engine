@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ImageGrid from "@/components/ImageGrid";
+import { creditEstimate, takesImages } from "@/lib/credits";
 import ModelPicker from "@/components/ModelPicker";
 import QuestionCard from "@/components/QuestionCard";
 import {
@@ -115,12 +116,8 @@ export default function Home() {
   const coolingDown = secondsLeft > 0;
   const maxN = plans?.plans.find((p) => p.id === plan)?.max_n ?? 1;
   const chosen = models.find((m) => m.id === settings.model);
-  const creditsPer =
-    settings.model === "auto"
-      ? Math.max(1, ...models.filter((m) => !m.locked).map((m) => m.credits_per_image))
-      : (chosen?.credits_per_image ?? 1);
-  const credits = creditsPer * settings.n;
-  const creditText = `${settings.model === "auto" ? "up to " : ""}${credits} credit${credits === 1 ? "" : "s"}`;
+  const estimate = creditEstimate(models, settings.model, settings.n, images.length, settings.resolution);
+  const creditText = `${estimate.upTo ? "up to " : ""}${estimate.credits} credit${estimate.credits === 1 ? "" : "s"}`;
 
   function startCooldown(seconds: number) {
     setNow(Date.now());
@@ -191,7 +188,11 @@ export default function Home() {
   }
 
   async function onFiles(files: FileList | null) {
-    setImages(files ? await Promise.all(Array.from(files).map(toBase64)) : []);
+    const next = files ? await Promise.all(Array.from(files).map(toBase64)) : [];
+    setImages(next);
+    // A picked model that cannot take this many images goes back to Auto.
+    const picked = models.find((m) => m.id === settings.model);
+    if (picked && !takesImages(picked, next.length)) setSettings((s) => ({ ...s, model: "auto" }));
   }
 
   function handleFailure(out: Exclude<StartResult, { kind: "started" }>) {
@@ -300,6 +301,14 @@ export default function Home() {
               </option>
             </select>
           </label>
+          <label className="flex items-center gap-2" title="Fast, low-credit mode: the cheapest model">
+            <input
+              type="checkbox"
+              checked={!!settings.draft}
+              onChange={(e) => setSettings((s) => ({ ...s, draft: e.target.checked }))}
+            />
+            Fast draft
+          </label>
           <label className="flex items-center gap-2">
             Variations
             <select
@@ -316,7 +325,7 @@ export default function Home() {
           </label>
         </div>
 
-        <ModelPicker models={models} value={settings.model} onChange={pickModel} />
+        <ModelPicker models={models} value={settings.model} onChange={pickModel} attached={images.length} />
 
         <input
           type="file"

@@ -31,9 +31,11 @@ test("create -> progress -> ready", async ({ page }) => {
   await expect(page.getByRole("img", { name: /Result/ })).toHaveCount(2, { timeout: 40_000 });
   await expect(page.getByText(/matches your prompt/)).toBeVisible();
   const body = (await page.locator("body").innerText()).toLowerCase();
-  for (const hidden of ["enhancer", "critic", "cloudflare", "flux-2", "seed"]) {
+  for (const hidden of ["enhancer", "critic", "cloudflare", "flux-2"]) {
     expect(body.includes(hidden), hidden).toBe(false);
   }
+  expect(/\bseed\b/.test(body), "seed").toBe(false); // "Seedream" is a model name, a seed is not
+
   const img = page.getByRole("img", { name: "Result 1" });
   expect(await img.getAttribute("src")).toMatch(/\/v1\/files\/.+\?t=/); // signed url
   await shot(page, "03-ready");
@@ -92,8 +94,106 @@ test("changing the plan updates the locks and the limits", async ({ page }) => {
   await page.getByLabel("Plan").selectOption("basic");
   await expect(variations.locator("option")).toHaveCount(2);
   await expect(page.getByRole("button", { name: /Phoenix 1\.0/ })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Auto Recommended" })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: /Auto \(Smart Router\)/ })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
+});
+
+test("decided OpenRouter models are listed as coming soon, in both views", async ({ page }) => {
+  // The models the spec decided (GPT, Nano Banana, Seedream ...) are visible but cannot be picked
+  for (const name of [/GPT Image 2\.5 Flare/, /Nano Banana 2\.1/, /Seedream 5\.0 Flash/, /Krea 2 Large/]) {
+    const row = page.getByRole("button", { name });
+    await expect(row).toBeDisabled();
+    await expect(row).toContainText("Soon");
+    await expect(row).toHaveAttribute("title", "Coming soon");
+  }
+  // usable models come before them
+  const names = await page.locator("ul button").allInnerTexts();
+  expect(names[1]).toMatch(/FLUX\.1 schnell|FLUX\.2 klein/);
+  await shot(page, "09-list-view");
+
+  // Family view groups by display name
+  await page.getByRole("tab", { name: "Family" }).click();
+  for (const family of [
+    "Google Nano Banana & Gemini",
+    "OpenAI GPT Image",
+    "FLUX",
+    "ByteDance Seedream",
+    "Recraft Design & Vector",
+    "Qwen",
+    "Meta Muse",
+  ]) {
+    await expect(page.getByText(family, { exact: true })).toBeVisible();
+  }
+  await shot(page, "10-family-view");
+
+  // search works across the list
+  await page.getByLabel("Search models").fill("banana");
+  await expect(page.getByRole("button", { name: /Nano Banana Pro/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /FLUX\.1 schnell/ })).toHaveCount(0);
+});
+
+test("the picker shows credits, reference limits and capability pills", async ({ page }) => {
+  // Auto is first and called the Smart Router
+  const first = page.locator("ul button").first();
+  await expect(first).toContainText("Auto (Smart Router)");
+
+  const vector = page.getByRole("button", { name: /Recraft V4\.1 Vector/ });
+  await expect(vector).toContainText("7 cr");
+  await expect(vector).toContainText("refs ≤ 1");
+  await expect(vector).toContainText("SVG Vector");
+  await expect(page.getByRole("button", { name: /Recraft V4\.1 Flash \(free\)/ })).toContainText("text only");
+  await expect(page.getByRole("button", { name: /Seedream 5\.5/ })).toContainText("Multi-Ref");
+  await expect(page.getByRole("button", { name: /Nano Banana Pro/ })).toContainText("12 cr");
+  await expect(page.getByRole("button", { name: /Nano Banana Pro/ })).toContainText("4K Studio");
+  await expect(page.getByRole("button", { name: /GPT Image 2 / })).toContainText("Transparent BG");
+  await expect(page.getByRole("button", { name: /FLUX\.1 schnell/ })).toContainText("Fast");
+  await shot(page, "11-pills");
+});
+
+test("attached images disable models that cannot take them, and the credit estimate follows", async ({
+  page,
+}) => {
+  const klein = page.getByRole("button", { name: /FLUX\.2 klein 4B/ });
+  await expect(klein).toBeEnabled();
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "ref.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  });
+  await expect(page.getByText(/1 image attached/)).toBeVisible();
+  // klein is text only, so with a reference attached it cannot be picked
+  await expect(klein).toBeDisabled();
+  await expect(klein).toHaveAttribute("title", /does not take reference images/);
+  await shot(page, "12-attached-image");
+
+  // a picked model that cannot take the images goes back to Auto
+  await page.locator('input[type="file"]').setInputFiles([]);
+  await klein.click();
+  await expect(klein).toHaveAttribute("aria-pressed", "true");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "ref.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  });
+  await expect(page.getByRole("button", { name: /Auto \(Smart Router\)/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+test("the credit estimate counts variations, and Fast draft is available", async ({ page }) => {
+  await expect(createButton(page)).toContainText("up to");
+  await page.getByRole("button", { name: /FLUX\.2 klein 4B/ }).click();
+  await expect(createButton(page)).toContainText("1 credit");
+  await page.getByLabel("Variations").selectOption("2");
+  await expect(createButton(page)).toContainText("2 credits");
+  await expect(page.getByLabel("Fast draft")).toBeVisible();
 });
